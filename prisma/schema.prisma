@@ -1,0 +1,245 @@
+datasource db {
+  provider = "postgresql"
+}
+
+model Contact {
+  id                     String    @id @default(cuid())
+  contactId              String    @unique @db.VarChar(64)
+  status                 String?   @db.VarChar(64)
+  displayName            String?   @db.VarChar(256)
+  firstName              String?   @db.VarChar(128)
+  lastName               String?   @db.VarChar(128)
+  email                  String?   @db.VarChar(256)
+  phone1                 String?   @db.VarChar(32)
+  phone2                 String?   @db.VarChar(32)
+  smsOptIn               Boolean   @default(false)
+  emailOptIn             Boolean   @default(true)
+  phoneCallOptIn         Boolean   @default(false)
+  preferredContactMethod String?   @db.VarChar(32)
+  createdAt              DateTime  @default(now())
+  updatedAt              DateTime  @updatedAt
+  lastSyncedAt           DateTime?
+
+  orders             Order[]
+  notificationEvents NotificationEvent[]
+
+  @@index([contactId])
+  @@index([email])
+  @@index([status])
+  @@map("contacts")
+}
+
+model Order {
+  id                  String    @id @default(cuid())
+  orderType           String    @db.VarChar(16)
+  orderNumber         String    @db.VarChar(64)
+  shipVia             String?   @db.VarChar(64)
+  status              String?   @db.VarChar(64)
+  headerRequestedOn   DateTime? @db.Date
+  customerId          String?   @db.VarChar(64)
+  customerDescription String?   @db.VarChar(256)
+  contactId           String    @db.VarChar(64)
+  locationId          String?   @db.VarChar(64)
+  locationDescription String?   @db.VarChar(256)
+  turnInDate          DateTime? @db.Date
+  noteId              String?   @db.VarChar(64)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  lastSyncedAt        DateTime?
+
+  contact            Contact              @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  total              OrderTotal?
+  lines              OrderLine[]
+  address            OrderAddress?
+  deliveryGroups     OrderDeliveryGroup[]
+  notificationEvents NotificationEvent[]
+
+  @@unique([orderType, orderNumber])
+  @@index([orderNumber])
+  @@index([contactId])
+  @@index([customerId])
+  @@index([headerRequestedOn])
+  @@index([status])
+  @@map("orders")
+}
+
+model OrderTotal {
+  id              String    @id @default(cuid())
+  orderId         String    @unique
+  orderNumber     String    @db.VarChar(64)
+  unpaidBalance   Decimal?  @db.Decimal(18, 2)
+  orderTotal      Decimal?  @db.Decimal(18, 2)
+  taxTotal        Decimal?  @db.Decimal(18, 2)
+  lineTotalAmount Decimal?  @db.Decimal(18, 2)
+  unbilledAmount  Decimal?  @db.Decimal(18, 2)
+  unbilledQty     Decimal?  @db.Decimal(18, 4)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastSyncedAt    DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderNumber])
+  @@map("order_totals")
+}
+
+model OrderLine {
+  id                  String    @id @default(cuid())
+  orderId             String
+  orderType           String    @db.VarChar(16)
+  orderNumber         String    @db.VarChar(64)
+  requestedOn         DateTime? @db.Date
+  lineNbr             Int
+  inventoryId         String?   @db.VarChar(128)
+  lineDescription     String?   @db.VarChar(512)
+  orderQty            Decimal?  @db.Decimal(18, 4)
+  openQty             Decimal?  @db.Decimal(18, 4)
+  discountedUnitPrice Decimal?  @db.Decimal(18, 2)
+  warehouseId         String?   @db.VarChar(64)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+  lastSyncedAt        DateTime?
+
+  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  allocations OrderLineAllocation[]
+
+  @@unique([orderId, lineNbr])
+  @@index([orderNumber])
+  @@index([orderType, orderNumber])
+  @@index([inventoryId])
+  @@index([requestedOn])
+  @@index([orderId, requestedOn])
+  @@map("order_lines")
+}
+
+model OrderLineAllocation {
+  id           String    @id @default(cuid())
+  orderLineId  String
+  orderType    String    @db.VarChar(16)
+  orderNumber  String    @db.VarChar(64)
+  lineNbr      Int
+  splitLineNbr Int
+  inventoryId  String?   @db.VarChar(128)
+  allocated    Boolean   @default(false)
+  completed    Boolean   @default(false)
+  qty          Decimal?  @db.Decimal(18, 4)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastSyncedAt DateTime?
+
+  orderLine OrderLine @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+
+  @@unique([orderLineId, splitLineNbr])
+  @@index([orderNumber])
+  @@index([orderType, orderNumber])
+  @@index([inventoryId])
+  @@map("order_line_allocations")
+}
+
+model OrderAddress {
+  id           String    @id @default(cuid())
+  orderId      String    @unique
+  addressLine1 String?   @db.VarChar(256)
+  addressLine2 String?   @db.VarChar(256)
+  city         String?   @db.VarChar(128)
+  country      String?   @db.VarChar(64)
+  postalCode   String?   @db.VarChar(32)
+  state        String?   @db.VarChar(64)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastSyncedAt DateTime?
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@map("order_addresses")
+}
+
+model OrderDeliveryGroup {
+  id           String    @id @default(cuid())
+  orderId      String
+  orderNumber  String    @db.VarChar(64)
+  orderType    String    @db.VarChar(16)
+  deliveryDate DateTime  @db.Date
+  status       String?   @db.VarChar(64)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  lastSyncedAt DateTime?
+
+  order              Order               @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  notificationEvents NotificationEvent[]
+
+  @@unique([orderId, deliveryDate])
+  @@index([orderNumber])
+  @@index([orderType, orderNumber])
+  @@index([deliveryDate])
+  @@index([status])
+  @@map("order_delivery_groups")
+}
+
+model NotificationEvent {
+  id                   String    @id @default(cuid())
+  orderDeliveryGroupId String
+  orderId              String
+  contactId            String    @db.VarChar(64)
+  eventType            String    @db.VarChar(64)
+  channel              String    @db.VarChar(32)
+  scheduledFor         DateTime
+  status               String    @db.VarChar(32)
+  subject              String?   @db.VarChar(256)
+  messagePreview       String?   @db.VarChar(1024)
+  lastAttemptedAt      DateTime?
+  sentAt               DateTime?
+  skippedAt            DateTime?
+  cancelledAt          DateTime?
+  failureReason        String?   @db.VarChar(1024)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  orderDeliveryGroup OrderDeliveryGroup    @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  order              Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  contact            Contact               @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  attempts           NotificationAttempt[]
+
+  @@unique([orderDeliveryGroupId, eventType, channel])
+  @@index([orderDeliveryGroupId])
+  @@index([orderId])
+  @@index([contactId])
+  @@index([eventType])
+  @@index([channel])
+  @@index([scheduledFor])
+  @@index([status])
+  @@map("notification_events")
+}
+
+model NotificationAttempt {
+  id                  String    @id @default(cuid())
+  notificationEventId String
+  attemptNumber       Int
+  channel             String    @db.VarChar(32)
+  provider            String?   @db.VarChar(64)
+  recipient           String    @db.VarChar(256)
+  recipientContactId  String?   @db.VarChar(64)
+  status              String    @db.VarChar(32)
+  providerMessageId   String?   @db.VarChar(256)
+  subject             String?   @db.VarChar(256)
+  messageBody         String?   @db.Text
+  errorCode           String?   @db.VarChar(128)
+  errorMessage        String?   @db.Text
+  sentAt              DateTime?
+  deliveredAt         DateTime?
+  failedAt            DateTime?
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  notificationEvent NotificationEvent @relation(fields: [notificationEventId], references: [id], onDelete: Cascade)
+
+  @@unique([notificationEventId, attemptNumber])
+  @@index([notificationEventId])
+  @@index([channel])
+  @@index([provider])
+  @@index([recipient])
+  @@index([recipientContactId])
+  @@index([status])
+  @@index([providerMessageId])
+  @@map("notification_attempts")
+}

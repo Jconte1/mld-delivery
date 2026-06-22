@@ -5,6 +5,7 @@ export const DEFAULT_DELIVERY_ENDPOINT_VERSION = "24.200.001";
 export const DEFAULT_EXCLUDED_ORDER_TYPES = [
   "ED", // EDGE HOMES
   "GB", // GARVETT HOMES
+  "BH",
   "DS", // DIRECT SHIPS
   "NH", // CBH HOMES
   "CH", // CHOCOLATE HOMES
@@ -51,12 +52,21 @@ export const DEFAULT_ALLOWED_SHIP_VIA = [
 ];
 
 export const DEFAULT_SALES_ORDER_EXPAND = "Totals,Details/Allocations,ShipToAddress";
+export const DEFAULT_ALLOWED_STATUSES = ["Open", "Awaiting Payment", "Back Order", "On Hold but Approved", "Shipping", "Completed"];
 
 export type FetchSalesOrdersParams = {
   requestedOn: Date | string;
   excludedOrderTypes?: string[];
   allowedShipVia?: string[];
+  allowedStatuses?: string[];
   expand?: string;
+};
+
+export type FetchQualifyingSalesOrdersParams = {
+  requestedOn: Date | string;
+  excludedOrderTypes?: string[];
+  allowedShipVia?: string[];
+  allowedStatuses?: string[];
 };
 
 type AcumaticaClientOptions = {
@@ -104,12 +114,17 @@ function appendPath(baseUrl: string, path: string) {
 
 export function buildSalesOrderFilter(params: {
   requestedOn: Date | string;
+  requestedOnField?: "RequestedOn" | "LineRequestedOn";
   excludedOrderTypes?: string[];
   allowedShipVia?: string[];
+  allowedStatuses?: string[];
 }) {
   const excludedOrderTypes = params.excludedOrderTypes ?? DEFAULT_EXCLUDED_ORDER_TYPES;
   const allowedShipVia = params.allowedShipVia ?? DEFAULT_ALLOWED_SHIP_VIA;
-  const clauses = [`RequestedOn eq datetimeoffset'${toDateTimeOffset(params.requestedOn)}'`];
+  const requestedOnField = params.requestedOnField ?? "RequestedOn";
+  const clauses = [
+    `${requestedOnField} eq datetimeoffset'${toDateTimeOffset(params.requestedOn)}'`,
+  ];
 
   for (const orderType of excludedOrderTypes) {
     clauses.push(`OrderType ne ${odataString(orderType)}`);
@@ -120,6 +135,13 @@ export function buildSalesOrderFilter(params: {
       .map((shipVia) => `ShipVia eq ${odataString(shipVia)}`)
       .join(" or ");
     clauses.push(`(${shipViaClause})`);
+  }
+
+  if (params.allowedStatuses && params.allowedStatuses.length > 0) {
+    const statusClause = params.allowedStatuses
+      .map((status) => `Status eq ${odataString(status)}`)
+      .join(" or ");
+    clauses.push(`(${statusClause})`);
   }
 
   return clauses.join(" and ");
@@ -139,6 +161,43 @@ export class AcumaticaClient {
     return this.fetchSalesOrders({ requestedOn });
   }
 
+  async fetchQualifyingSalesOrdersByLineRequestedOn(
+    requestedOn: Date | string,
+    params: Omit<FetchQualifyingSalesOrdersParams, "requestedOn"> = {}
+  ): Promise<unknown[]> {
+    const query = new URLSearchParams({
+      $filter: buildSalesOrderFilter({
+        requestedOn,
+        requestedOnField: "LineRequestedOn",
+        excludedOrderTypes: params.excludedOrderTypes,
+        allowedShipVia: params.allowedShipVia,
+        allowedStatuses: params.allowedStatuses ?? DEFAULT_ALLOWED_STATUSES,
+      }),
+      $select: "OrderNbr,OrderType,Status,ShipVia,LineRequestedOn",
+    });
+
+    const response = await this.request<SalesOrderResponse>(
+      `/entity/Delivery/${encodeURIComponent(this.deliveryEndpointVersion)}/SalesOrder?${query}`
+    );
+
+    return this.toRows(response);
+  }
+
+  async fetchDeliverySalesOrderByOrderNumber(orderNumber: string): Promise<unknown[]> {
+    const query = new URLSearchParams({
+      $filter: `OrderNbr eq ${odataString(orderNumber)}`,
+      $expand: DEFAULT_SALES_ORDER_EXPAND,
+    });
+
+    const response = await this.request<SalesOrderResponse>(
+      `/entity/DeliverySalesOrder/${encodeURIComponent(
+        this.deliveryEndpointVersion
+      )}/SalesOrder?${query}`
+    );
+
+    return this.toRows(response);
+  }
+
   async fetchSalesOrders(params: FetchSalesOrdersParams): Promise<unknown[]> {
     const query = new URLSearchParams({
       $filter: buildSalesOrderFilter(params),
@@ -149,6 +208,10 @@ export class AcumaticaClient {
       `/entity/Delivery/${encodeURIComponent(this.deliveryEndpointVersion)}/SalesOrder?${query}`
     );
 
+    return this.toRows(response);
+  }
+
+  private toRows(response: SalesOrderResponse): unknown[] {
     if (Array.isArray(response)) {
       return response;
     }

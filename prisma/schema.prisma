@@ -1,3 +1,8 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../lib/generated/prisma"
+}
+
 datasource db {
   provider = "postgresql"
 }
@@ -174,6 +179,62 @@ model OrderDeliveryGroup {
   @@index([deliveryDate])
   @@index([status])
   @@map("order_delivery_groups")
+}
+
+model ErpChangeEvent {
+  id String @id @default(cuid())
+
+  changeType String  @db.VarChar(64)
+  entityType String  @db.VarChar(64)
+  entityId   String? @db.VarChar(128)
+  entityKey  String  @db.VarChar(256)
+  fieldName  String? @db.VarChar(128)
+
+  orderId     String? @db.VarChar(128)
+  orderType   String? @db.VarChar(16)
+  orderNumber String? @db.VarChar(64)
+
+  orderLineId           String? @db.VarChar(128)
+  orderDeliveryGroupId  String? @db.VarChar(128)
+  orderLineAllocationId String? @db.VarChar(128)
+
+  lineNbr      Int?
+  splitLineNbr Int?
+  deliveryDate DateTime? @db.Date
+
+  oldValue Json?
+  newValue Json?
+
+  summary  String? @db.VarChar(1024)
+  severity String? @db.VarChar(32)
+
+  changeKey String @unique @db.VarChar(512)
+
+  status String @default("detected") @db.VarChar(32)
+
+  detectedAt  DateTime  @default(now())
+  processedAt DateTime?
+  ignoredAt   DateTime?
+
+  source      String? @default("acumatica") @db.VarChar(64)
+  importRunId String? @db.VarChar(128)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([changeType])
+  @@index([entityType])
+  @@index([entityKey])
+  @@index([orderId])
+  @@index([orderNumber])
+  @@index([orderType, orderNumber])
+  @@index([orderLineId])
+  @@index([orderDeliveryGroupId])
+  @@index([orderLineAllocationId])
+  @@index([status])
+  @@index([detectedAt])
+  @@index([importRunId])
+  @@map("erp_change_events")
 }
 
 model NotificationEvent {

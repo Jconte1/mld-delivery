@@ -6,11 +6,13 @@ export const ERP_CHANGE_TYPES = {
   CONTACT_CHANGED: "contact_changed",
   ADDRESS_CHANGED: "address_changed",
   LOCATION_CHANGED: "location_changed",
+  BUYER_GROUP_CHANGED: "buyer_group_changed",
   SALESPERSON_CHANGED: "salesperson_changed",
   SHIPPING_METHOD_CHANGED: "shipping_method_changed",
   LINE_ITEM_CHANGED: "line_item_changed",
   LINE_QUANTITY_CHANGED: "line_quantity_changed",
   LINE_PRICE_CHANGED: "line_price_changed",
+  ETA_CHANGED: "eta_changed",
   ALLOCATION_CHANGED: "allocation_changed",
   BACKORDER_RELEVANT_CHANGE: "backorder_relevant_change",
 } as const;
@@ -55,6 +57,7 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
     customer_changed: ["customerId", "customerDescription"],
     contact_changed: ["contactId"],
     location_changed: ["locationId", "locationDescription"],
+    buyer_group_changed: ["buyerGroup"],
     shipping_method_changed: ["shipVia"],
   },
   order_total: {
@@ -65,10 +68,12 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
       "lineTotalAmount",
       "unbilledAmount",
       "unbilledQty",
+      "paymentTerms",
     ],
   },
   order_line: {
     delivery_date_changed: ["requestedOn"],
+    eta_changed: ["eta"],
     line_item_changed: ["inventoryId", "lineDescription", "warehouseId"],
     line_quantity_changed: ["orderQty", "openQty"],
     line_price_changed: ["discountedUnitPrice"],
@@ -96,6 +101,7 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
   contact: {
     contact_changed: [
       "status",
+      "companyName",
       "displayName",
       "firstName",
       "lastName",
@@ -105,7 +111,6 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
       "smsOptIn",
       "emailOptIn",
       "phoneCallOptIn",
-      "preferredContactMethod",
     ],
   },
 } as const;

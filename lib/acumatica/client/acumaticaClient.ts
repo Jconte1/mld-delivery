@@ -52,7 +52,17 @@ export const DEFAULT_ALLOWED_SHIP_VIA = [
 ];
 
 export const DEFAULT_SALES_ORDER_EXPAND = "Totals,Details/Allocations,ShipToAddress";
-export const DEFAULT_ALLOWED_STATUSES = ["Open", "Awaiting Payment", "Back Order", "On Hold but Approved", "Shipping", "Completed"];
+export const DEFAULT_SALES_ORDER_CUSTOM = "Document.AttributeBUYERGROUP";
+export const DEFAULT_ALLOWED_STATUSES = [
+  "Open",
+  "Awaiting Payment",
+  "Back Order",
+  "On Hold but Approved",
+  "Shipping",
+  "Completed",
+  "Canceled",
+  "Cancelled",
+];
 
 export type FetchSalesOrdersParams = {
   requestedOn: Date | string;
@@ -183,16 +193,46 @@ export class AcumaticaClient {
     return this.toRows(response);
   }
 
-  async fetchDeliverySalesOrderByOrderNumber(orderNumber: string): Promise<unknown[]> {
+  async fetchDeliverySalesOrderByOrderNumber(
+    orderNumber: string,
+    orderType?: string | null
+  ): Promise<unknown[]> {
+    const filter = [
+      `OrderNbr eq ${odataString(orderNumber)}`,
+      orderType ? `OrderType eq ${odataString(orderType)}` : null,
+    ]
+      .filter(Boolean)
+      .join(" and ");
+
     const query = new URLSearchParams({
-      $filter: `OrderNbr eq ${odataString(orderNumber)}`,
+      $filter: filter,
       $expand: DEFAULT_SALES_ORDER_EXPAND,
+      $custom: DEFAULT_SALES_ORDER_CUSTOM,
     });
 
     const response = await this.request<SalesOrderResponse>(
       `/entity/DeliverySalesOrder/${encodeURIComponent(
         this.deliveryEndpointVersion
       )}/SalesOrder?${query}`
+    );
+
+    return this.toRows(response);
+  }
+
+  async fetchDeliveryContactByContactId(contactId: string): Promise<unknown[]> {
+    const trimmedContactId = contactId.trim();
+    if (!trimmedContactId) return [];
+
+    const contactIdValue = /^\d+$/.test(trimmedContactId)
+      ? trimmedContactId
+      : odataString(trimmedContactId);
+    const query = new URLSearchParams({
+      $filter: `ContactID eq ${contactIdValue}`,
+      $top: "1",
+    });
+
+    const response = await this.request<SalesOrderResponse>(
+      `/entity/Delivery/${encodeURIComponent(this.deliveryEndpointVersion)}/Contact?${query}`
     );
 
     return this.toRows(response);

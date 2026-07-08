@@ -7,10 +7,60 @@ datasource db {
   provider = "postgresql"
 }
 
+enum NotificationIntervalType {
+  DAY_180
+  DAY_90
+  DAY_60
+  DAY_42
+  DAY_30
+  DAY_14
+  DAY_12
+  DAY_10
+  DAY_8
+  DAY_2
+}
+
+enum NotificationActionType {
+  DELIVERY_REMINDER
+  DELIVERY_CONFIRMATION_REQUEST
+  PAYMENT_REQUEST
+  PAYMENT_ENFORCEMENT
+  BACKORDER_REPORT
+  INTERNAL_EMAIL
+  MANUAL_REVIEW
+}
+
+enum NotificationChannel {
+  SMS   @map("sms")
+  EMAIL @map("email")
+}
+
+enum NotificationEventStatus {
+  PENDING      @map("pending")
+  SCHEDULED    @map("scheduled")
+  SKIPPED      @map("skipped")
+  SENT         @map("sent")
+  FAILED       @map("failed")
+  CANCELLED    @map("cancelled")
+  DEDUPED      @map("deduped")
+  ALREADY_SENT @map("already_sent")
+}
+
+enum InternalOrderLifecycleStatus {
+  ACTIVE                 @map("active")
+  PAYMENT_PENDING        @map("payment_pending")
+  DELIVERY_BUMPED_UNPAID @map("delivery_bumped_unpaid")
+  BLOCKED                @map("blocked")
+  MANUAL_REVIEW          @map("manual_review")
+  COMPLETED              @map("completed")
+  CANCELLED              @map("cancelled")
+}
+
 model Contact {
   id                     String    @id @default(cuid())
   contactId              String    @unique @db.VarChar(64)
   status                 String?   @db.VarChar(64)
+  companyName            String?   @db.VarChar(256)
   displayName            String?   @db.VarChar(256)
   firstName              String?   @db.VarChar(128)
   lastName               String?   @db.VarChar(128)
@@ -20,13 +70,14 @@ model Contact {
   smsOptIn               Boolean   @default(false)
   emailOptIn             Boolean   @default(true)
   phoneCallOptIn         Boolean   @default(false)
-  preferredContactMethod String?   @db.VarChar(32)
   createdAt              DateTime  @default(now())
   updatedAt              DateTime  @updatedAt
   lastSyncedAt           DateTime?
 
   orders             Order[]
   notificationEvents NotificationEvent[]
+  smsOptOuts         SmsOptOut[]
+  emailOptOuts       EmailOptOut[]
 
   @@index([contactId])
   @@index([email])
@@ -48,6 +99,10 @@ model Order {
   locationDescription String?   @db.VarChar(256)
   turnInDate          DateTime? @db.Date
   noteId              String?   @db.VarChar(64)
+  internalLifecycleStatus InternalOrderLifecycleStatus @default(ACTIVE)
+  lifecycleReason          String?                      @db.VarChar(1024)
+  lifecycleUpdatedAt       DateTime?
+  buyerGroup               String?                      @db.VarChar(64)
   createdAt           DateTime  @default(now())
   updatedAt           DateTime  @updatedAt
   lastSyncedAt        DateTime?
@@ -65,6 +120,8 @@ model Order {
   @@index([customerId])
   @@index([headerRequestedOn])
   @@index([status])
+  @@index([internalLifecycleStatus])
+  @@index([buyerGroup])
   @@map("orders")
 }
 
@@ -78,6 +135,7 @@ model OrderTotal {
   lineTotalAmount Decimal?  @db.Decimal(18, 2)
   unbilledAmount  Decimal?  @db.Decimal(18, 2)
   unbilledQty     Decimal?  @db.Decimal(18, 4)
+  paymentTerms    String?   @map("payment_terms") @db.VarChar(64)
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
   lastSyncedAt    DateTime?
@@ -97,6 +155,7 @@ model OrderLine {
   lineNbr             Int
   inventoryId         String?   @db.VarChar(128)
   lineDescription     String?   @db.VarChar(512)
+  eta                 DateTime? @db.Date
   orderQty            Decimal?  @db.Decimal(18, 4)
   openQty             Decimal?  @db.Decimal(18, 4)
   discountedUnitPrice Decimal?  @db.Decimal(18, 2)
@@ -238,37 +297,48 @@ model ErpChangeEvent {
 }
 
 model NotificationEvent {
-  id                   String    @id @default(cuid())
-  orderDeliveryGroupId String
-  orderId              String
-  contactId            String    @db.VarChar(64)
-  eventType            String    @db.VarChar(64)
-  channel              String    @db.VarChar(32)
-  scheduledFor         DateTime
-  status               String    @db.VarChar(32)
-  subject              String?   @db.VarChar(256)
-  messagePreview       String?   @db.VarChar(1024)
-  lastAttemptedAt      DateTime?
-  sentAt               DateTime?
-  skippedAt            DateTime?
-  cancelledAt          DateTime?
-  failureReason        String?   @db.VarChar(1024)
-  createdAt            DateTime  @default(now())
-  updatedAt            DateTime  @updatedAt
+  id                String                  @id @default(cuid())
+  orderId           String
+  deliveryGroupId   String                  @map("orderDeliveryGroupId")
+  contactId         String                  @db.VarChar(64)
+  orderType         String                  @db.VarChar(16)
+  orderNumber       String                  @db.VarChar(64)
+  deliveryDate      DateTime                @db.Date
+  intervalType      NotificationIntervalType
+  actionType        NotificationActionType
+  dedupeKey         String                  @unique @db.VarChar(512)
+  selectedChannel   NotificationChannel?
+  channelReason     String?                 @db.VarChar(256)
+  recipientEmail    String?                 @db.VarChar(256)
+  recipientPhone    String?                 @db.VarChar(32)
+  status            NotificationEventStatus @default(PENDING)
+  reasonSkipped     String?                 @db.VarChar(1024)
+  reasonFailed      String?                 @db.VarChar(1024)
+  provider          String?                 @db.VarChar(64)
+  externalMessageId String?                 @db.VarChar(256)
+  scheduledAt       DateTime?
+  triggeredAt       DateTime?
+  sentAt            DateTime?
+  createdAt         DateTime                @default(now())
+  updatedAt         DateTime                @updatedAt
 
-  orderDeliveryGroup OrderDeliveryGroup    @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  orderDeliveryGroup OrderDeliveryGroup    @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
   order              Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
   contact            Contact               @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
   attempts           NotificationAttempt[]
 
-  @@unique([orderDeliveryGroupId, eventType, channel])
-  @@index([orderDeliveryGroupId])
+  @@index([deliveryGroupId])
   @@index([orderId])
   @@index([contactId])
-  @@index([eventType])
-  @@index([channel])
-  @@index([scheduledFor])
+  @@index([orderType, orderNumber])
+  @@index([deliveryDate])
+  @@index([intervalType])
+  @@index([actionType])
+  @@index([selectedChannel])
   @@index([status])
+  @@index([scheduledAt])
+  @@index([triggeredAt])
+  @@index([sentAt])
   @@map("notification_events")
 }
 
@@ -276,21 +346,15 @@ model NotificationAttempt {
   id                  String    @id @default(cuid())
   notificationEventId String
   attemptNumber       Int
-  channel             String    @db.VarChar(32)
+  channel             NotificationChannel
   provider            String?   @db.VarChar(64)
-  recipient           String    @db.VarChar(256)
-  recipientContactId  String?   @db.VarChar(64)
-  status              String    @db.VarChar(32)
-  providerMessageId   String?   @db.VarChar(256)
-  subject             String?   @db.VarChar(256)
-  messageBody         String?   @db.Text
-  errorCode           String?   @db.VarChar(128)
-  errorMessage        String?   @db.Text
+  success             Boolean   @default(false)
+  errorMessage        String?   @db.VarChar(1024)
+  providerCode        String?   @db.VarChar(128)
+  httpStatus          Int?
+  externalMessageId   String?   @db.VarChar(256)
   sentAt              DateTime?
-  deliveredAt         DateTime?
-  failedAt            DateTime?
   createdAt           DateTime  @default(now())
-  updatedAt           DateTime  @updatedAt
 
   notificationEvent NotificationEvent @relation(fields: [notificationEventId], references: [id], onDelete: Cascade)
 
@@ -298,9 +362,49 @@ model NotificationAttempt {
   @@index([notificationEventId])
   @@index([channel])
   @@index([provider])
-  @@index([recipient])
-  @@index([recipientContactId])
-  @@index([status])
-  @@index([providerMessageId])
+  @@index([success])
+  @@index([externalMessageId])
   @@map("notification_attempts")
+}
+
+model SmsOptOut {
+  id             String    @id @default(cuid())
+  contactId      String?   @db.VarChar(64)
+  phone          String    @db.VarChar(32)
+  source         String?   @db.VarChar(64)
+  reason         String?   @db.VarChar(1024)
+  optedOutAt     DateTime  @default(now())
+  optedBackInAt  DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  contact Contact? @relation(fields: [contactId], references: [contactId], onDelete: SetNull)
+
+  @@index([contactId])
+  @@index([phone])
+  @@index([isActive])
+  @@index([phone, isActive])
+  @@map("sms_opt_outs")
+}
+
+model EmailOptOut {
+  id             String    @id @default(cuid())
+  contactId      String?   @db.VarChar(64)
+  email          String    @db.VarChar(256)
+  source         String?   @db.VarChar(64)
+  reason         String?   @db.VarChar(1024)
+  optedOutAt     DateTime  @default(now())
+  optedBackInAt  DateTime?
+  isActive       Boolean   @default(true)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  contact Contact? @relation(fields: [contactId], references: [contactId], onDelete: SetNull)
+
+  @@index([contactId])
+  @@index([email])
+  @@index([isActive])
+  @@index([email, isActive])
+  @@map("email_opt_outs")
 }

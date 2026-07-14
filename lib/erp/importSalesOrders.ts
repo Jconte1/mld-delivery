@@ -8,6 +8,8 @@ import {
   type ErpChangeDetectionResult,
 } from "@/lib/erp/detectErpChanges";
 import { createErpClientFromEnv } from "@/lib/erp/erpClient";
+import { syncOrderDeliveryGroups } from "@/lib/erp/syncOrderDeliveryGroups";
+import { persistOrderReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { prisma } from "@/lib/prisma";
 
 export type ImportSalesOrdersResult = {
@@ -18,6 +20,7 @@ export type ImportSalesOrdersResult = {
   ordersCreated: number;
   ordersUpdated: number;
   totalsUpserted: number;
+  taxDetailsUpserted: number;
   linesUpserted: number;
   allocationsUpserted: number;
   addressesUpserted: number;
@@ -40,6 +43,7 @@ type ImportDeltas = Pick<
   | "ordersCreated"
   | "ordersUpdated"
   | "totalsUpserted"
+  | "taxDetailsUpserted"
   | "linesUpserted"
   | "allocationsUpserted"
   | "addressesUpserted"
@@ -54,6 +58,16 @@ type ImportError = ImportSalesOrdersResult["errors"][number];
 type OrderIdentity = {
   orderNumber: string;
   orderType: string | null;
+};
+
+export type ImportSalesOrderLookup = {
+  orderNumber: string;
+  orderType?: string | null;
+};
+
+export type ImportSalesOrdersForLineRequestedOnOptions = {
+  orderLookups?: ImportSalesOrderLookup[];
+  includeUnqualifiedOrderLookups?: boolean;
 };
 
 const DEFAULT_ERP_IMPORT_TRANSACTION_TIMEOUT_MS = 30_000;
@@ -92,6 +106,7 @@ function emptyResult(requestedOn: string): ImportSalesOrdersResult {
     ordersCreated: 0,
     ordersUpdated: 0,
     totalsUpserted: 0,
+    taxDetailsUpserted: 0,
     linesUpserted: 0,
     allocationsUpserted: 0,
     addressesUpserted: 0,
@@ -111,6 +126,7 @@ function emptyDeltas(): ImportDeltas {
     ordersCreated: 0,
     ordersUpdated: 0,
     totalsUpserted: 0,
+    taxDetailsUpserted: 0,
     linesUpserted: 0,
     allocationsUpserted: 0,
     addressesUpserted: 0,
@@ -126,6 +142,7 @@ function addDeltas(result: ImportSalesOrdersResult, deltas: ImportDeltas) {
   result.ordersCreated += deltas.ordersCreated;
   result.ordersUpdated += deltas.ordersUpdated;
   result.totalsUpserted += deltas.totalsUpserted;
+  result.taxDetailsUpserted += deltas.taxDetailsUpserted;
   result.linesUpserted += deltas.linesUpserted;
   result.allocationsUpserted += deltas.allocationsUpserted;
   result.addressesUpserted += deltas.addressesUpserted;
@@ -369,8 +386,21 @@ function fullOrderMatchesLookup(row: unknown, lookup: OrderIdentity) {
   return !lookup.orderType || identity.orderType === lookup.orderType;
 }
 
+function matchesImportOrderFilter(
+  identity: OrderIdentity,
+  orderLookups: ImportSalesOrderLookup[] | undefined
+) {
+  if (!orderLookups || orderLookups.length === 0) return true;
+
+  return orderLookups.some((lookup) => {
+    if (lookup.orderNumber !== identity.orderNumber) return false;
+    return !lookup.orderType || lookup.orderType === identity.orderType;
+  });
+}
+
 export async function importSalesOrdersForLineRequestedOn(
-  requestedOn: Date | string
+  requestedOn: Date | string,
+  options: ImportSalesOrdersForLineRequestedOnOptions = {}
 ): Promise<ImportSalesOrdersResult> {
   const requestedOnKey = normalizeRequestedOn(requestedOn);
   const result = emptyResult(requestedOnKey);
@@ -396,10 +426,25 @@ export async function importSalesOrdersForLineRequestedOn(
       continue;
     }
 
-    qualifyingOrders.set(orderKey(identity.orderType, identity.orderNumber), {
+    const lookup = {
       orderNumber: identity.orderNumber,
       orderType: identity.orderType,
-    });
+    };
+
+    if (!matchesImportOrderFilter(lookup, options.orderLookups)) {
+      continue;
+    }
+
+    qualifyingOrders.set(orderKey(lookup.orderType, lookup.orderNumber), lookup);
+  }
+
+  if (options.includeUnqualifiedOrderLookups) {
+    for (const lookup of options.orderLookups ?? []) {
+      qualifyingOrders.set(orderKey(lookup.orderType ?? null, lookup.orderNumber), {
+        orderNumber: lookup.orderNumber,
+        orderType: lookup.orderType ?? null,
+      });
+    }
   }
 
   const processedFullOrderKeys = new Set<string>();
@@ -739,6 +784,40 @@ export async function importSalesOrdersForLineRequestedOn(
             });
             deltas.totalsUpserted += 1;
 
+            const taxDetails = getArray(getField(fullOrder, "TaxDetails"));
+            await tx.orderTaxDetail.deleteMany({
+              where: { orderId: order.id },
+            });
+            if (taxDetails.length > 0) {
+              const createdTaxDetails = await tx.orderTaxDetail.createMany({
+                data: taxDetails.map((taxDetail) => ({
+                  orderId: order.id,
+                  orderType,
+                  orderNumber,
+                  rowNumber:
+                    getInteger(getField(taxDetail, "rowNumber")) ??
+                    getInteger(getField(taxDetail, "RowNumber")),
+                  lineNbr: getInteger(getField(taxDetail, "LineNbr")),
+                  recordId: firstStringField(taxDetail, ["RecordID", "RecordId"]),
+                  taxId: firstStringField(taxDetail, ["TaxID", "TaxId"]),
+                  taxCategory: getString(getField(taxDetail, "TaxCategory")),
+                  taxType: getString(getField(taxDetail, "TaxType")),
+                  customerTaxZone: firstStringField(taxDetail, ["CustomerTaxZone", "TaxZone"]),
+                  taxRate: getDecimalValue(getField(taxDetail, "TaxRate")),
+                  taxableAmount: firstString(
+                    getDecimalValue(getField(taxDetail, "TaxableAmount")),
+                    getDecimalValue(getField(taxDetail, "TaxableAmt"))
+                  ),
+                  taxAmount: firstString(
+                    getDecimalValue(getField(taxDetail, "TaxAmount")),
+                    getDecimalValue(getField(taxDetail, "TaxAmt"))
+                  ),
+                  lastSyncedAt: importAt,
+                })),
+              });
+              deltas.taxDetailsUpserted += createdTaxDetails.count;
+            }
+
             const details = getArray(getField(fullOrder, "Details"));
             const existingOrderLines = await tx.orderLine.findMany({
               where: { orderId: order.id },
@@ -749,6 +828,9 @@ export async function importSalesOrdersForLineRequestedOn(
                 eta: true,
                 inventoryId: true,
                 lineDescription: true,
+                itemType: true,
+                itemClass: true,
+                taxCategory: true,
                 warehouseId: true,
                 orderQty: true,
                 openQty: true,
@@ -783,6 +865,7 @@ export async function importSalesOrdersForLineRequestedOn(
             );
 
             const requestedDateKeys = new Set<string>();
+            const requestedDateLineCounts = new Map<string, number>();
             const incomingLineNbrs = new Set<number>();
             const retainedOrderLineIds = new Set<string>();
             const incomingAllocationKeys = new Set<string>();
@@ -804,6 +887,10 @@ export async function importSalesOrdersForLineRequestedOn(
               const requestedDateKey = requestedDate ? dateKeyFromValue(requestedDate) : null;
               if (requestedDateKey) {
                 requestedDateKeys.add(requestedDateKey);
+                requestedDateLineCounts.set(
+                  requestedDateKey,
+                  (requestedDateLineCounts.get(requestedDateKey) ?? 0) + 1
+                );
               }
 
               const lineData = {
@@ -813,6 +900,9 @@ export async function importSalesOrdersForLineRequestedOn(
                 lineNbr,
                 inventoryId: getString(getField(detail, "InventoryID")),
                 lineDescription: getString(getField(detail, "LineDescription")),
+                itemType: getString(getField(detail, "ItemType")),
+                itemClass: getString(getField(detail, "ItemClass")),
+                taxCategory: getString(getField(detail, "TaxCategory")),
                 eta: getDateValue(getField(detail, "ETA")),
                 orderQty: getDecimalValue(getField(detail, "OrderQty")),
                 openQty: getDecimalValue(getField(detail, "OpenQty")),
@@ -995,45 +1085,25 @@ export async function importSalesOrdersForLineRequestedOn(
               deltas.addressesUpserted += 1;
             }
 
-            const requestedDeliveryDates = [...requestedDateKeys].map(dateFromKey);
-            for (const deliveryDate of requestedDeliveryDates) {
-              const deliveryGroupData = {
-                orderNumber,
-                orderType,
-                deliveryDate,
-                status,
-                lastSyncedAt: importAt,
-              };
-
-              await tx.orderDeliveryGroup.upsert({
-                where: {
-                  orderId_deliveryDate: {
-                    orderId: order.id,
-                    deliveryDate,
-                  },
-                },
-                create: {
-                  orderId: order.id,
-                  ...deliveryGroupData,
-                },
-                update: deliveryGroupData,
-              });
-              deltas.deliveryGroupsUpserted += 1;
-            }
-
-            await tx.orderDeliveryGroup.deleteMany({
-              where: {
-                orderId: order.id,
-                ...(requestedDeliveryDates.length > 0
-                  ? { deliveryDate: { notIn: requestedDeliveryDates } }
-                  : {}),
-              },
+            const deliveryGroupSync = await syncOrderDeliveryGroups(tx, {
+              orderId: order.id,
+              orderNumber,
+              orderType,
+              status,
+              importAt,
+              currentDeliveryGroups: [...requestedDateKeys].map((requestedDateKey) => ({
+                deliveryDate: dateFromKey(requestedDateKey),
+                lineCount: requestedDateLineCounts.get(requestedDateKey) ?? 0,
+              })),
             });
+            deltas.deliveryGroupsUpserted += deliveryGroupSync.upserted;
 
-            return { deltas, errors };
+            return { orderId: order.id, deltas, errors };
           },
           { timeout: transactionTimeoutMs }
         );
+
+        await persistOrderReadiness(transactionResult.orderId);
 
         addDeltas(result, transactionResult.deltas);
         result.errors.push(...transactionResult.errors);

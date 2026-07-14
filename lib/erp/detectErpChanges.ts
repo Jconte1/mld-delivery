@@ -132,6 +132,8 @@ const ORDER_LINE_FIELDS: ChangeFieldDefinition[] = [
   { fieldName: "eta", changeType: ERP_CHANGE_TYPES.ETA_CHANGED, valueType: "date" },
   { fieldName: "inventoryId", changeType: ERP_CHANGE_TYPES.LINE_ITEM_CHANGED },
   { fieldName: "lineDescription", changeType: ERP_CHANGE_TYPES.LINE_ITEM_CHANGED },
+  { fieldName: "itemType", changeType: ERP_CHANGE_TYPES.LINE_ITEM_CHANGED },
+  { fieldName: "itemClass", changeType: ERP_CHANGE_TYPES.LINE_ITEM_CHANGED },
   { fieldName: "warehouseId", changeType: ERP_CHANGE_TYPES.LINE_ITEM_CHANGED },
   {
     fieldName: "orderQty",

@@ -51,7 +51,7 @@ export const DEFAULT_ALLOWED_SHIP_VIA = [
   "DELIVERY",
 ];
 
-export const DEFAULT_SALES_ORDER_EXPAND = "Totals,Details/Allocations,ShipToAddress";
+export const DEFAULT_SALES_ORDER_EXPAND = "Totals,Details/Allocations,ShipToAddress,TaxDetails";
 export const DEFAULT_SALES_ORDER_CUSTOM = "Document.AttributeBUYERGROUP";
 export const DEFAULT_ALLOWED_STATUSES = [
   "Open",

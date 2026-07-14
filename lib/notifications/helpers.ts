@@ -100,6 +100,10 @@ export function addDays(value: Date | string, days: number) {
   return date;
 }
 
+export function getNotificationTargetDate(runDate: Date | string, intervalDays: number) {
+  return addDays(runDate, intervalDays);
+}
+
 export function isNotificationBusinessDay(runDate: Date | string) {
   const day = dateFromKey(runDate).getUTCDay();
   return day !== 0 && day !== 6;
@@ -225,6 +229,24 @@ export function formatCustomerFriendlyDate(value: Date | string) {
   }).format(dateFromKey(value));
 }
 
+export function getDeliveryReminderIntro(intervalType: NotificationIntervalType) {
+  switch (intervalType) {
+    case "DAY_180":
+      return "we are still a ways out, but wanted to remind you that";
+    case "DAY_90":
+      return "we are 3 months out! This is a reminder that";
+    case "DAY_60":
+      return "we are 2 months out! This is a reminder that";
+    default:
+      return "this is a reminder that";
+  }
+}
+
+export function formatDeliveryDescription(buyerGroup: string | null | undefined) {
+  const cleanedBuyerGroup = cleanNotificationText(buyerGroup);
+  return cleanedBuyerGroup ? `${cleanedBuyerGroup} delivery` : "delivery";
+}
+
 export function formatContactName(params: {
   companyName?: string | null;
   displayName?: string | null;
@@ -245,6 +267,21 @@ export function formatContactName(params: {
   );
 }
 
+export function renderDeliveryReminderMessage(params: {
+  intervalType: NotificationIntervalType;
+  contactName: string;
+  buyerGroup?: string | null;
+  jobName: string;
+  jobAddress: string;
+  deliveryDate: Date | string;
+}) {
+  const intro = getDeliveryReminderIntro(params.intervalType);
+  const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
+  const jobAddress = cleanNotificationText(params.jobAddress) ?? "the job site";
+
+  return `Hello ${params.contactName}, ${intro} your ${deliveryDescription} for ${params.jobName} at ${jobAddress} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}.`;
+}
+
 export function buildDeliveryReminderMessage(params: {
   contactName: string;
   buyerGroup?: string | null;
@@ -252,12 +289,36 @@ export function buildDeliveryReminderMessage(params: {
   jobAddress: string;
   deliveryDate: Date | string;
 }) {
-  const buyerGroup = cleanNotificationText(params.buyerGroup);
-  const deliveryDescription = buyerGroup ? `${buyerGroup} delivery` : "delivery";
-
-  return `Hello ${params.contactName}, we are still a ways out, but wanted to remind you that your ${deliveryDescription} for ${params.jobName} at ${params.jobAddress} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}.`;
+  return renderDeliveryReminderMessage({
+    intervalType: "DAY_180",
+    ...params,
+  });
 }
 
 export function buildDeliveryReminderEmailSubject(deliveryDate: Date | string) {
   return `Delivery reminder for ${formatCustomerFriendlyDate(deliveryDate)}`;
+}
+
+export function renderDeliveryReminderEmailSubject(params: {
+  buyerGroup?: string | null;
+  jobName?: string | null;
+  deliveryDate: Date | string;
+}) {
+  const buyerGroup = cleanNotificationText(params.buyerGroup);
+  const jobName = cleanNotificationText(params.jobName);
+  const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+
+  if (buyerGroup && jobName && jobName !== "your delivery") {
+    return `${buyerGroup} delivery reminder: ${jobName} - ${deliveryDate}`;
+  }
+
+  if (!buyerGroup && jobName && jobName !== "your delivery") {
+    return `Delivery reminder: ${jobName} - ${deliveryDate}`;
+  }
+
+  if (buyerGroup) {
+    return `${buyerGroup} delivery reminder - ${deliveryDate}`;
+  }
+
+  return `Delivery reminder - ${deliveryDate}`;
 }

@@ -1,0 +1,561 @@
+"orderType","orderNumber","deliveryGroupId","deliveryDate","eventId","dedupeKey","intervalType","actionType","status","selectedChannel","recipientEmail","recipientPhone","reasonSkipped","subject","renderedMessagePreview","linkTokenPresent","linkScopeKey","confirmationState","paymentApplicabilityStatus","paymentStatus","paymentTerms","unpaidBalance","orderTotal","paidToDate","amountDueNow","amountDueNowRounded","currentDeliveryGroupValue","currentDeliveryGroupMerchandiseValue","currentDeliveryGroupTaxAmount","remainingUndeliveredValueAfterCurrentDelivery","requiredDownOnRemaining","paymentReminderApplies","emailPaymentReminderIncluded","paymentCalculationWarnings"
+"BQ","BQ00892","cmrjjzeoq000cbsmbxe3yt0qx","2026-07-22","cmrjk3t9t014xbsmbx9689287","delivery_notification:BQ:BQ00892:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","caleb@tresidio.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Tresidio Homes / Autumn Creek Block 3, Lot 2 - Wednesday, July 22, 2026","Hello Caleb,
+
+We are 6 weeks out! Your Appliance delivery for Tresidio Homes / Autumn Creek Block 3, Lot 2 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4402 E. Dillinger St., Nampa ID 83637
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_dc0c99955d42d8111ee783110b04a7e87a3a49894c998302
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:BQ:BQ00892:2026-07-22:cmrjjzeoq000cbsmbxe3yt0qx","PENDING","not_applicable_terms","not_applicable","N30NODEP","1002.94","1002.94","0.00",,,"952.94","899.00","53.94",,,"false","false",""
+"C1","C106229","cmrjjzh22000rbsmb3tw6d89i","2026-07-22","cmrjk3tft014zbsmb1qmignl8","delivery_notification:C1:C106229:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","eric@dyerwoodgc.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Dyer Wood General Construction / Walsh Residence - Wednesday, July 22, 2026","Hello Eric,
+
+We are 6 weeks out! Your Appliance delivery for Dyer Wood General Construction / Walsh Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 8200 Royal Street East #47, Park City UT 84060
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_17bd581fbfa663c53f6943f16c3595f4cd74ad007ff58d66
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:C1:C106229:2026-07-22:cmrjjzh22000rbsmb3tw6d89i","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","3930.30","3930.30",,,"3930.30","3651.00","279.30",,,"false","false",""
+"C1","C106338","cmrkv3tne0018zwmbuhn19s2a","2026-07-22","cmrkv7vhh015zzwmbuoxqxcp6","delivery_notification:C1:C106338:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","19rbhm@gmail.com",,,"ACTION REQUIRED: Plumbing delivery confirmation: Sandra Slater / Primary Location - Wednesday, July 22, 2026","Hello Sandra,
+
+We are 6 weeks out! Your Plumbing delivery for Sandra Slater / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 12356 W. Indus Drive, Star ID 83669
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_b79ab230a33e4f460a2c7a3a644d3f32097365b9fa475ed5
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:C1:C106338:2026-07-22:cmrkv3tne0018zwmbuhn19s2a","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","2000.87","2000.87",,,"2000.86","1887.60","113.26",,,"false","false",""
+"C1","C106479","cmrjjziop000zbsmbni6uv7a6","2026-07-22","cmrjk3tk80151bsmbgoxvxu7x","delivery_notification:C1:C106479:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","caleb@tresidio.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Tresidio Homes / Autumn Creek Block 3, Lot 2 - Wednesday, July 22, 2026","Hello Caleb,
+
+We are 6 weeks out! Your Appliance delivery for Tresidio Homes / Autumn Creek Block 3, Lot 2 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4402 E. Dillinger St., Nampa ID 83637
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_e6c640a751c93553df2778c7820d992d0d405d0105a661a5
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:C1:C106479:2026-07-22:cmrjjziop000zbsmbni6uv7a6","PENDING","not_applicable_terms","not_applicable","N30NODEP","1375.88","1375.88","0.00",,,"1375.88","1298.00","77.88",,,"false","false",""
+"C1","C106498","cmrjjzke80017bsmbugd4cf3z","2026-07-22","cmrjk3top0153bsmbay9l8ph5","delivery_notification:C1:C106498:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","andy@craftedut.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Crafted Homes, LLC / Maegan and Michael Slotten - Wednesday, July 22, 2026","Hello Andy,
+
+We are 6 weeks out! Your Appliance delivery for Crafted Homes, LLC / Maegan and Michael Slotten is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 155 N Alta Street, Salt lake City UT 84103
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_acfd7295d6540eafcfecfd2a1681cf1861790b874ec8960b
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:C1:C106498:2026-07-22:cmrjjzke80017bsmbugd4cf3z","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","2162.69","2162.69",,,"2162.69","2009.00","153.69",,,"false","false",""
+"C1","C106507","cmrjjzmi2001gbsmbrw8wwmuq","2026-07-22","cmrjk3tt10155bsmb5g6gyfx3","delivery_notification:C1:C106507:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","jeff@jeffshaw.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Jeff Shaw Construction / HOLLY NELSON - Wednesday, July 22, 2026","Hello Jeff,
+
+We are 6 weeks out! Your Appliance delivery for Jeff Shaw Construction / HOLLY NELSON is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 3594 DRAGE CIR, Salt Lake City UT 84109
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_1b1a9a09eb7cd8bc303f73c8851107f7f29001d00daa3b9a
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:C1:C106507:2026-07-22:cmrjjzmi2001gbsmbrw8wwmuq","PENDING","applicable","balance_due","PP","920.26","1842.37","922.11","920.260000","920.26","1792.37","1665.00","127.37","0.00","0.00","true","true",""
+"CB","CB00533","cmrjjzrgg003cbsmb5jea7v8y","2026-07-22","cmrjk3txk0157bsmbh1mwqqvb","delivery_notification:CB:CB00533:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SKIPPED",,,,"no_automated_channel_available",,"no_automated_channel_available","false",,,"applicable","balance_due","PP","34958.02","69918.02","34960.00","34958.003745","34958.00","69917.99","64967.13","4950.86","0.03","0.01","true","false",""
+"HW","HW06085","cmrjjzw3c004ibsmbnr2mqaku","2026-07-22","cmrjk3tzr0158bsmbkduvvrc3","delivery_notification:HW:HW06085:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","jared@landmarkswest.com",,,"ACTION REQUIRED: Hardware delivery confirmation: Landmarks West / Amy & Dan Poehling - Wednesday, July 22, 2026","Hello Jared,
+
+We are 6 weeks out! Your Hardware delivery for Landmarks West / Amy & Dan Poehling is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: Victory Ranch, Kamas UT 84036
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_b23e669e5ceb457b1ac8ee57abcc646b7edc6b99569daf6a
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:HW:HW06085:2026-07-22:cmrjjzw3c004ibsmbnr2mqaku","PENDING","not_applicable_terms","not_applicable","N30DEP","161.94","4695.84","4533.90",,,"4415.84","4253.90","161.94",,,"false","false",""
+"PG","PG02724","cmrjk0dwx00f7bsmb7x5th8t1","2026-07-22","cmrjk3u45015absmb61noddr0","delivery_notification:PG:PG02724:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","DSIMPSON@MAGLEBYCONSTRUCTION.COM",,,"ACTION REQUIRED: Plumbing delivery confirmation: Magleby Companies / Bald Eagle - Wednesday, July 22, 2026","Hello DESTRY,
+
+We are 6 weeks out! Your Plumbing delivery for Magleby Companies / Bald Eagle is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 7885 Bald Eagle Dr, Deer Valley UT 84060
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_5f09ff4a1478075495cb8a8848df068eb2208da3c92fc6aa
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG02724:2026-07-22:cmrjk0dwx00f7bsmb7x5th8t1","PENDING","not_applicable_terms","not_applicable","N30DEP","0.00","62617.93","62617.93",,,"16565.57","15417.00","1148.57",,,"false","false",""
+"PG","PG03961","cmrjk0ne700gwbsmb06bflu9d","2026-07-22","cmrjk3u8d015cbsmbnfmfia0a","delivery_notification:PG:PG03961:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","IAN@D3VBLACK.COM",,,"ACTION REQUIRED: Plumbing delivery confirmation: DEV Black LLC / HYGGE - Wednesday, July 22, 2026","Hello IAN,
+
+We are 6 weeks out! Your Plumbing delivery for DEV Black LLC / HYGGE is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 3698 E WARM SPRINGS AVE, Building 7, BOISE ID 83716
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_ef4de4004ca403fe8acadfd27c916f23bf4bc329bbed451b
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG03961:2026-07-22:cmrjk0ne700gwbsmb06bflu9d","PENDING","not_applicable_terms","not_applicable","N30NODEP","19900.18","26923.28","7023.10",,,"1386.48","1308.00","78.48",,,"false","false",""
+"PG","PG04007","cmrjk0tv300iybsmbaxkchcdb","2026-07-22","cmrjk3ucl015ebsmbjfmh0qsj","delivery_notification:PG:PG04007:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","BRIANNA@O2IDAHO.COM",,,"ACTION REQUIRED: Plumbing delivery confirmation: O2 CONSTRUCTION / 4/3 MILLSTONE - Wednesday, July 22, 2026","Hello BRIANNA,
+
+We are 6 weeks out! Your Plumbing delivery for O2 CONSTRUCTION / 4/3 MILLSTONE is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 2511 S Janeen St., K Brothers, Boise ID 83709
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_6c790926e1f43e7026c21487a9395796b384c9a64154a1b3
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG04007:2026-07-22:cmrjk0tv300iybsmbaxkchcdb","PENDING","not_applicable_terms","not_applicable","N30NODEP","983.74","10680.09","9696.35",,,"983.74","928.06","55.68",,,"false","false",""
+"PG","PG04048","cmrjk0ytw00k3bsmbis07vpem","2026-07-22","cmrjk3ugr015gbsmb7uqkqucs","delivery_notification:PG:PG04048:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","eric@dyerwoodgc.com",,,"ACTION REQUIRED: Plumbing delivery confirmation: Dyer Wood General Construction / Walsh Residence - Wednesday, July 22, 2026","Hello Eric,
+
+We are 6 weeks out! Your Plumbing delivery for Dyer Wood General Construction / Walsh Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 8200 Royal Street East #47, Park City UT 84060
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_3faa5b2e7619e0c8eb08aab27cb163ca41c93cec110810de
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG04048:2026-07-22:cmrjk0ytw00k3bsmbis07vpem","PENDING","applicable","balance_due","PP","4760.33","9520.67","4760.34","4760.330000","4760.33","9148.87","8498.72","650.15","0.00","0.00","true","true",""
+"PG","PG04145","cmrjk14da00mibsmbjegzw566","2026-07-22","cmrjk3uky015ibsmbom85dv85","delivery_notification:PG:PG04145:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","destiny@whiskeyriverrealestate.com",,,"ACTION REQUIRED: Plumbing delivery confirmation: Destiny Besner / Primary Location - Wednesday, July 22, 2026","Hello Destiny,
+
+We are 6 weeks out! Your Plumbing delivery for Destiny Besner / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4028 Algenia Lane, Island Park ID 83429
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_1b163115249492804770147ca48ae7f4b6c0edc83f29a336
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG04145:2026-07-22:cmrjk14da00mibsmbjegzw566","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","16264.38","16264.38",,,"1710.80","1710.80","0.00",,,"false","false","Order has taxTotal but no TaxDetails rows; effective tax treated as 0."
+"PG","PG04631","cmrkv586c00lrzwmbre0t5w9p","2026-07-22","cmrkv7xey016azwmbfpcx6t2o","delivery_notification:PG:PG04631:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","swaggartbuilders@outlook.com",,,"ACTION REQUIRED: Plumbing delivery confirmation: Swaggart Builders LLC / Terra View 52-4 - Wednesday, July 22, 2026","Hello Logan,
+
+We are 6 weeks out! Your Plumbing delivery for Swaggart Builders LLC / Terra View 52-4 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 5404 N Landon Creek Pl, Meridian ID 83646
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_a70d78abfc0764931eabd0b6fde2a2af64270320f91a0cdf
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PG:PG04631:2026-07-22:cmrkv586c00lrzwmbre0t5w9p","PENDING","not_applicable_terms","not_applicable","N30NODEP","395.67","395.67","0.00",,,"319.18","301.11","18.07",,,"false","false",""
+"PL","PL02508","cmrjk1byy00nybsmbbl0ks9kx","2026-07-22","cmrjk3up0015kbsmbwodrvfs5","delivery_notification:PL:PL02508:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","daceknight@hotmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Silver Pine Construction / Garth Klintworth - Wednesday, July 22, 2026","Hello Dace,
+
+We are 6 weeks out! Your Appliance delivery for Silver Pine Construction / Garth Klintworth is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 724 Copper Belt Drive, Heber UT 84032
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_492de43fcbbd0ae69d4f5a994788b6ceb41ae2f2ee9e801b
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PL:PL02508:2026-07-22:cmrjk1byy00nybsmbbl0ks9kx","PENDING","applicable","balance_due","PP","29999.67","60599.67","30600.00","29999.668075","29999.67","60599.67","56311.00","4288.67","0.00","0.00","true","true",""
+"PL","PL02596","cmrjk1eyp00oqbsmb6fcwe9u3","2026-07-22","cmrjk3ut4015mbsmb9mzo4yn7","delivery_notification:PL:PL02596:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","phil@altusdg.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Altus Development / Arlington Residence - Wednesday, July 22, 2026","Hello Phil,
+
+We are 6 weeks out! Your Appliance delivery for Altus Development / Arlington Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1500 E. Arlington Drive, Salt Lake City UT 84108
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_b01da966cb40827f65c90de6159a5aaa98655a733d47779c
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PL:PL02596:2026-07-22:cmrjk1eyp00oqbsmb6fcwe9u3","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","42618.89","42618.89",,,"9818.76","9121.00","697.76",,,"false","false",""
+"PL","PL02604","cmrjk1iii00q5bsmbmfgm354y","2026-07-22","cmrjk3ux8015obsmbodfcdzct","delivery_notification:PL:PL02604:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","eric@dyerwoodgc.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Dyer Wood General Construction / Walsh Residence - Wednesday, July 22, 2026","Hello Eric,
+
+We are 6 weeks out! Your Appliance delivery for Dyer Wood General Construction / Walsh Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 8200 Royal Street East #47, Park City UT 84060
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_621b4fbad503ace146356b5351c1c9014530101445483330
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PL:PL02604:2026-07-22:cmrjk1iii00q5bsmbmfgm354y","PENDING","applicable","balance_due","PP","37854.70","75709.40","37854.70","37854.700000","37854.70","75709.42","70347.00","5362.42","0.00","0.00","true","true",""
+"PL","PL02621","cmrjk1m1q00qzbsmbkxlv5fcz","2026-07-22","cmrjk3v1a015qbsmby0a3wb8q","delivery_notification:PL:PL02621:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","Sbdi@smartfella.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Sundberg Building & Design, Inc / Fran and Tim Byrne - Wednesday, July 22, 2026","Hello Brian,
+
+We are 6 weeks out! Your Appliance delivery for Sundberg Building & Design, Inc / Fran and Tim Byrne is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 2564 E. Village Circle, Salt Lake City UT 84108
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_1ccd3ce22b7606c8f2f8669f74d345b27f3f5aa027786493
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:PL:PL02621:2026-07-22:cmrjk1m1q00qzbsmbkxlv5fcz","PENDING","applicable","balance_due","PP","17734.82","37734.82","20000.00","17734.812575","17734.81","37734.81","35071.00","2663.81","0.01","0.01","true","true",""
+"SO","SO36943","cmrjk1qg200robsmbz0zqp98t","2026-07-22","cmrjk3v5g015sbsmbc702hjs6","delivery_notification:SO:SO36943:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","justin@kjcustombuilders.com",,,"ACTION REQUIRED: Appliance delivery confirmation: KJ Custom Builders / Mayfield Springs Lot 49 - Wednesday, July 22, 2026","Hello Justin,
+
+We are 6 weeks out! Your Appliance delivery for KJ Custom Builders / Mayfield Springs Lot 49 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 545 E Distributor Dr, Mayfield ID 83716
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_b95ece6d983ceada278a883f742bcd78afaf5bec0ed7fff8
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO36943:2026-07-22:cmrjk1qg200robsmbz0zqp98t","PENDING","not_applicable_terms","not_applicable","N30NODEP","4824.24","4824.24","0.00",,,"4504.00","4504.00","0.00",,,"false","false","Order has taxTotal but no TaxDetails rows; effective tax treated as 0."
+"SO","SO36965","cmrjk1t6f00s8bsmbe7lq07u2","2026-07-22","cmrjk3v9s015ubsmbu58sek2h","delivery_notification:SO:SO36965:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","erin@designmyelement.com",,,"ACTION REQUIRED: Appliance delivery confirmation: ELEMENT DESIGN BUILD / Stonegate - THSG - Wednesday, July 22, 2026","Hello Erin,
+
+We are 6 weeks out! Your Appliance delivery for ELEMENT DESIGN BUILD / Stonegate - THSG is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1965 S. Linder Rd., Eagle ID 83616
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_d70698f5306d05191e7152f873969a1875adbfe25c27a8e6
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO36965:2026-07-22:cmrjk1t6f00s8bsmbe7lq07u2","PENDING","not_applicable_terms","not_applicable","N30DEP","11636.68","35020.64","23383.96",,,"11636.68","10978.00","658.68",,,"false","false",""
+"SO","SO38280","cmrjk1vo300sfbsmbryzsg79f","2026-07-22","cmrjk3ve3015wbsmb2l86smvo","delivery_notification:SO:SO38280:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","vandykeconstructionco@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: DON VAN DYKE CONSTRUCTION, INC. / TAYLOR 2 MEGAN AND JARED - Wednesday, July 22, 2026","Hello Don,
+
+We are 6 weeks out! Your Appliance delivery for DON VAN DYKE CONSTRUCTION, INC. / TAYLOR 2 MEGAN AND JARED is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 833 S 1130 E, ALPINE UT 84004
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_d9c6779f4a43764718ca6d5dc8d4a2d8bf90246913b31728
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO38280:2026-07-22:cmrjk1vo300sfbsmbryzsg79f","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","1801.94","1801.94",,,"1801.94","1677.00","124.94",,,"false","false",""
+"SO","SO38336","cmrjk1y6v00t8bsmbdodzly1f","2026-07-22","cmrjk3vim015ybsmbwew77gmz","delivery_notification:SO:SO38336:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","sbrehorn@cox.net",,,"ACTION REQUIRED: Appliance delivery confirmation: Scott and Susan Rehorn / Primary Location - Wednesday, July 22, 2026","Hello Scott,
+
+We are 6 weeks out! Your Appliance delivery for Scott and Susan Rehorn / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 3244 Range Court, Park City UT 84098
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_aee93ec8e69637add304df9032121b9e4149d810926fd7d2
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO38336:2026-07-22:cmrjk1y6v00t8bsmbdodzly1f","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","6221.98","6221.98",,,"1107.72","1029.00","78.72",,,"false","false",""
+"SO","SO38416","cmrkv5yxh00tlzwmbws6eeu4j","2026-07-22","cmrkv7yzg016kzwmbxj2p7d2q","delivery_notification:SO:SO38416:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","tdjones13@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: In-Line Contracting / Richardson Home - Wednesday, July 22, 2026","Hello Tom,
+
+We are 6 weeks out! Your Appliance delivery for In-Line Contracting / Richardson Home is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1362 S 1160 E, Salem UTAH 84653
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_4b82edc11c948dc2faf0fc4c30be20eb686fc8dd37b674ba
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO38416:2026-07-22:cmrkv5yxh00tlzwmbws6eeu4j","PENDING","applicable","balance_due","PP","18834.77","37669.77","18835.00","18834.770000","18834.77","37669.77","35075.29","2594.48","0.00","0.00","true","true",""
+"SO","SO38860","cmrjk210700tvbsmbwdyupq94","2026-07-22","cmrjk3vmz0160bsmb85dx6g4u","delivery_notification:SO:SO38860:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SKIPPED",,,,"no_automated_channel_available",,"no_automated_channel_available","false",,,"applicable","balance_due","PP","12442.44","25028.09","12585.65","12442.438625","12442.44","24878.09","23305.00","1573.09","0.00","0.00","true","false",""
+"SO","SO38966","cmrjk23h100ucbsmb6sdlykof","2026-07-22","cmrjk3vp20161bsmbjtysmwa5","delivery_notification:SO:SO38966:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","cddurra@yahoo.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Connie Durrance / Primary Location - Wednesday, July 22, 2026","Hello Connie,
+
+We are 6 weeks out! Your Appliance delivery for Connie Durrance / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4365 N Bedford DR, Provo UT 84604
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_f622b56ef0ddf8a204a964e707da82bcab6a0cfbace1068c
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO38966:2026-07-22:cmrjk23h100ucbsmb6sdlykof","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","18822.66","18822.66",,,"1250.72","1164.00","86.72",,,"false","false",""
+"SO","SO39036","cmrjk26av00v0bsmbynstl53r","2026-07-22","cmrjk3vt70163bsmbe8zjs9ta","delivery_notification:SO:SO39036:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","Marjorie.Heck@sheahomes.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Shea Homes / Valor 0436 - Wednesday, July 22, 2026","Hello Marjorie,
+
+We are 6 weeks out! Your Appliance delivery for Shea Homes / Valor 0436 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 12212 S CONNECTION LN, Kuna ID 83634
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_362aa9b9cdf16fddf7a49b9aa569757e4f9461b6a6968fee
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39036:2026-07-22:cmrjk26av00v0bsmbynstl53r","PENDING","not_applicable_terms","not_applicable","CONTRACT","1494.58","1494.58","0.00",,,"1444.58","1373.00","71.58",,,"false","false",""
+"SO","SO39038","cmrjk28dp00vhbsmbbt64yeph","2026-07-22","cmrjk3vx80165bsmbrv55gzq6","delivery_notification:SO:SO39038:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","caleb@tresidio.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Tresidio Homes / Valnova Kirkhills Block 2, Lot 1 - Wednesday, July 22, 2026","Hello Caleb,
+
+We are 6 weeks out! Your Appliance delivery for Tresidio Homes / Valnova Kirkhills Block 2, Lot 1 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 6734 W. Sollas Dr., Eagle ID 83616
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_68cf270d290ef534d267181895a8b5c2af69afed2c14241f
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39038:2026-07-22:cmrjk28dp00vhbsmbbt64yeph","PENDING","not_applicable_terms","not_applicable","N30NODEP","6111.08","6111.08","0.00",,,"6061.08","5718.00","343.08",,,"false","false",""
+"SO","SO39042","cmrjk2b8w00wfbsmbds782mwg","2026-07-22","cmrjk3w1b0167bsmblnawkfr0","delivery_notification:SO:SO39042:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","grady.pace@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Grady & Janie Pace / Primary Location - Wednesday, July 22, 2026","Hello Grady,
+
+We are 6 weeks out! Your Appliance delivery for Grady & Janie Pace / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 139 E Cottonwood Lane, Oakley UT 84055
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_ccadb527cdf781f167f56f9034e1b486228db6ea27f77fa0
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39042:2026-07-22:cmrjk2b8w00wfbsmbds782mwg","PENDING","applicable","balance_due","PP","23448.45","46896.90","23448.45","23448.448900","23448.45","46896.90","43582.00","3314.90","0.00","0.00","true","true",""
+"SO","SO39322","cmrjk2doi00wvbsmbcbh5y8c2","2026-07-22","cmrjk3w5d0169bsmb2z4n3yoq","delivery_notification:SO:SO39322:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SKIPPED",,,,"no_automated_channel_available",,"no_automated_channel_available","false",,,"no_meaningful_balance_due","no_balance_due","PP","0.00","20892.23","20892.23",,,"20892.23","19461.01","1431.22",,,"false","false",""
+"SO","SO39352","cmrjk2g5i00xlbsmbulnpk6rr","2026-07-22","cmrjk3w82016absmbefl88zna","delivery_notification:SO:SO39352:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SKIPPED",,,,"no_automated_channel_available",,"no_automated_channel_available","false",,,"not_applicable_terms","not_applicable","N30NODEP","6584.84","6584.84","0.00",,,"6484.85","6114.00","370.85",,,"false","false",""
+"SO","SO39686","cmrjk2jqm00y7bsmbzwvmiqo4","2026-07-22","cmrjk3waq016bbsmbnp4ndgjn","delivery_notification:SO:SO39686:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","desertwestconstruction@msn.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Desert West Homes / Charlottes Field Lot 3 - Wednesday, July 22, 2026","Hello Josh,
+
+We are 6 weeks out! Your Appliance delivery for Desert West Homes / Charlottes Field Lot 3 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 326 E Perrine Dr, Charlottes Field Lot 3, Midvale UT 84047
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_52181f01a9940a385bf272c82f6902409553a5ac61c8f43e
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39686:2026-07-22:cmrjk2jqm00y7bsmbzwvmiqo4","PENDING","not_applicable_terms","not_applicable","N30NODEP","3137.40","3137.40","0.00",,,"3087.40","2868.00","219.40",,,"false","false",""
+"SO","SO39687","cmrjk2m0h00ysbsmb6htzn2io","2026-07-22","cmrjk3wff016dbsmbiq4x1sfp","delivery_notification:SO:SO39687:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","desertwestconstruction@msn.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Desert West Homes / Charlottes Field Lot 4 - Wednesday, July 22, 2026","Hello Josh,
+
+We are 6 weeks out! Your Appliance delivery for Desert West Homes / Charlottes Field Lot 4 is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 330 E Perrine Dr, Charlottes Field Lot 4, Midvale UT 84047
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_1af7924104363e19dd1d41c4b878deac0a1123a77609c61c
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39687:2026-07-22:cmrjk2m0h00ysbsmb6htzn2io","PENDING","not_applicable_terms","not_applicable","N30NODEP","3137.40","3137.40","0.00",,,"3087.40","2868.00","219.40",,,"false","false",""
+"SO","SO39908","cmrjk2ps7010bbsmb2wy1w9a0","2026-07-22","cmrjk3wjj016fbsmbx6g009rc","delivery_notification:SO:SO39908:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","jbconstructionremodeling@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: JB Construction & Remodeling / McGraw Residence - Wednesday, July 22, 2026","Hello Jody,
+
+We are 6 weeks out! Your Appliance delivery for JB Construction & Remodeling / McGraw Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1025 W. Colchester Dr, Eagle IDAHO 83616
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_f03c7bd386e0909e88cb75e0f3b43692cf0dfcf54b2c7057
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39908:2026-07-22:cmrjk2ps7010bbsmb2wy1w9a0","PENDING","applicable","balance_due","PP","6713.51","31379.36","24665.85","6713.510000","6713.51","13977.16","13186.00","791.16","0.00","0.00","true","true",""
+"SO","SO39963","cmrjk2sso010obsmbnmvxymav","2026-07-22","cmrjk3wnn016hbsmbs66xml7q","delivery_notification:SO:SO39963:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","loganscashoffers@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Logan Knight / Primary Location - Wednesday, July 22, 2026","Hello Logan,
+
+We are 6 weeks out! Your Appliance delivery for Logan Knight / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 2616 N Terrace Way, Boise ID 83702
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_721b49a2d77e09b8a2474ea4a969df6ae2bf830549ba7dbb
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO39963:2026-07-22:cmrjk2sso010obsmbnmvxymav","PENDING","applicable","balance_due","PP","2235.54","4471.08","2235.54","2235.540000","2235.54","4471.08","4218.00","253.08","0.00","0.00","true","true",""
+"SO","SO40083","cmrjk2vmg0111bsmbhct2muf0","2026-07-22","cmrjk3wrr016jbsmbtywlwhdk","delivery_notification:SO:SO40083:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","coleman@larcodesignbuild.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Larco Design Build / Primary Location - Wednesday, July 22, 2026","Hello Coleman,
+
+We are 6 weeks out! Your Appliance delivery for Larco Design Build / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 6904 W Lake Ave, South Jordan UT 84009
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_5c2a85952fce3fb66f83b60f2eb837b7fa23a148d9d83b03
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40083:2026-07-22:cmrjk2vmg0111bsmbhct2muf0","PENDING","applicable","balance_due","PP","2737.04","5474.08","2737.04","2530.196000","2530.20","5048.00","5048.00","0.00","376.08","169.24","false","false","Order has taxTotal but no TaxDetails rows; effective tax treated as 0."
+"SO","SO40181","cmrjk2y6d011tbsmbsxbjz1m2","2026-07-22","cmrjk3wvy016lbsmb8lcei8b0","delivery_notification:SO:SO40181:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","aaron@shadowrockgroup.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Shadow Rock Construction / 309 Discovery Ridge - Wednesday, July 22, 2026","Hello Aaron,
+
+We are 6 weeks out! Your Appliance delivery for Shadow Rock Construction / 309 Discovery Ridge is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4043 W. Crest Court, Discovery Ridge 309, Park City UT 84098
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_a08ded59e8e200775aee12bec3219aa7d5d99bee94bc420f
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40181:2026-07-22:cmrjk2y6d011tbsmbsxbjz1m2","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","4220.84","4220.84",,,"4120.84","3828.00","292.84",,,"false","false",""
+"SO","SO40259","cmrjk30o00125bsmbbc9eg9l4","2026-07-22","cmrjk3x03016nbsmbm96tq5n3","delivery_notification:SO:SO40259:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","acer.roof@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Acer Construction / Primary Location - Wednesday, July 22, 2026","Hello James,
+
+We are 6 weeks out! Your Appliance delivery for Acer Construction / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: WIll Call, Paragonah UT 84721
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_4a36df33e2cf69c8378ca1b37c880c04479802eb19992100
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40259:2026-07-22:cmrjk30o00125bsmbbc9eg9l4","PENDING","not_applicable_terms","not_applicable","N30NODEP","0.00","7203.49","7203.49",,,"6748.00","6748.00","0.00",,,"false","false","Order has taxTotal but no TaxDetails rows; effective tax treated as 0."
+"SO","SO40466","cmrjk35ub013hbsmbb57n01zf","2026-07-22","cmrjk3x48016pbsmbcs24oktj","delivery_notification:SO:SO40466:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","traejaussi@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Southview Builders / Primary Location - Wednesday, July 22, 2026","Hello Trae,
+
+We are 6 weeks out! Your Appliance delivery for Southview Builders / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 365 S 500 W, Fillmore UT 84631
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_ac3335eb0d6fc6f421a9e9baaa4bda3aa41bb082f6aa7ea8
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40466:2026-07-22:cmrjk35ub013hbsmbb57n01zf","PENDING","applicable","balance_due","PP","12627.27","25627.27","13000.00","12627.251383","12627.25","25377.24","23838.98","1538.26","0.03","0.02","true","true",""
+"SO","SO40470","cmrkv7ctx014bzwmbgq0b3un4","2026-07-22","cmrkv81m9016yzwmbt3kfspnj","delivery_notification:SO:SO40470:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","CRAIG@ALTITUDEHOMECONCIERGE.COM",,,"ACTION REQUIRED: Appliance delivery confirmation: ALTITUDE HOME CONCIERGE / 1455 Red Fox - Smith Residence - Wednesday, July 22, 2026","Hello Craig,
+
+We are 6 weeks out! Your Appliance delivery for ALTITUDE HOME CONCIERGE / 1455 Red Fox - Smith Residence is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1455 Red Fox Rd, Park City UT 84098
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_4022dca28cb311b91138796efd781a4482ce3b6be4bfc492
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40470:2026-07-22:cmrkv7ctx014bzwmbgq0b3un4","PENDING","applicable","balance_due","PP","4039.80","8079.61","4039.81","4039.800000","4039.80","8029.61","7459.00","570.61","0.00","0.00","true","true",""
+"SO","SO40480","cmrjk38y40141bsmbl49bi9rd","2026-07-22","cmrjk3x8l016rbsmbfczeu94f","delivery_notification:SO:SO40480:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","andersuz262@gmail.com",,,"ACTION REQUIRED: Appliance delivery confirmation: Suzy Anderson / Primary Location - Wednesday, July 22, 2026","Hello Suzy,
+
+We are 6 weeks out! Your Appliance delivery for Suzy Anderson / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1546 Hidden Creek Road, Heber UT 84032
+
+Our records show a balance will be due before delivery. You can view payment details using the link below.
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_7ff55812f201f457074a56c14049d65353c825d8d76b6210
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40480:2026-07-22:cmrjk38y40141bsmbl49bi9rd","PENDING","applicable","balance_due","PP","2030.02","4060.04","2030.02","2030.016700","2030.02","4010.03","3732.00","278.03","0.01","0.00","true","true",""
+"SO","SO40502","cmrjk3cy4014bbsmbti63lwee","2026-07-22","cmrjk3xcw016tbsmb7e0sb4i1","delivery_notification:SO:SO40502:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","travis@sagegroupconstruction.com",,,"ACTION REQUIRED: Appliance delivery confirmation: SAGE GROUP CONSTRUCTION / VICKIE BIEHN - Wednesday, July 22, 2026","Hello Travis,
+
+We are 6 weeks out! Your Appliance delivery for SAGE GROUP CONSTRUCTION / VICKIE BIEHN is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 1015 NORTH 640 WEST, WEST BOUNTIFUL UT 84087
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_27aa30d92bb4727c6ef1dba204d2174461512804b5b72d50
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40502:2026-07-22:cmrjk3cy4014bbsmbti63lwee","PENDING","no_meaningful_balance_due","no_balance_due","PP","0.00","2598.08","2598.08",,,"2548.08","2367.00","181.08",,,"false","false",""
+"SO","SO40521","cmrjk3mgm014wbsmbvvtk1vvn","2026-07-22","cmrjk3xh3016vbsmb572wvif7","delivery_notification:SO:SO40521:2026-07-22:DAY_42:DELIVERY_CONFIRMATION_REQUEST","DAY_42","DELIVERY_CONFIRMATION_REQUEST","SCHEDULED","EMAIL","allen@fullscale.us",,,"ACTION REQUIRED: Appliance delivery confirmation: Full Scale Construction / Primary Location - Wednesday, July 22, 2026","Hello Allen,
+
+We are 6 weeks out! Your Appliance delivery for Full Scale Construction / Primary Location is scheduled for Wednesday, July 22, 2026.
+
+Delivery address: 4403 W. 100 N., IW 191, Cedar City UT 84721
+
+Please confirm if this delivery date still works or request a different date using the link below.
+
+To confirm/change delivery and view delivery details, click here:
+https://delivery.example.test/confirm/dc42_ffd8a93f9bccef06c7321d12e6967b912fc171b6dcf7237b
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.","true","delivery_confirmation:SO:SO40521:2026-07-22:cmrjk3mgm014wbsmbvvtk1vvn","PENDING","not_applicable_terms","not_applicable","NET 30","3497.88","3497.88","0.00",,,"3469.24","3272.00","197.24",,,"false","false",""

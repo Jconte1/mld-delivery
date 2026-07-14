@@ -74,7 +74,7 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
   order_line: {
     delivery_date_changed: ["requestedOn"],
     eta_changed: ["eta"],
-    line_item_changed: ["inventoryId", "lineDescription", "warehouseId"],
+    line_item_changed: ["inventoryId", "lineDescription", "itemType", "itemClass", "warehouseId"],
     line_quantity_changed: ["orderQty", "openQty"],
     line_price_changed: ["discountedUnitPrice"],
   },

@@ -4,22 +4,22 @@ import {
   type CreateDeliveryReminderEventsSummary,
 } from "@/lib/notifications/createDeliveryReminderEvents";
 
-const INTERVAL_DAYS = 180;
+const INTERVAL_DAYS = 90;
 
-export type Create180DayDeliveryReminderEventsSummary = CreateDeliveryReminderEventsSummary;
+export type Create90DayDeliveryReminderEventsSummary = CreateDeliveryReminderEventsSummary;
 
-export type Create180DayDeliveryReminderEventsOptions = {
+export type Create90DayDeliveryReminderEventsOptions = {
   runDate?: Date | string;
   dryRun?: boolean;
 };
 
-export async function create180DayDeliveryReminderEvents(
-  options: Create180DayDeliveryReminderEventsOptions = {}
-): Promise<Create180DayDeliveryReminderEventsSummary> {
+export async function create90DayDeliveryReminderEvents(
+  options: Create90DayDeliveryReminderEventsOptions = {}
+): Promise<Create90DayDeliveryReminderEventsSummary> {
   return createDeliveryReminderEvents({
     runDate: options.runDate,
     dryRun: options.dryRun,
-    intervalType: NotificationIntervalType.DAY_180,
+    intervalType: NotificationIntervalType.DAY_90,
     intervalDays: INTERVAL_DAYS,
   });
 }

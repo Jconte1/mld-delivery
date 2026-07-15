@@ -336,6 +336,8 @@ async function build42DayMessages(params: {
   const email = render42DayEmailConfirmationMessage({
     contactName: params.contactName,
     buyerGroup: params.group.order.buyerGroup,
+    customerDescription: params.group.order.customerDescription,
+    locationDescription: params.group.order.locationDescription,
     jobName: params.jobName,
     jobAddress: params.jobAddress,
     deliveryDate: params.group.deliveryDate,

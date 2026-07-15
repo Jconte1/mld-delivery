@@ -229,6 +229,20 @@ export function formatCustomerFriendlyDate(value: Date | string) {
   }).format(dateFromKey(value));
 }
 
+export function formatCurrencyAmount(value: string | number | null | undefined) {
+  if (value === null || value === undefined) return "$0.00";
+  const numeric =
+    typeof value === "number" ? value : Number(String(value).trim().replace(/,/g, ""));
+  if (!Number.isFinite(numeric)) return String(value);
+
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 2,
+    maximumFractionDigits: 2,
+  }).format(numeric);
+}
+
 export function getDeliveryReminderIntro(intervalType: NotificationIntervalType) {
   switch (intervalType) {
     case "DAY_180":

@@ -1,5 +1,6 @@
 import {
   cleanNotificationText,
+  formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
 } from "@/lib/notifications/helpers";
@@ -14,12 +15,7 @@ function formatBalanceOwedAmount(value: string | null | undefined) {
   const amount = Number(value);
   if (!Number.isFinite(amount) || amount <= 2) return null;
 
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(amount);
+  return formatCurrencyAmount(amount);
 }
 
 export function render42DayPaymentReminderText(amountDueNowRounded?: string | null) {
@@ -49,8 +45,29 @@ function safeEmailJobAddress(value: string | null | undefined) {
   return cleaned;
 }
 
+function htmlJobName(params: {
+  customerDescription?: string | null;
+  locationDescription?: string | null;
+  jobName: string;
+}) {
+  const customerDescription = cleanNotificationText(params.customerDescription);
+  const locationDescription = cleanNotificationText(params.locationDescription);
+
+  if (!locationDescription || locationDescription.toUpperCase() === "MAIN") {
+    return `<strong>${escapeHtml(customerDescription ?? params.jobName)}</strong>`;
+  }
+
+  if (!customerDescription) return `<strong>${escapeHtml(locationDescription)}</strong>`;
+
+  return `<strong>${escapeHtml(customerDescription)}</strong> / <strong>${escapeHtml(
+    locationDescription
+  )}</strong>`;
+}
+
 export function render42DayEmailConfirmationSubject(params: {
   buyerGroup?: string | null;
+  customerDescription?: string | null;
+  locationDescription?: string | null;
   jobName?: string | null;
   deliveryDate: Date | string;
 }) {
@@ -77,6 +94,8 @@ export function render42DayEmailConfirmationSubject(params: {
 export function render42DayEmailConfirmationBody(params: {
   contactName: string;
   buyerGroup?: string | null;
+  customerDescription?: string | null;
+  locationDescription?: string | null;
   jobName?: string | null;
   jobAddress?: string | null;
   deliveryDate: Date | string;
@@ -116,6 +135,8 @@ export function render42DayEmailConfirmationBody(params: {
 export function render42DayEmailConfirmationHtmlBody(params: {
   contactName: string;
   buyerGroup?: string | null;
+  customerDescription?: string | null;
+  locationDescription?: string | null;
   jobName?: string | null;
   jobAddress?: string | null;
   deliveryDate: Date | string;
@@ -133,14 +154,21 @@ export function render42DayEmailConfirmationHtmlBody(params: {
     ? render42DayPaymentReminderText(params.amountDueNowRounded)
     : null;
   const paragraph = (value: string) => `<p>${escapeHtml(value)}</p>`;
+  const paymentAmount = formatBalanceOwedAmount(params.amountDueNowRounded);
 
   return [
     paragraph(`Hello ${contactName},`),
-    paragraph(
-      `We are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${deliveryDate}.`
-    ),
-    paragraph(`Delivery address: ${jobAddress}`),
-    paymentText ? paragraph(paymentText) : null,
+    `<p>We are 6 weeks out! Your ${escapeHtml(deliveryDescription)} for ${htmlJobName({
+      customerDescription: params.customerDescription,
+      locationDescription: params.locationDescription,
+      jobName,
+    })} is scheduled for ${escapeHtml(deliveryDate)}.</p>`,
+    `<p>Delivery address: <strong>${escapeHtml(jobAddress)}</strong></p>`,
+    paymentText && paymentAmount
+      ? `<p>Balance owed before delivery: <strong>${escapeHtml(paymentAmount)}</strong></p>`
+      : paymentText
+        ? paragraph(paymentText)
+        : null,
     paragraph("To confirm/change delivery and view order details, click here:"),
     `<p><a href="${escapeHtml(
       link
@@ -155,6 +183,8 @@ export function render42DayEmailConfirmationHtmlBody(params: {
 export function render42DayEmailConfirmationMessage(params: {
   contactName: string;
   buyerGroup?: string | null;
+  customerDescription?: string | null;
+  locationDescription?: string | null;
   jobName?: string | null;
   jobAddress?: string | null;
   deliveryDate: Date | string;

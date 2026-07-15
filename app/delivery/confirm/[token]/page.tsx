@@ -9,6 +9,7 @@ import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineRea
 import {
   dateFromKey,
   dateKey,
+  formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatJobAddress,
   formatJobName,
@@ -232,15 +233,19 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
             <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
               <div>
                 <dt className="font-medium text-zinc-500">Customer</dt>
-                <dd className="mt-1 text-zinc-900">{order.customerDescription ?? "Not provided"}</dd>
+                <dd className="mt-1 font-semibold text-zinc-900">
+                  {order.customerDescription ?? "Not provided"}
+                </dd>
               </div>
               <div>
                 <dt className="font-medium text-zinc-500">Job</dt>
-                <dd className="mt-1 text-zinc-900">{order.locationDescription ?? "Not provided"}</dd>
+                <dd className="mt-1 font-semibold text-zinc-900">
+                  {order.locationDescription ?? "Not provided"}
+                </dd>
               </div>
               <div className="sm:col-span-2">
                 <dt className="font-medium text-zinc-500">Address</dt>
-                <dd className="mt-1 text-zinc-900">{jobAddress}</dd>
+                <dd className="mt-1 font-semibold text-zinc-900">{jobAddress}</dd>
               </div>
             </dl>
 
@@ -277,17 +282,21 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
               {showAmountDue ? (
                 <div>
                   <dt className="font-medium text-zinc-500">Amount due now</dt>
-                  <dd className="mt-1 text-2xl font-semibold">${payment.amountDueNowRounded}</dd>
+                  <dd className="mt-1 text-2xl font-semibold">
+                    {formatCurrencyAmount(payment.amountDueNowRounded)}
+                  </dd>
                 </div>
               ) : null}
               <div>
                 <dt className="font-medium text-zinc-500">Unpaid balance</dt>
-                <dd className="mt-1 text-zinc-900">${payment.unpaidBalance ?? "0.00"}</dd>
+                <dd className="mt-1 text-zinc-900">
+                  {formatCurrencyAmount(payment.unpaidBalance)}
+                </dd>
               </div>
               <div>
                 <dt className="font-medium text-zinc-500">Current delivery value</dt>
                 <dd className="mt-1 text-zinc-900">
-                  ${payment.currentDeliveryGroupValue ?? "0.00"}
+                  {formatCurrencyAmount(payment.currentDeliveryGroupValue)}
                 </dd>
               </div>
             </dl>

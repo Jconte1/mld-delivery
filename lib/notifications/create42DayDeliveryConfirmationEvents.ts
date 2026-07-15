@@ -493,6 +493,8 @@ export async function create42DayDeliveryConfirmationEvents(
         ? render42DayEmailConfirmationMessage({
             contactName,
             buyerGroup: order.buyerGroup,
+            customerDescription: order.customerDescription,
+            locationDescription: order.locationDescription,
             jobName,
             jobAddress,
             deliveryDate: deliveryGroup.deliveryDate,

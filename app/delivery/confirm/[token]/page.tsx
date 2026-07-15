@@ -15,10 +15,11 @@ import {
   formatJobName,
 } from "@/lib/notifications/helpers";
 import { prisma } from "@/lib/prisma";
+import { DeliveryConfirmationActions } from "./DeliveryConfirmationActions";
 
 type PageProps = {
   params: Promise<{ token: string }>;
-  searchParams?: Promise<{ updated?: string }>;
+  searchParams?: Promise<{ error?: string; updated?: string }>;
 };
 
 type DeliveryLine = Pick<
@@ -87,6 +88,59 @@ function statusClass(status: string | null | undefined) {
   }
 }
 
+function titleCaseStatus(value: string) {
+  return value
+    .toLowerCase()
+    .split("_")
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(" ");
+}
+
+function nextDateKey(value: Date | string) {
+  const date = dateFromKey(value);
+  date.setUTCDate(date.getUTCDate() + 1);
+  return dateKey(date);
+}
+
+function isWeekendDate(value: Date | string) {
+  const day = dateFromKey(value).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function parseDateKeyOrNull(value: string) {
+  try {
+    return dateFromKey(value);
+  } catch {
+    return null;
+  }
+}
+
+function isFinalConfirmationStatus(value: DeliveryConfirmationStatus) {
+  return (
+    value === DeliveryConfirmationStatus.CONFIRMED ||
+    value === DeliveryConfirmationStatus.NEW_DATE_REQUESTED
+  );
+}
+
+function requestDateErrorMessage(value: string | undefined) {
+  switch (value) {
+    case "missing_date":
+      return "Please choose a requested delivery date.";
+    case "earlier_date":
+      return "Please choose a date later than your current scheduled delivery date.";
+    case "weekend_date":
+      return "Please choose a weekday delivery date.";
+    default:
+      return null;
+  }
+}
+
+function redirectToConfirmation(token: string, params: Record<string, string>): never {
+  const query = new URLSearchParams(params).toString();
+  redirect(`/delivery/confirm/${encodeURIComponent(token)}${query ? `?${query}` : ""}`);
+}
+
 function InfoState({ title, message }: { title: string; message: string }) {
   return (
     <main className="min-h-screen bg-zinc-50 px-6 py-12 text-zinc-950">
@@ -106,9 +160,13 @@ async function confirmDelivery(formData: FormData) {
 
   const confirmation = await prisma.deliveryConfirmation.findUnique({
     where: { linkToken: token },
-    select: { id: true },
+    select: { id: true, status: true },
   });
   if (confirmation) {
+    if (isFinalConfirmationStatus(confirmation.status)) {
+      redirectToConfirmation(token, { updated: "already_final" });
+    }
+
     await prisma.deliveryConfirmation.update({
       where: { id: confirmation.id },
       data: {
@@ -130,20 +188,44 @@ async function requestDifferentDate(formData: FormData) {
 
   const confirmation = await prisma.deliveryConfirmation.findUnique({
     where: { linkToken: token },
-    select: { id: true },
+    select: {
+      id: true,
+      status: true,
+      deliveryDate: true,
+      requestedNewDate: true,
+    },
   });
   if (confirmation) {
-    const requestedNewDate = requestedNewDateRaw ? dateFromKey(requestedNewDateRaw) : null;
+    if (isFinalConfirmationStatus(confirmation.status)) {
+      redirectToConfirmation(token, { updated: "already_final" });
+    }
+
+    if (!requestedNewDateRaw) {
+      redirectToConfirmation(token, { error: "missing_date" });
+    }
+
+    const requestedNewDate = parseDateKeyOrNull(requestedNewDateRaw);
+    if (!requestedNewDate) {
+      redirectToConfirmation(token, { error: "missing_date" });
+    }
+
+    const currentDate = confirmation.requestedNewDate ?? confirmation.deliveryDate;
+    if (requestedNewDate.getTime() <= dateFromKey(currentDate).getTime()) {
+      redirectToConfirmation(token, { error: "earlier_date" });
+    }
+
+    if (isWeekendDate(requestedNewDate)) {
+      redirectToConfirmation(token, { error: "weekend_date" });
+    }
+
     await prisma.deliveryConfirmation.update({
       where: { id: confirmation.id },
       data: {
-        status: requestedNewDate
-          ? DeliveryConfirmationStatus.NEW_DATE_REQUESTED
-          : DeliveryConfirmationStatus.AWAITING_NEW_DATE,
+        status: DeliveryConfirmationStatus.NEW_DATE_REQUESTED,
         changeRequestedAt: new Date(),
         requestedNewDate,
-        requestedNewDateRaw: requestedNewDateRaw || null,
-        requestedNewDateAt: requestedNewDate ? new Date() : null,
+        requestedNewDateRaw,
+        requestedNewDateAt: new Date(),
       },
     });
   }
@@ -198,6 +280,23 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
   const readiness = await getDeliveryGroupReadiness(group.id);
   const payment = await getDeliveryGroupPaymentEvaluation(group.id);
   const showAmountDue = payment.paymentStatus === "balance_due" && payment.amountDueNowRounded;
+  const statusLabel = titleCaseStatus(confirmation.status);
+  const scheduledDateLabel = formatCustomerFriendlyDate(group.deliveryDate);
+  const requestedNewDateLabel = confirmation.requestedNewDate
+    ? formatCustomerFriendlyDate(confirmation.requestedNewDate)
+    : null;
+  const isFinalStatus = isFinalConfirmationStatus(confirmation.status);
+  const minimumRequestedDate = nextDateKey(confirmation.requestedNewDate ?? group.deliveryDate);
+  const errorMessage = requestDateErrorMessage(search.error);
+  const headerDateLine =
+    confirmation.status === DeliveryConfirmationStatus.CONFIRMED
+      ? `${order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery"} confirmed for ${scheduledDateLabel}`
+      : confirmation.status === DeliveryConfirmationStatus.NEW_DATE_REQUESTED &&
+          requestedNewDateLabel
+        ? `New delivery date requested for ${requestedNewDateLabel}`
+        : confirmation.status === DeliveryConfirmationStatus.AWAITING_NEW_DATE
+          ? `New delivery date request started for ${scheduledDateLabel}`
+          : `${order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery"} scheduled for ${scheduledDateLabel}`;
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">
@@ -207,16 +306,11 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
           <div className="mt-3 flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
               <h1 className="text-3xl font-semibold tracking-tight">{jobName}</h1>
-              <p className="mt-2 text-lg text-zinc-700">
-                {order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery"} scheduled for{" "}
-                {formatCustomerFriendlyDate(group.deliveryDate)}
-              </p>
+              <p className="mt-2 text-lg text-zinc-700">{headerDateLine}</p>
             </div>
             <div className="rounded-md bg-zinc-100 px-4 py-3 text-sm text-zinc-700">
-              <div>
-                {group.orderType} {group.orderNumber}
-              </div>
-              <div>Status: {confirmation.status.toLowerCase().replace(/_/g, " ")}</div>
+              <div>Order #: {group.orderNumber}</div>
+              <div>Status: {statusLabel}</div>
             </div>
           </div>
 
@@ -247,27 +341,36 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
                 <dt className="font-medium text-zinc-500">Address</dt>
                 <dd className="mt-1 font-semibold text-zinc-900">{jobAddress}</dd>
               </div>
+              {requestedNewDateLabel ? (
+                <>
+                  <div>
+                    <dt className="font-medium text-zinc-500">Current Scheduled Delivery Date</dt>
+                    <dd className="mt-1 text-zinc-900">{scheduledDateLabel}</dd>
+                  </div>
+                  <div>
+                    <dt className="font-medium text-zinc-500">Requested New Delivery Date</dt>
+                    <dd className="mt-1 font-semibold text-zinc-900">{requestedNewDateLabel}</dd>
+                  </div>
+                </>
+              ) : (
+                <div className="sm:col-span-2">
+                  <dt className="font-medium text-zinc-500">Requested Delivery Date</dt>
+                  <dd className="mt-1 font-semibold text-zinc-900">{scheduledDateLabel}</dd>
+                </div>
+              )}
             </dl>
 
-            <div className="mt-6 flex flex-col gap-3 sm:flex-row">
-              <form action={confirmDelivery}>
-                <input type="hidden" name="token" value={token} />
-                <button className="w-full rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 sm:w-auto">
-                  Confirm Delivery
-                </button>
-              </form>
-              <form action={requestDifferentDate} className="flex flex-col gap-2 sm:flex-row">
-                <input type="hidden" name="token" value={token} />
-                <input
-                  type="date"
-                  name="requestedNewDate"
-                  className="rounded-md border border-zinc-300 px-3 py-2 text-sm"
-                />
-                <button className="rounded-md border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100">
-                  Request Different Date
-                </button>
-              </form>
-            </div>
+            <DeliveryConfirmationActions
+              token={token}
+              status={confirmation.status}
+              scheduledDateLabel={scheduledDateLabel}
+              requestedNewDateLabel={requestedNewDateLabel}
+              minimumRequestedDate={minimumRequestedDate}
+              isLocked={isFinalStatus}
+              errorMessage={errorMessage}
+              confirmDeliveryAction={confirmDelivery}
+              requestDifferentDateAction={requestDifferentDate}
+            />
           </section>
 
           <aside className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">

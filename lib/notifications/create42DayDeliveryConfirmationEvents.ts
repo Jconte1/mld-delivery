@@ -498,6 +498,7 @@ export async function create42DayDeliveryConfirmationEvents(
             deliveryDate: deliveryGroup.deliveryDate,
             link,
             paymentReminderApplies: showPaymentReminder,
+            amountDueNowRounded: paymentReport.amountDueNowRounded,
           })
         : null;
     const subject =

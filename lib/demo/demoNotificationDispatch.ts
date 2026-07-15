@@ -1,6 +1,6 @@
 export type DemoSendResult = {
   provider: "twilio" | "ms_graph";
-  to: string;
+  recipientEnvVar: "NOTIFICATIONS_TEST_PHONE" | "NOTIFICATIONS_TEST_EMAIL";
   ok: boolean;
   id?: string | null;
 };
@@ -140,8 +140,16 @@ export async function sendDemoSms(input: DemoSmsInput): Promise<DemoSendResult> 
   }
 
   const json = JSON.parse(text) as { sid?: string };
-  console.log("[demo-notifications][sms] sent", { to, sid: json.sid ?? null });
-  return { provider: "twilio", to, ok: true, id: json.sid ?? null };
+  console.log("[demo-notifications][sms] sent", {
+    recipientEnvVar: "NOTIFICATIONS_TEST_PHONE",
+    messageIdPresent: Boolean(json.sid),
+  });
+  return {
+    provider: "twilio",
+    recipientEnvVar: "NOTIFICATIONS_TEST_PHONE",
+    ok: true,
+    id: json.sid ?? null,
+  };
 }
 
 export async function sendDemoEmail(input: DemoEmailInput): Promise<DemoSendResult> {
@@ -179,6 +187,8 @@ export async function sendDemoEmail(input: DemoEmailInput): Promise<DemoSendResu
     throw new Error(`Graph demo email failed: ${resp.status} ${text}`);
   }
 
-  console.log("[demo-notifications][email] sent", { to });
-  return { provider: "ms_graph", to, ok: true };
+  console.log("[demo-notifications][email] sent", {
+    recipientEnvVar: "NOTIFICATIONS_TEST_EMAIL",
+  });
+  return { provider: "ms_graph", recipientEnvVar: "NOTIFICATIONS_TEST_EMAIL", ok: true };
 }

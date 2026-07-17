@@ -7,9 +7,7 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "prisma:generate": "prisma generate",
-    "demo:delivery:preview": "tsx --env-file=.env scripts/demo-send-delivery-notifications.ts --preview-only",
-    "demo:delivery:send": "tsx --env-file=.env scripts/demo-send-delivery-notifications.ts"
+    "prisma:generate": "prisma generate"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

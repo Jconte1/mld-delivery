@@ -17,7 +17,10 @@ import {
   buildDeliveryConfirmationLink,
   newDeliveryConfirmationLinkToken,
 } from "@/lib/notifications/deliveryConfirmationLinks";
-import { ensurePendingDeliveryConfirmation } from "@/lib/notifications/deliveryConfirmationState";
+import {
+  ensurePendingDeliveryConfirmation,
+  isDeliveryGroupDateConfirmed,
+} from "@/lib/notifications/deliveryConfirmationState";
 import {
   buildNotificationDedupeKey,
   dateFromKey,
@@ -31,6 +34,13 @@ import {
 import { prisma } from "@/lib/prisma";
 
 export const DELIVERY_CONFIRMATION_42_DAY_INTERVAL_DAYS = 42;
+export const DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON =
+  "already_confirmed_for_delivery_date";
+
+export type DeliveryConfirmation42DayClient = Pick<
+  typeof prisma,
+  "orderDeliveryGroup" | "notificationEvent" | "deliveryConfirmation"
+>;
 
 export type DeliveryConfirmation42DayEventReport = {
   orderType: string;
@@ -46,6 +56,7 @@ export type DeliveryConfirmation42DayEventReport = {
   recipientEmail: string | null;
   recipientPhone: string | null;
   reasonSkipped: string | null;
+  alreadyConfirmedForDeliveryDate: boolean;
   subject: string | null;
   renderedMessagePreview: string;
   linkTokenPresent: boolean;
@@ -93,6 +104,7 @@ export type Create42DayDeliveryConfirmationEventsSummary = {
 export type Create42DayDeliveryConfirmationEventsOptions = {
   runDate?: Date | string;
   now?: Date;
+  prismaClient?: DeliveryConfirmation42DayClient;
 };
 
 export type DeliveryConfirmation42DayTargetGroup = Awaited<
@@ -253,8 +265,23 @@ async function evaluate42DayDeliveryGroupPayment(deliveryGroupId: string) {
   }
 }
 
-export async function find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate: Date | string) {
-  return prisma.orderDeliveryGroup.findMany({
+const notificationEventSelect = {
+  id: true,
+  dedupeKey: true,
+  intervalType: true,
+  actionType: true,
+  status: true,
+  selectedChannel: true,
+  recipientEmail: true,
+  recipientPhone: true,
+  reasonSkipped: true,
+} as const;
+
+export async function find42DayDeliveryConfirmationTargetGroups(
+  targetDeliveryDate: Date | string,
+  client: DeliveryConfirmation42DayClient = prisma
+) {
+  return client.orderDeliveryGroup.findMany({
     where: {
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
@@ -328,13 +355,14 @@ export function is42DayDeliveryGroupEligible(group: DeliveryConfirmation42DayTar
 export async function create42DayDeliveryConfirmationEvents(
   options: Create42DayDeliveryConfirmationEventsOptions = {}
 ): Promise<Create42DayDeliveryConfirmationEventsSummary> {
+  const client = options.prismaClient ?? prisma;
   const runDate = dateKey(options.runDate ?? new Date());
   const now = options.now ?? new Date();
   const targetDeliveryDate = dateKey(
     getNotificationTargetDate(runDate, DELIVERY_CONFIRMATION_42_DAY_INTERVAL_DAYS)
   );
   const summary = emptySummary({ runDate, targetDeliveryDate });
-  const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate);
+  const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
   summary.targetDeliveryGroups = deliveryGroups.length;
 
   for (const deliveryGroup of deliveryGroups) {
@@ -347,12 +375,11 @@ export async function create42DayDeliveryConfirmationEvents(
     summary.eligibleDeliveryGroups += 1;
     const paymentReport = await evaluate42DayDeliveryGroupPayment(deliveryGroup.id);
     const showPaymentReminder = paymentReminderApplies(paymentReport);
-
-    const channel = selectNotificationChannel(order.contact, {
-      activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-      activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+    const alreadyConfirmedForDeliveryDate = await isDeliveryGroupDateConfirmed({
+      deliveryGroupId: deliveryGroup.id,
+      deliveryDate: deliveryGroup.deliveryDate,
+      client,
     });
-    const shouldSkipForNoChannel = channel.selectedChannel === null;
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -361,25 +388,38 @@ export async function create42DayDeliveryConfirmationEvents(
       actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
     });
 
-    let event = await prisma.notificationEvent.findUnique({
+    const channel = alreadyConfirmedForDeliveryDate
+      ? null
+      : selectNotificationChannel(order.contact, {
+          activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
+          activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+        });
+    const shouldSkipForNoChannel = channel?.selectedChannel === null;
+
+    let event = await client.notificationEvent.findUnique({
       where: { dedupeKey },
-      select: {
-        id: true,
-        dedupeKey: true,
-        intervalType: true,
-        actionType: true,
-        status: true,
-        selectedChannel: true,
-        recipientEmail: true,
-        recipientPhone: true,
-        reasonSkipped: true,
-      },
+      select: notificationEventSelect,
     });
 
     if (event) {
       summary.eventsDeduped += 1;
+      if (alreadyConfirmedForDeliveryDate) {
+        event = await client.notificationEvent.update({
+          where: { id: event.id },
+          data: {
+            selectedChannel: null,
+            channelReason: DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+            recipientEmail: null,
+            recipientPhone: null,
+            status: NotificationEventStatus.SKIPPED,
+            reasonSkipped: DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+            scheduledAt: null,
+          },
+          select: notificationEventSelect,
+        });
+      }
     } else {
-      event = await prisma.notificationEvent.create({
+      event = await client.notificationEvent.create({
         data: {
           orderId: order.id,
           deliveryGroupId: deliveryGroup.id,
@@ -390,27 +430,25 @@ export async function create42DayDeliveryConfirmationEvents(
           intervalType: NotificationIntervalType.DAY_42,
           actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
           dedupeKey,
-          selectedChannel: channel.selectedChannel,
-          channelReason: channel.channelReason,
-          recipientEmail: channel.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
-          recipientPhone: channel.selectedChannel === "SMS" ? channel.recipientPhone : null,
-          status: shouldSkipForNoChannel
-            ? NotificationEventStatus.SKIPPED
-            : NotificationEventStatus.SCHEDULED,
-          reasonSkipped: shouldSkipForNoChannel ? channel.channelReason : null,
-          scheduledAt: shouldSkipForNoChannel ? null : dateFromKey(runDate),
+          selectedChannel: channel?.selectedChannel ?? null,
+          channelReason: alreadyConfirmedForDeliveryDate
+            ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
+            : channel?.channelReason,
+          recipientEmail: channel?.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
+          recipientPhone: channel?.selectedChannel === "SMS" ? channel.recipientPhone : null,
+          status:
+            alreadyConfirmedForDeliveryDate || shouldSkipForNoChannel
+              ? NotificationEventStatus.SKIPPED
+              : NotificationEventStatus.SCHEDULED,
+          reasonSkipped: alreadyConfirmedForDeliveryDate
+            ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
+            : shouldSkipForNoChannel
+              ? channel?.channelReason
+              : null,
+          scheduledAt:
+            alreadyConfirmedForDeliveryDate || shouldSkipForNoChannel ? null : dateFromKey(runDate),
         },
-        select: {
-          id: true,
-          dedupeKey: true,
-          intervalType: true,
-          actionType: true,
-          status: true,
-          selectedChannel: true,
-          recipientEmail: true,
-          recipientPhone: true,
-          reasonSkipped: true,
-        },
+        select: notificationEventSelect,
       });
 
       summary.eventsCreated += 1;
@@ -440,7 +478,7 @@ export async function create42DayDeliveryConfirmationEvents(
     let confirmationState: string | null = null;
 
     if (event.status === NotificationEventStatus.SCHEDULED) {
-      const existingConfirmation = await prisma.deliveryConfirmation.findUnique({
+      const existingConfirmation = await client.deliveryConfirmation.findUnique({
         where: {
           deliveryGroupId_deliveryDate: {
             deliveryGroupId: deliveryGroup.id,
@@ -456,18 +494,21 @@ export async function create42DayDeliveryConfirmationEvents(
         deliveryDate: deliveryGroup.deliveryDate,
         deliveryGroupId: deliveryGroup.id,
       });
-      const confirmation = await ensurePendingDeliveryConfirmation({
-        orderId: order.id,
-        deliveryGroupId: deliveryGroup.id,
-        notificationEventId: event.id,
-        orderType: order.orderType,
-        orderNumber: order.orderNumber,
-        deliveryDate: deliveryGroup.deliveryDate,
-        contactId: order.contact.contactId,
-        linkToken,
-        linkCreatedAt: now,
-        linkExpiresAt: new Date(dateFromKey(runDate).getTime() + 30 * 24 * 60 * 60 * 1000),
-      });
+      const confirmation = await ensurePendingDeliveryConfirmation(
+        {
+          orderId: order.id,
+          deliveryGroupId: deliveryGroup.id,
+          notificationEventId: event.id,
+          orderType: order.orderType,
+          orderNumber: order.orderNumber,
+          deliveryDate: deliveryGroup.deliveryDate,
+          contactId: order.contact.contactId,
+          linkToken,
+          linkCreatedAt: now,
+          linkExpiresAt: new Date(dateFromKey(runDate).getTime() + 30 * 24 * 60 * 60 * 1000),
+        },
+        client
+      );
       confirmationState = confirmation.status;
       summary.confirmationsCreatedOrReused += 1;
       if (existingConfirmation) {
@@ -535,6 +576,7 @@ export async function create42DayDeliveryConfirmationEvents(
       recipientEmail: event.recipientEmail,
       recipientPhone: event.recipientPhone,
       reasonSkipped: event.reasonSkipped,
+      alreadyConfirmedForDeliveryDate,
       subject,
       renderedMessagePreview,
       linkTokenPresent: Boolean(linkToken),

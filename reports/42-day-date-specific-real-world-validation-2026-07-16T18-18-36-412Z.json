@@ -1,0 +1,196 @@
+{
+  "generatedAt": "2026-07-16T18:18:36.412Z",
+  "diagnosticRolledBack": true,
+  "runDate": "2099-01-01",
+  "targetDeliveryDate": "2099-02-12",
+  "method": "Rollback-only representative fixtures executed through create42DayDeliveryConfirmationEvents.",
+  "sourceFindings": {
+    "alreadyConfirmedCheckLocation": "lib/notifications/create42DayDeliveryConfirmationEvents.ts before selectNotificationChannel",
+    "alreadyConfirmedRunsBeforeChannelSelection": true,
+    "noChannelStillSeparate": true,
+    "ineligibleFilteringStillFirst": true,
+    "readinessRulesChanged": false,
+    "paymentRulesChanged": false,
+    "acumaticaConfirmationFieldsUsedAsSkipConditions": false
+  },
+  "firstRun": {
+    "targetDeliveryGroups": 9,
+    "eligibleDeliveryGroups": 5,
+    "deliveryGroupsSkippedIneligible": 4,
+    "eventsCreated": 5,
+    "eventsDeduped": 0,
+    "eventsSkipped": 3,
+    "scheduledEvents": 2,
+    "scheduledByChannel": {
+      "SMS": 2,
+      "EMAIL": 0
+    },
+    "skippedReasons": {
+      "already_confirmed_for_delivery_date": 2,
+      "no_automated_channel_available": 1
+    },
+    "confirmationsCreatedOrReused": 2,
+    "confirmationsCreated": 2,
+    "confirmationsReused": 0
+  },
+  "secondRun": {
+    "targetDeliveryGroups": 9,
+    "eligibleDeliveryGroups": 5,
+    "deliveryGroupsSkippedIneligible": 4,
+    "eventsCreated": 0,
+    "eventsDeduped": 5,
+    "eventsSkipped": 0,
+    "scheduledEvents": 2,
+    "scheduledByChannel": {
+      "SMS": 2,
+      "EMAIL": 0
+    },
+    "skippedReasons": {
+      "already_confirmed_for_delivery_date": 2,
+      "no_automated_channel_available": 1
+    },
+    "confirmationsCreatedOrReused": 2,
+    "confirmationsCreated": 0,
+    "confirmationsReused": 2
+  },
+  "scenarios": {
+    "newTargetNoConfirmation": {
+      "passed": true,
+      "details": {
+        "status": "SCHEDULED",
+        "selectedChannel": "SMS",
+        "reasonSkipped": null,
+        "scheduledAt": "2099-01-01T00:00:00.000Z",
+        "alreadyConfirmedForDeliveryDate": false,
+        "linkTokenPresent": true,
+        "confirmationStatus": "PENDING",
+        "confirmationDeliveryDate": "2099-02-12"
+      }
+    },
+    "sameDateAlreadyConfirmed": {
+      "passed": true,
+      "details": {
+        "status": "SKIPPED",
+        "reasonSkipped": "already_confirmed_for_delivery_date",
+        "selectedChannel": null,
+        "recipientEmail": null,
+        "recipientPhone": null,
+        "scheduledAt": null,
+        "alreadyConfirmedForDeliveryDate": true,
+        "linkTokenPresent": false,
+        "confirmationStatus": "CONFIRMED",
+        "confirmationDeliveryDate": "2099-02-12",
+        "confirmationLinkToken": null
+      }
+    },
+    "oldDateConfirmedNewDate": {
+      "passed": true,
+      "details": {
+        "oldConfirmationStatus": "CONFIRMED",
+        "oldConfirmationDeliveryDate": "2099-01-15",
+        "newEventStatus": "SCHEDULED",
+        "newEventReasonSkipped": null,
+        "newEventSelectedChannel": "SMS",
+        "newReportAlreadyConfirmed": false,
+        "newConfirmationStatus": "PENDING",
+        "newConfirmationDeliveryDate": "2099-02-12"
+      }
+    },
+    "sameDateDisappearsAndReappears": {
+      "passed": true,
+      "details": {
+        "originalDeliveryGroupId": "cmrnu1hnd000etwmbsq25q68j",
+        "reappearedDeliveryGroupId": "cmrnu1hnd000etwmbsq25q68j",
+        "sameDeliveryGroupIdReused": true,
+        "isActiveAfterReappear": true,
+        "confirmationStillApplied": true,
+        "eventStatus": "SKIPPED",
+        "reasonSkipped": "already_confirmed_for_delivery_date",
+        "alreadyConfirmedForDeliveryDate": true,
+        "businessRuleConfirmationPoint": "Current behavior treats same deliveryGroupId + same deliveryDate as the same confirmation scope after reactivation."
+      }
+    },
+    "acumaticaMetadataAloneDoesNotBlock": {
+      "passed": true,
+      "details": {
+        "applicable": false,
+        "reason": "CONFIRMVIA/CONFIRMWTH/CONFIRMWITH are not imported or stored in delivery, and code search found no 42-day skip logic based on those fields."
+      }
+    },
+    "noAutomatedChannel": {
+      "passed": true,
+      "details": {
+        "status": "SKIPPED",
+        "reasonSkipped": "no_automated_channel_available",
+        "selectedChannel": null,
+        "recipientEmail": null,
+        "recipientPhone": null,
+        "scheduledAt": null,
+        "alreadyConfirmedForDeliveryDate": false,
+        "deliveryConfirmationCreated": false
+      }
+    },
+    "ineligibleOrders": {
+      "passed": true,
+      "details": {
+        "ineligibleFixtureCount": 4,
+        "ineligibleSkippedCount": 4,
+        "notificationEventsCreatedForIneligibleOrders": 0,
+        "orderNumbers": [
+          "D42RW1784225912644-G-COMPLETED",
+          "D42RW1784225912644-G-CANCELLED",
+          "D42RW1784225912644-G-BLOCKED",
+          "D42RW1784225912644-G-MANUAL"
+        ],
+        "behavior": "Ineligible delivery groups are excluded before notification_event creation."
+      }
+    },
+    "dedupeAndOutput": {
+      "passed": true,
+      "details": {
+        "firstRunEventsCreated": 5,
+        "secondRunEventsCreated": 0,
+        "secondRunEventsDeduped": 5,
+        "notificationEventsForEligibleFixtures": 5,
+        "dedupeKeys": [
+          "delivery_notification:TS:D42RW1784225912644-A-NEW:2099-02-12:DAY_42:DELIVERY_CONFIRMATION_REQUEST",
+          "delivery_notification:TS:D42RW1784225912644-B-CONFIRMED:2099-02-12:DAY_42:DELIVERY_CONFIRMATION_REQUEST",
+          "delivery_notification:TS:D42RW1784225912644-C-MOVED:2099-02-12:DAY_42:DELIVERY_CONFIRMATION_REQUEST",
+          "delivery_notification:TS:D42RW1784225912644-D-REAPPEAR:2099-02-12:DAY_42:DELIVERY_CONFIRMATION_REQUEST",
+          "delivery_notification:TS:D42RW1784225912644-F-NOCHANNEL:2099-02-12:DAY_42:DELIVERY_CONFIRMATION_REQUEST"
+        ],
+        "deliveryDateInDedupeKey": true,
+        "channelInDedupeKey": false,
+        "reportsIncludeAlreadyConfirmedForDeliveryDate": true
+      }
+    },
+    "notificationAttemptsUntouched": {
+      "passed": true,
+      "details": {
+        "notificationAttemptsForFixtureEvents": 0
+      }
+    }
+  },
+  "dedupe": {
+    "includesDeliveryDate": true,
+    "channelIncluded": false,
+    "rerunCreatedDuplicates": false
+  },
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 46,
+      "deliveryConfirmations": 39,
+      "notificationAttempts": 0
+    },
+    "after": {
+      "notificationEvents": 46,
+      "deliveryConfirmations": 39,
+      "notificationAttempts": 0
+    },
+    "unchanged": true
+  },
+  "reportPaths": {
+    "json": "reports\\42-day-date-specific-real-world-validation-2026-07-16T18-18-36-412Z.json",
+    "markdown": "reports\\42-day-date-specific-real-world-validation-2026-07-16T18-18-36-412Z.md"
+  }
+}

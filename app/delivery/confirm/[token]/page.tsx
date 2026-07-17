@@ -6,6 +6,7 @@ import {
 } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
+import { confirmDeliveryFromWebpage } from "@/lib/notifications/confirmDeliveryFromWebpage";
 import {
   dateFromKey,
   dateKey,
@@ -158,22 +159,27 @@ async function confirmDelivery(formData: FormData) {
   const token = String(formData.get("token") ?? "");
   if (!token) redirect("/delivery/confirm/invalid");
 
-  const confirmation = await prisma.deliveryConfirmation.findUnique({
-    where: { linkToken: token },
-    select: { id: true, status: true },
-  });
-  if (confirmation) {
-    if (isFinalConfirmationStatus(confirmation.status)) {
-      redirectToConfirmation(token, { updated: "already_final" });
-    }
+  const result = await confirmDeliveryFromWebpage({ linkToken: token });
+  if (result.outcome === "already_final") {
+    redirectToConfirmation(token, { updated: "already_final" });
+  }
 
-    await prisma.deliveryConfirmation.update({
-      where: { id: confirmation.id },
-      data: {
-        status: DeliveryConfirmationStatus.CONFIRMED,
-        confirmedAt: new Date(),
-      },
-    });
+  if (result.outcome === "confirmed") {
+    if (result.writeback.error) {
+      console.error("[delivery-confirmation-writeback] enqueue failed after confirmation saved", {
+        deliveryConfirmationId: result.confirmation.id,
+        orderType: result.confirmation.orderType,
+        orderNumber: result.confirmation.orderNumber,
+        error: result.writeback.error,
+      });
+    } else {
+      console.info("[delivery-confirmation-writeback] queued dry-run job", {
+        jobId: result.writeback.jobId,
+        deliveryConfirmationId: result.confirmation.id,
+        orderType: result.confirmation.orderType,
+        orderNumber: result.confirmation.orderNumber,
+      });
+    }
   }
 
   redirect(`/delivery/confirm/${encodeURIComponent(token)}?updated=confirmed`);

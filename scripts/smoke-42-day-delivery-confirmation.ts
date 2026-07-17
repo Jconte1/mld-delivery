@@ -205,6 +205,7 @@ async function writeReports(params: {
     "recipientEmail",
     "recipientPhone",
     "reasonSkipped",
+    "alreadyConfirmedForDeliveryDate",
     "subject",
     "renderedMessagePreview",
     "linkTokenPresent",

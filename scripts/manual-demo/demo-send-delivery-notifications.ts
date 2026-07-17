@@ -1,16 +1,16 @@
-import { NotificationIntervalType } from "../lib/generated/prisma/client";
-import { getDeliveryGroupPaymentEvaluation } from "../lib/delivery-payment/deliveryGroupPayment";
+import { NotificationIntervalType } from "../../lib/generated/prisma/client";
+import { getDeliveryGroupPaymentEvaluation } from "../../lib/delivery-payment/deliveryGroupPayment";
 import {
   buildDeliveryConfirmationLink,
   getDeliveryAppBaseUrlConfig,
   newDeliveryConfirmationLinkToken,
-} from "../lib/notifications/deliveryConfirmationLinks";
-import { ensurePendingDeliveryConfirmation } from "../lib/notifications/deliveryConfirmationState";
-import { render42DayEmailConfirmationMessage } from "../lib/notifications/deliveryConfirmationEmail";
+} from "../../lib/notifications/deliveryConfirmationLinks";
+import { ensurePendingDeliveryConfirmation } from "../../lib/notifications/deliveryConfirmationState";
+import { render42DayEmailConfirmationMessage } from "../../lib/notifications/deliveryConfirmationEmail";
 import {
   buildDeliveryConfirmationScopeKey,
   render42DaySmsConfirmationMessage,
-} from "../lib/notifications/deliveryConfirmationSms";
+} from "../../lib/notifications/deliveryConfirmationSms";
 import {
   dateFromKey,
   dateKey,
@@ -19,13 +19,13 @@ import {
   formatJobName,
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
-} from "../lib/notifications/helpers";
+} from "../../lib/notifications/helpers";
 import {
   sendDemoEmail,
   sendDemoSms,
   type DemoSendResult,
-} from "../lib/demo/demoNotificationDispatch";
-import { prisma } from "../lib/prisma";
+} from "./demoNotificationDispatch";
+import { prisma } from "../../lib/prisma";
 
 type DemoMode = "preview" | "send";
 type DemoInterval = "180" | "90" | "60" | "42" | "all";
@@ -94,9 +94,9 @@ const REMINDER_INTERVALS = [
 function usage() {
   return [
     "Usage:",
-    "  npx.cmd --no-install tsx --env-file=.env scripts\\demo-send-delivery-notifications.ts --preview-only --delivery-group-id=<id> --interval=all",
-    "  npx.cmd --no-install tsx --env-file=.env scripts\\demo-send-delivery-notifications.ts --preview-only --order-type=SO --order-number=SO40466 --delivery-date=2026-07-22 --interval=42",
-    "  npx.cmd --no-install tsx --env-file=.env scripts\\demo-send-delivery-notifications.ts --send --delivery-group-id=<id> --interval=180",
+    "  npx.cmd --no-install tsx --env-file=.env scripts\\manual-demo\\demo-send-delivery-notifications.ts --preview-only --delivery-group-id=<id> --interval=all",
+    "  npx.cmd --no-install tsx --env-file=.env scripts\\manual-demo\\demo-send-delivery-notifications.ts --preview-only --order-type=<type> --order-number=<number> --delivery-date=<YYYY-MM-DD> --interval=42",
+    "  npx.cmd --no-install tsx --env-file=.env scripts\\manual-demo\\demo-send-delivery-notifications.ts --send --delivery-group-id=<id> --interval=180",
     "",
     "Intervals: --interval=180, --interval=90, --interval=60, --interval=42, --interval=all",
     "Default interval: all",

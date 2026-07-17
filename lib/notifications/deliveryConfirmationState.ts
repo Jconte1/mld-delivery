@@ -13,6 +13,8 @@ import {
 import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
 import { prisma } from "@/lib/prisma";
 
+export type DeliveryConfirmationStateClient = Pick<typeof prisma, "deliveryConfirmation">;
+
 export type DeliveryConfirmationScope = {
   orderId: string;
   deliveryGroupId: string;
@@ -59,10 +61,32 @@ function isAwaitingNewDate(status: DeliveryConfirmationStatus) {
   );
 }
 
-export async function ensurePendingDeliveryConfirmation(scope: DeliveryConfirmationScope) {
+export async function isDeliveryGroupDateConfirmed(params: {
+  deliveryGroupId: string;
+  deliveryDate: Date | string;
+  client?: DeliveryConfirmationStateClient;
+}) {
+  const client = params.client ?? prisma;
+  const confirmation = await client.deliveryConfirmation.findUnique({
+    where: {
+      deliveryGroupId_deliveryDate: {
+        deliveryGroupId: params.deliveryGroupId,
+        deliveryDate: dateFromKey(params.deliveryDate),
+      },
+    },
+    select: { status: true },
+  });
+
+  return confirmation?.status === DeliveryConfirmationStatus.CONFIRMED;
+}
+
+export async function ensurePendingDeliveryConfirmation(
+  scope: DeliveryConfirmationScope,
+  client: DeliveryConfirmationStateClient = prisma
+) {
   const scopeData = baseScopeData(scope);
 
-  return prisma.deliveryConfirmation.upsert({
+  return client.deliveryConfirmation.upsert({
     where: {
       deliveryGroupId_deliveryDate: {
         deliveryGroupId: scope.deliveryGroupId,

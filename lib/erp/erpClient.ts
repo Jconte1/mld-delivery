@@ -12,7 +12,11 @@ export type DeliveryErpClient = {
 
 function shouldUseQueueErp() {
   const raw = process.env.USE_QUEUE_ERP?.trim().toLowerCase();
-  return raw === "true";
+  if (!raw) {
+    return Boolean(process.env.MLD_QUEUE_BASE_URL?.trim() && process.env.MLD_QUEUE_TOKEN?.trim());
+  }
+
+  return ["1", "true", "yes", "y", "on"].includes(raw);
 }
 
 export function createErpClientFromEnv(): DeliveryErpClient {

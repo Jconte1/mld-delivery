@@ -1,0 +1,56 @@
+{
+  "testMarker": "controlled-production-style-delivery-notification-smoke",
+  "runDate": "2026-07-17",
+  "targetDeliveryDate": "2027-01-13",
+  "requestedOn": "2027-01-13T09:19:00.000Z",
+  "interval": "180-day reminder",
+  "importSummary": {
+    "requestedOn": "2027-01-13",
+    "qualifyingOrdersFetched": 0,
+    "fullOrdersFetched": 0,
+    "contactsUpserted": 0,
+    "ordersCreated": 0,
+    "ordersUpdated": 0,
+    "totalsUpserted": 0,
+    "taxDetailsUpserted": 0,
+    "linesUpserted": 0,
+    "allocationsUpserted": 0,
+    "addressesUpserted": 0,
+    "deliveryGroupsUpserted": 0,
+    "changeEventsDetected": 0,
+    "changeEventsCreated": 0,
+    "changeEventsDeduped": 0,
+    "skippedOrders": 0,
+    "failedOrders": 0,
+    "errors": []
+  },
+  "eventSummary": {
+    "runDate": "2026-07-17",
+    "targetDeliveryDate": "2027-01-13",
+    "eligibleDeliveryGroups": 0,
+    "eventsCreated": 0,
+    "eventsSkipped": 0,
+    "eventsDeduped": 0,
+    "weekendSkipped": false,
+    "targetDeliveryGroups": 0,
+    "deliveryGroupsSkippedIneligible": 0,
+    "deliveryGroupsSkippedNoChannel": 0,
+    "dryRun": false,
+    "eventsWouldCreate": 0,
+    "messagePreviews": []
+  },
+  "activeDeliveryGroups": 0,
+  "notificationEventCounts": {
+    "scheduled": 0,
+    "skipped": 0,
+    "skippedByReason": {},
+    "groupedRows": []
+  },
+  "selected": null,
+  "sendResults": null,
+  "safety": {
+    "providerRecipientsOverriddenToTestOnly": true,
+    "noRealCustomerRecipientsUsed": true,
+    "bothEmailAndSmsSentOnlyForControlledTestRecipientOverride": false
+  }
+}

@@ -1,0 +1,126 @@
+{
+  "testMarker": "controlled-production-style-delivery-notification-smoke",
+  "runDate": "2026-07-17",
+  "targetDeliveryDate": "2026-09-15",
+  "requestedOn": "2026-09-15T09:19:00.000Z",
+  "interval": "60-day reminder",
+  "importSummary": {
+    "requestedOn": "2026-09-15",
+    "qualifyingOrdersFetched": 334,
+    "fullOrdersFetched": 20,
+    "contactsUpserted": 17,
+    "ordersCreated": 17,
+    "ordersUpdated": 0,
+    "totalsUpserted": 17,
+    "taxDetailsUpserted": 31,
+    "linesUpserted": 235,
+    "allocationsUpserted": 199,
+    "addressesUpserted": 17,
+    "deliveryGroupsUpserted": 31,
+    "changeEventsDetected": 0,
+    "changeEventsCreated": 0,
+    "changeEventsDeduped": 0,
+    "skippedOrders": 3,
+    "failedOrders": 0,
+    "errors": [
+      {
+        "orderNumber": "PG04651",
+        "orderType": "PG",
+        "reason": "Full SalesOrder payload is missing required ContactID"
+      },
+      {
+        "orderNumber": "SO37842",
+        "orderType": "SO",
+        "reason": "Full SalesOrder payload is missing required ContactID"
+      },
+      {
+        "orderNumber": "SO40311",
+        "orderType": "SO",
+        "reason": "Full SalesOrder payload is missing required ContactID"
+      }
+    ]
+  },
+  "eventSummary": {
+    "runDate": "2026-07-17",
+    "targetDeliveryDate": "2026-09-15",
+    "eligibleDeliveryGroups": 17,
+    "eventsCreated": 17,
+    "eventsSkipped": 0,
+    "eventsDeduped": 0,
+    "weekendSkipped": false,
+    "targetDeliveryGroups": 17,
+    "deliveryGroupsSkippedIneligible": 0,
+    "deliveryGroupsSkippedNoChannel": 0,
+    "dryRun": false,
+    "eventsWouldCreate": 0,
+    "messagePreviews": [
+      {
+        "orderNumber": "BQ00937",
+        "deliveryDate": "2026-09-15",
+        "subject": "Appliance delivery reminder: Tresidio Homes / Lugarno Terra North Block 19, Lot 5 - Tuesday, September 15, 2026",
+        "body": "Hello Caleb, we are 2 months out! This is a reminder that your Appliance delivery for Tresidio Homes / Lugarno Terra North Block 19, Lot 5 at 2104 N. Ryde Ave, Kuna ID 83634 is scheduled for Tuesday, September 15, 2026."
+      },
+      {
+        "orderNumber": "C105954",
+        "deliveryDate": "2026-09-15",
+        "subject": "Appliance delivery reminder: Northern Construction / DARREL & LORI ANDERSON-9210 - Tuesday, September 15, 2026",
+        "body": "Hello Tammy, we are 2 months out! This is a reminder that your Appliance delivery for Northern Construction / DARREL & LORI ANDERSON-9210 at 2550 N Pescara Ln, Eagle ID 83616 is scheduled for Tuesday, September 15, 2026."
+      },
+      {
+        "orderNumber": "C106046",
+        "deliveryDate": "2026-09-15",
+        "subject": "Appliance delivery reminder: Northern Construction / DARREL & LORI ANDERSON-9210 - Tuesday, September 15, 2026",
+        "body": "Hello Tammy, we are 2 months out! This is a reminder that your Appliance delivery for Northern Construction / DARREL & LORI ANDERSON-9210 at 2550 N Pescara Ln, Eagle ID 83616 is scheduled for Tuesday, September 15, 2026."
+      }
+    ]
+  },
+  "activeDeliveryGroups": 17,
+  "notificationEventCounts": {
+    "scheduled": 17,
+    "skipped": 0,
+    "skippedByReason": {},
+    "groupedRows": [
+      {
+        "_count": {
+          "_all": 17
+        },
+        "status": "SCHEDULED",
+        "reasonSkipped": null
+      }
+    ]
+  },
+  "selected": {
+    "eventId": "cmrp9z9s400g318mbfgcfuwn2",
+    "orderType": "BQ",
+    "orderNumber": "BQ00937",
+    "deliveryGroupId": "cmrp9x7za000u18mbx1vgsk4k",
+    "deliveryDate": "2026-09-15",
+    "productionSelectedChannel": "EMAIL",
+    "productionChannelReason": "email_available_sms_unavailable",
+    "providerRecipientsOverriddenToTestOnly": true,
+    "testEmailRecipient": "j***@mld.com",
+    "testPhoneRecipient": "***-***-5923",
+    "confirmationLink": null,
+    "confirmationId": null
+  },
+  "sendResults": {
+    "email": {
+      "recipientEnvVar": "NOTIFICATIONS_TEST_EMAIL",
+      "ok": true,
+      "provider": "ms_graph",
+      "error": null
+    },
+    "sms": {
+      "recipientEnvVar": "NOTIFICATIONS_TEST_PHONE",
+      "ok": true,
+      "provider": "twilio",
+      "idPresent": true,
+      "error": null
+    }
+  },
+  "safety": {
+    "providerRecipientsOverriddenToTestOnly": true,
+    "noRealCustomerRecipientsUsed": true,
+    "bothEmailAndSmsSentOnlyForControlledTestRecipientOverride": true
+  }
+}

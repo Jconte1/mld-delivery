@@ -2,7 +2,6 @@ import {
   buildDeliveryConfirmationAttributeWritebackPayload,
   DELIVERY_CONFIRMATION_ATTRIBUTE_WRITEBACK_ROUTE,
   DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV,
-  DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV,
   enqueueDeliveryConfirmationAttributeWriteback,
   resolveConfirmedWith,
 } from "../lib/notifications/deliveryConfirmationAttributeWritebackQueue";
@@ -53,18 +52,8 @@ assertEqual(payload.source, "WEBPAGE", "source");
 assertEqual(payload.dryRun, true, "dryRun");
 
 const originalDryRunEnv = process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV];
-const originalLiveOrderEnv = process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV];
 process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV] = "false";
-process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV] = "SO37860";
-const liveTestPayload = buildDeliveryConfirmationAttributeWritebackPayload({
-  orderType: "SO",
-  orderNumber: "SO37860",
-  deliveryConfirmationId: "dc_37860",
-  deliveryGroupId: "dg_37860",
-  deliveryDate: "2026-07-22",
-  contact: { displayName: "Trae Customer" },
-});
-const nonMatchingLiveTestPayload = buildDeliveryConfirmationAttributeWritebackPayload({
+const livePayload = buildDeliveryConfirmationAttributeWritebackPayload({
   orderType: "SO",
   orderNumber: "SO40466",
   deliveryConfirmationId: "dc_40466",
@@ -72,12 +61,18 @@ const nonMatchingLiveTestPayload = buildDeliveryConfirmationAttributeWritebackPa
   deliveryDate: "2026-07-22",
   contact: { displayName: "Trae Customer" },
 });
-assertEqual(liveTestPayload.dryRun, false, "SO37860 live-test dryRun override");
-assertEqual(nonMatchingLiveTestPayload.dryRun, true, "non-matching live-test order stays dryRun");
+const otherLivePayload = buildDeliveryConfirmationAttributeWritebackPayload({
+  orderType: "SO",
+  orderNumber: "SO40466",
+  deliveryConfirmationId: "dc_40466",
+  deliveryGroupId: "dg_40466",
+  deliveryDate: "2026-07-22",
+  contact: { displayName: "Trae Customer" },
+});
+assertEqual(livePayload.dryRun, false, "dryRun false allows live payload");
+assertEqual(otherLivePayload.dryRun, false, "dryRun false allows any order live payload");
 if (originalDryRunEnv === undefined) delete process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV];
 else process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV] = originalDryRunEnv;
-if (originalLiveOrderEnv === undefined) delete process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV];
-else process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV] = originalLiveOrderEnv;
 
 async function main() {
   const requests: Array<{ url: string; init?: RequestInit }> = [];
@@ -145,8 +140,8 @@ async function main() {
       {
         fallbackCases: 5,
         payload,
-        liveTestPayloadDryRun: liveTestPayload.dryRun,
-        nonMatchingLiveTestPayloadDryRun: nonMatchingLiveTestPayload.dryRun,
+        livePayloadDryRun: livePayload.dryRun,
+        otherLivePayloadDryRun: otherLivePayload.dryRun,
         enqueueRequestValidated: true,
         enqueueFailureThrows: true,
       },

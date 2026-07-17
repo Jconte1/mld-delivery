@@ -1,0 +1,98 @@
+{
+  "testMarker": "controlled-production-style-delivery-notification-smoke",
+  "runDate": "2026-07-17",
+  "targetDeliveryDate": "2026-10-15",
+  "requestedOn": "2026-10-15T09:19:00.000Z",
+  "interval": "90-day reminder",
+  "importSummary": {
+    "requestedOn": "2026-10-15",
+    "qualifyingOrdersFetched": 4,
+    "fullOrdersFetched": 1,
+    "contactsUpserted": 1,
+    "ordersCreated": 1,
+    "ordersUpdated": 0,
+    "totalsUpserted": 1,
+    "taxDetailsUpserted": 2,
+    "linesUpserted": 4,
+    "allocationsUpserted": 3,
+    "addressesUpserted": 1,
+    "deliveryGroupsUpserted": 1,
+    "changeEventsDetected": 0,
+    "changeEventsCreated": 0,
+    "changeEventsDeduped": 0,
+    "skippedOrders": 0,
+    "failedOrders": 0,
+    "errors": []
+  },
+  "eventSummary": {
+    "runDate": "2026-07-17",
+    "targetDeliveryDate": "2026-10-15",
+    "eligibleDeliveryGroups": 1,
+    "eventsCreated": 1,
+    "eventsSkipped": 0,
+    "eventsDeduped": 0,
+    "weekendSkipped": false,
+    "targetDeliveryGroups": 1,
+    "deliveryGroupsSkippedIneligible": 0,
+    "deliveryGroupsSkippedNoChannel": 0,
+    "dryRun": false,
+    "eventsWouldCreate": 0,
+    "messagePreviews": [
+      {
+        "orderNumber": "BQ00957",
+        "deliveryDate": "2026-10-15",
+        "subject": "Appliance delivery reminder: Tresidio Homes / Avimor Town Center Block 9, Lot 1 - Thursday, October 15, 2026",
+        "body": "Hello Caleb, we are 3 months out! This is a reminder that your Appliance delivery for Tresidio Homes / Avimor Town Center Block 9, Lot 1 at 18610 N. McLeod Way, Eagle ID 83629 is scheduled for Thursday, October 15, 2026."
+      }
+    ]
+  },
+  "activeDeliveryGroups": 1,
+  "notificationEventCounts": {
+    "scheduled": 1,
+    "skipped": 0,
+    "skippedByReason": {},
+    "groupedRows": [
+      {
+        "_count": {
+          "_all": 1
+        },
+        "status": "SCHEDULED",
+        "reasonSkipped": null
+      }
+    ]
+  },
+  "selected": {
+    "eventId": "cmrp9x0de000e18mbe8psqnmb",
+    "orderType": "BQ",
+    "orderNumber": "BQ00957",
+    "deliveryGroupId": "cmrp9wzhh000d18mbu084txfc",
+    "deliveryDate": "2026-10-15",
+    "productionSelectedChannel": "EMAIL",
+    "productionChannelReason": "email_available_sms_unavailable",
+    "providerRecipientsOverriddenToTestOnly": true,
+    "testEmailRecipient": "j***@mld.com",
+    "testPhoneRecipient": "***-***-5923",
+    "confirmationLink": null,
+    "confirmationId": null
+  },
+  "sendResults": {
+    "email": {
+      "recipientEnvVar": "NOTIFICATIONS_TEST_EMAIL",
+      "ok": true,
+      "provider": "ms_graph",
+      "error": null
+    },
+    "sms": {
+      "recipientEnvVar": "NOTIFICATIONS_TEST_PHONE",
+      "ok": true,
+      "provider": "twilio",
+      "idPresent": true,
+      "error": null
+    }
+  },
+  "safety": {
+    "providerRecipientsOverriddenToTestOnly": true,
+    "noRealCustomerRecipientsUsed": true,
+    "bothEmailAndSmsSentOnlyForControlledTestRecipientOverride": true
+  }
+}

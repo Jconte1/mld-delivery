@@ -5,8 +5,6 @@ export const DELIVERY_CONFIRMATION_ATTRIBUTE_WRITEBACK_ROUTE =
 export const WEBPAGE_CONFIRMED_VIA_VALUE = "WEBPAGE";
 export const DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV =
   "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN";
-export const DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV =
-  "DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER";
 const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000;
 
 type QueueFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -85,16 +83,12 @@ export function resolveConfirmedWith(contact: ConfirmationWritebackContactInput)
   );
 }
 
-export function shouldDryRunDeliveryConfirmationAttributeWriteback(orderNumber: string) {
-  const normalizedOrderNumber = orderNumber.trim().toUpperCase();
+export function shouldDryRunDeliveryConfirmationAttributeWriteback() {
   const dryRunOverride = process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV]
     ?.trim()
     .toLowerCase();
-  const liveTestOrder = process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV]
-    ?.trim()
-    .toUpperCase();
 
-  return !(dryRunOverride === "false" && liveTestOrder === normalizedOrderNumber);
+  return dryRunOverride !== "false";
 }
 
 export function buildDeliveryConfirmationAttributeWritebackPayload(
@@ -111,7 +105,7 @@ export function buildDeliveryConfirmationAttributeWritebackPayload(
     deliveryGroupId: params.deliveryGroupId,
     deliveryDate: dateKey(params.deliveryDate),
     source: "WEBPAGE",
-    dryRun: shouldDryRunDeliveryConfirmationAttributeWriteback(orderNumber),
+    dryRun: shouldDryRunDeliveryConfirmationAttributeWriteback(),
   };
 }
 

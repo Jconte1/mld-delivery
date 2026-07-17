@@ -173,11 +173,12 @@ async function confirmDelivery(formData: FormData) {
         error: result.writeback.error,
       });
     } else {
-      console.info("[delivery-confirmation-writeback] queued dry-run job", {
+      console.info("[delivery-confirmation-writeback] queued confirmation attribute job", {
         jobId: result.writeback.jobId,
         deliveryConfirmationId: result.confirmation.id,
         orderType: result.confirmation.orderType,
         orderNumber: result.confirmation.orderNumber,
+        dryRun: result.writeback.payload.dryRun,
       });
     }
   }

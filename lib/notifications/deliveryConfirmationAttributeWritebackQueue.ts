@@ -3,6 +3,10 @@ import { dateKey } from "@/lib/notifications/helpers";
 export const DELIVERY_CONFIRMATION_ATTRIBUTE_WRITEBACK_ROUTE =
   "/api/erp/jobs/delivery/confirmation-attributes";
 export const WEBPAGE_CONFIRMED_VIA_VALUE = "WEBPAGE";
+export const DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV =
+  "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN";
+export const DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV =
+  "DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER";
 const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000;
 
 type QueueFetch = (input: string | URL, init?: RequestInit) => Promise<Response>;
@@ -24,7 +28,7 @@ export type DeliveryConfirmationAttributeWritebackPayload = {
   deliveryGroupId: string;
   deliveryDate: string;
   source: "WEBPAGE";
-  dryRun: true;
+  dryRun: boolean;
 };
 
 export type EnqueueDeliveryConfirmationAttributeWritebackParams = {
@@ -81,19 +85,33 @@ export function resolveConfirmedWith(contact: ConfirmationWritebackContactInput)
   );
 }
 
+export function shouldDryRunDeliveryConfirmationAttributeWriteback(orderNumber: string) {
+  const normalizedOrderNumber = orderNumber.trim().toUpperCase();
+  const dryRunOverride = process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV]
+    ?.trim()
+    .toLowerCase();
+  const liveTestOrder = process.env[DELIVERY_CONFIRMATION_WRITEBACK_LIVE_TEST_ORDER_ENV]
+    ?.trim()
+    .toUpperCase();
+
+  return !(dryRunOverride === "false" && liveTestOrder === normalizedOrderNumber);
+}
+
 export function buildDeliveryConfirmationAttributeWritebackPayload(
   params: EnqueueDeliveryConfirmationAttributeWritebackParams
 ): DeliveryConfirmationAttributeWritebackPayload {
+  const orderNumber = params.orderNumber.trim().toUpperCase();
+
   return {
     orderType: params.orderType.trim().toUpperCase(),
-    orderNumber: params.orderNumber.trim().toUpperCase(),
+    orderNumber,
     confirmedVia: WEBPAGE_CONFIRMED_VIA_VALUE,
     confirmedWith: resolveConfirmedWith(params.contact),
     deliveryConfirmationId: params.deliveryConfirmationId,
     deliveryGroupId: params.deliveryGroupId,
     deliveryDate: dateKey(params.deliveryDate),
     source: "WEBPAGE",
-    dryRun: true,
+    dryRun: shouldDryRunDeliveryConfirmationAttributeWriteback(orderNumber),
   };
 }
 

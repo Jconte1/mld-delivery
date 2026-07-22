@@ -18,6 +18,7 @@ import { create90DayDeliveryReminderEvents } from "../lib/notifications/create90
 import { render42DayEmailConfirmationMessage } from "../lib/notifications/deliveryConfirmationEmail";
 import { buildDeliveryConfirmationLink } from "../lib/notifications/deliveryConfirmationLinks";
 import { render42DaySmsConfirmationMessage } from "../lib/notifications/deliveryConfirmationSms";
+import { renderDeliveryReminderEmailBody } from "../lib/notifications/deliveryReminderEmail";
 import {
   dateFromKey,
   dateKey,
@@ -28,6 +29,7 @@ import {
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
 } from "../lib/notifications/helpers";
+import { getActiveSalespersonContact } from "../lib/notifications/salespersonContactCache";
 import { prisma } from "../lib/prisma";
 import { sendDemoEmail, sendDemoSms } from "./manual-demo/demoNotificationDispatch";
 
@@ -257,6 +259,7 @@ async function renderSelectedMessages(
   const group = event.orderDeliveryGroup;
   const order = group.order;
   const contactName = formatContactName(order.contact);
+  const salespersonContact = await getActiveSalespersonContact(order.salespersonNumber);
   const jobName = formatJobName({
     customerDescription: order.customerDescription,
     locationDescription: order.locationDescription,
@@ -269,7 +272,7 @@ async function renderSelectedMessages(
       jobName,
       deliveryDate: group.deliveryDate,
     });
-    const body = renderDeliveryReminderMessage({
+    const smsBody = renderDeliveryReminderMessage({
       intervalType: config.intervalType,
       contactName,
       buyerGroup: order.buyerGroup,
@@ -277,7 +280,16 @@ async function renderSelectedMessages(
       jobAddress,
       deliveryDate: group.deliveryDate,
     });
-    return { subject, emailBody: body, smsBody: body, confirmationLink: null, confirmationId: null };
+    const emailBody = renderDeliveryReminderEmailBody({
+      intervalType: config.intervalType,
+      contactName,
+      buyerGroup: order.buyerGroup,
+      jobName,
+      jobAddress,
+      deliveryDate: group.deliveryDate,
+      salespersonContact,
+    });
+    return { subject, emailBody, smsBody, confirmationLink: null, confirmationId: null };
   }
 
   const confirmation = await prisma.deliveryConfirmation.findUnique({
@@ -310,6 +322,7 @@ async function renderSelectedMessages(
     link,
     paymentReminderApplies,
     amountDueNowRounded: payment.amountDueNowRounded,
+    salespersonContact,
   });
   const smsBody = render42DaySmsConfirmationMessage({
     contactName,
@@ -317,6 +330,7 @@ async function renderSelectedMessages(
     jobName,
     deliveryDate: group.deliveryDate,
     link,
+    deliveryAddress: order.address,
   });
 
   return {

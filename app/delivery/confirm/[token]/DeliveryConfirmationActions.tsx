@@ -2,12 +2,21 @@
 
 import { useState, type FormEvent } from "react";
 
+import {
+  parseDateInputValue,
+  validateRequestedDeliveryDateEligibility,
+} from "@/lib/notifications/deliveryDateEligibility";
+
 type DeliveryConfirmationActionsProps = {
   token: string;
   status: string;
   scheduledDateLabel: string;
   requestedNewDateLabel: string | null;
   minimumRequestedDate: string;
+  currentDeliveryDate: string;
+  deliveryAddressState: string | null;
+  deliveryAddressPostalCode: string | null;
+  requestedDateInstruction: string;
   isLocked: boolean;
   errorMessage: string | null;
   confirmDeliveryAction: (formData: FormData) => void | Promise<void>;
@@ -22,11 +31,6 @@ function dateLabel(value: string) {
     day: "numeric",
     year: "numeric",
   }).format(new Date(`${value}T00:00:00.000Z`));
-}
-
-function isWeekend(value: string) {
-  const day = new Date(`${value}T00:00:00.000Z`).getUTCDay();
-  return day === 0 || day === 6;
 }
 
 function lockedMessage(props: DeliveryConfirmationActionsProps) {
@@ -68,13 +72,23 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
 
     if (selectedDate < props.minimumRequestedDate) {
       event.preventDefault();
-      setClientError("Please choose a date later than your current scheduled delivery date.");
+      setClientError("That date has already passed. Please choose a future delivery date.");
       return;
     }
 
-    if (isWeekend(selectedDate)) {
+    const parsed = parseDateInputValue(selectedDate);
+    const validation = validateRequestedDeliveryDateEligibility({
+      requestedDate: parsed.valid ? parsed.date : null,
+      currentDeliveryDate: props.currentDeliveryDate,
+      address: {
+        state: props.deliveryAddressState,
+        postalCode: props.deliveryAddressPostalCode,
+      },
+    });
+
+    if (!validation.allowed) {
       event.preventDefault();
-      setClientError("Please choose a weekday delivery date.");
+      setClientError(validation.webMessage);
       return;
     }
 
@@ -142,7 +156,7 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
               }}
               className="w-full rounded-md border border-zinc-300 px-3 py-2 text-sm sm:w-auto"
             />
-            <p className="mt-2 text-xs text-zinc-500">Weekday dates only.</p>
+            <p className="mt-2 text-xs text-zinc-500">{props.requestedDateInstruction}</p>
           </div>
           <button className="rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
             Confirm Requested Date

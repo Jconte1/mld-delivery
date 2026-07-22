@@ -336,6 +336,33 @@ function getBuyerGroup(fullOrder: unknown) {
   );
 }
 
+function getConfirmVia(fullOrder: unknown) {
+  return firstString(
+    getString(getNestedField(fullOrder, ["custom", "Document", "AttributeCONFIRMVIA"])),
+    firstStringField(fullOrder, [
+      "ConfirmVia",
+      "ConfirmedVia",
+      "AttributeCONFIRMVIA",
+      "SOOrder_AttributeCONFIRMVIA",
+      "SOOrder.AttributeCONFIRMVIA",
+    ])
+  );
+}
+
+export function getSalespersonNumber(fullOrder: unknown) {
+  return firstString(
+    getString(getNestedField(fullOrder, ["custom", "Document", "AttributeSALESNEW"])),
+    firstStringField(fullOrder, [
+      "AttributeSALESNEW",
+      "SOOrder_AttributeSALESNEW",
+      "SOOrder.AttributeSALESNEW",
+    ]),
+    getString(getField(fullOrder, "DefaultSalesperson")),
+    getString(getField(fullOrder, "DefaultSalesPerson")),
+    firstStringField(fullOrder, ["SalespersonID", "SalesPersonID", "salespersonId"])
+  );
+}
+
 function activeStatusFromContact(contact: unknown) {
   const status = getString(getField(contact, "Status"));
   if (status) return status;
@@ -677,6 +704,8 @@ export async function importSalesOrdersForLineRequestedOn(
                 locationId: true,
                 locationDescription: true,
                 buyerGroup: true,
+                confirmVia: true,
+                salespersonNumber: true,
                 shipVia: true,
               },
             });
@@ -691,6 +720,8 @@ export async function importSalesOrdersForLineRequestedOn(
               locationId: getString(getField(fullOrder, "LocationID")),
               locationDescription,
               buyerGroup: getBuyerGroup(fullOrder),
+              confirmVia: getConfirmVia(fullOrder),
+              salespersonNumber: getSalespersonNumber(fullOrder),
               turnInDate: getDateValue(getField(fullOrder, "Date")),
               noteId: getString(getField(fullOrder, "NoteID")),
               lastSyncedAt: importAt,

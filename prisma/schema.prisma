@@ -115,6 +115,8 @@ model Order {
   lifecycleReason         String?                      @db.VarChar(1024)
   lifecycleUpdatedAt      DateTime?
   buyerGroup              String?                      @db.VarChar(64)
+  confirmVia              String?                      @db.VarChar(64)
+  salespersonNumber       String?                      @db.VarChar(16)
   createdAt               DateTime                     @default(now())
   updatedAt               DateTime                     @updatedAt
   lastSyncedAt            DateTime?
@@ -136,7 +138,26 @@ model Order {
   @@index([status])
   @@index([internalLifecycleStatus])
   @@index([buyerGroup])
+  @@index([salespersonNumber])
   @@map("orders")
+}
+
+model SalespersonContact {
+  id                String    @id @default(cuid())
+  salespersonNumber String    @unique @db.VarChar(16)
+  salespersonName   String?   @db.VarChar(128)
+  salespersonEmail  String?   @db.VarChar(256)
+  salespersonPhone  String?   @db.VarChar(32)
+  sourceStaffUserId String?   @db.VarChar(128)
+  sourceRole        String?   @db.VarChar(32)
+  isActive          Boolean   @default(true)
+  sourceUpdatedAt   DateTime?
+  lastSyncedAt      DateTime
+  createdAt         DateTime  @default(now())
+  updatedAt         DateTime  @updatedAt
+
+  @@index([isActive])
+  @@map("salesperson_contacts")
 }
 
 model OrderTotal {
@@ -383,11 +404,13 @@ model NotificationEvent {
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 
-  orderDeliveryGroup    OrderDeliveryGroup     @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
-  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  contact               Contact                @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  orderDeliveryGroup    OrderDeliveryGroup            @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  order                 Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  contact               Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
   attempts              NotificationAttempt[]
   deliveryConfirmations DeliveryConfirmation[]
+  twilioInboundMessages TwilioInboundMessage[]
+  twilioStatusCallbacks TwilioMessageStatusCallback[]
 
   @@index([deliveryGroupId])
   @@index([orderId])
@@ -418,7 +441,8 @@ model NotificationAttempt {
   sentAt              DateTime?
   createdAt           DateTime            @default(now())
 
-  notificationEvent NotificationEvent @relation(fields: [notificationEventId], references: [id], onDelete: Cascade)
+  notificationEvent     NotificationEvent             @relation(fields: [notificationEventId], references: [id], onDelete: Cascade)
+  twilioStatusCallbacks TwilioMessageStatusCallback[]
 
   @@unique([notificationEventId, attemptNumber])
   @@index([notificationEventId])
@@ -430,36 +454,46 @@ model NotificationAttempt {
 }
 
 model DeliveryConfirmation {
-  id                  String                     @id @default(cuid())
-  orderId             String
-  deliveryGroupId     String                     @map("orderDeliveryGroupId")
-  notificationEventId String?
-  orderType           String                     @db.VarChar(16)
-  orderNumber         String                     @db.VarChar(64)
-  deliveryDate        DateTime                   @db.Date
-  contactId           String                     @db.VarChar(64)
-  status              DeliveryConfirmationStatus @default(PENDING)
-  responseChannel     NotificationChannel?
-  rawResponse         String?                    @db.VarChar(1024)
-  normalizedResponse  String?                    @db.VarChar(128)
-  confirmedAt         DateTime?
-  changeRequestedAt   DateTime?
-  requestedNewDate    DateTime?                  @db.Date
-  requestedNewDateRaw String?                    @db.VarChar(64)
-  requestedNewDateAt  DateTime?
-  reminderSentAt      DateTime?
-  noResponseAt        DateTime?
-  linkToken           String?                    @unique @db.VarChar(128)
-  linkCreatedAt       DateTime?
-  linkExpiresAt       DateTime?
-  linkExpiredAt       DateTime?
-  createdAt           DateTime                   @default(now())
-  updatedAt           DateTime                   @updatedAt
+  id                        String                     @id @default(cuid())
+  orderId                   String
+  deliveryGroupId           String                     @map("orderDeliveryGroupId")
+  notificationEventId       String?
+  orderType                 String                     @db.VarChar(16)
+  orderNumber               String                     @db.VarChar(64)
+  deliveryDate              DateTime                   @db.Date
+  contactId                 String                     @db.VarChar(64)
+  status                    DeliveryConfirmationStatus @default(PENDING)
+  responseChannel           NotificationChannel?
+  rawResponse               String?                    @db.VarChar(1024)
+  normalizedResponse        String?                    @db.VarChar(128)
+  confirmedAt               DateTime?
+  changeRequestedAt         DateTime?
+  requestedNewDate          DateTime?                  @db.Date
+  requestedNewDateRaw       String?                    @db.VarChar(64)
+  requestedNewDateAt        DateTime?
+  reminderSentAt            DateTime?
+  noResponseAt              DateTime?
+  manualReviewRequired      Boolean                    @default(false)
+  manualReviewReason        String?                    @db.VarChar(64)
+  manualReviewMarkedAt      DateTime?
+  manualReviewNotes         String?                    @db.VarChar(1024)
+  unrecognizedResponseCount Int                        @default(0)
+  confirmationFollowUpCount Int                        @default(0)
+  lastSmsResponseAt         DateTime?
+  lastSmsResponseBody       String?                    @db.VarChar(1024)
+  linkToken                 String?                    @unique @db.VarChar(128)
+  linkCreatedAt             DateTime?
+  linkExpiresAt             DateTime?
+  linkExpiredAt             DateTime?
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
 
-  order              Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderDeliveryGroup OrderDeliveryGroup @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
-  notificationEvent  NotificationEvent? @relation(fields: [notificationEventId], references: [id], onDelete: SetNull)
-  contact            Contact            @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  order                 Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderDeliveryGroup    OrderDeliveryGroup            @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  notificationEvent     NotificationEvent?            @relation(fields: [notificationEventId], references: [id], onDelete: SetNull)
+  contact               Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  twilioInboundMessages TwilioInboundMessage[]
+  twilioStatusCallbacks TwilioMessageStatusCallback[]
 
   @@unique([deliveryGroupId, deliveryDate])
   @@index([orderId])
@@ -473,6 +507,9 @@ model DeliveryConfirmation {
   @@index([requestedNewDate])
   @@index([reminderSentAt])
   @@index([noResponseAt])
+  @@index([manualReviewRequired])
+  @@index([manualReviewReason])
+  @@index([lastSmsResponseAt])
   @@map("delivery_confirmations")
 }
 
@@ -516,4 +553,74 @@ model EmailOptOut {
   @@index([isActive])
   @@index([email, isActive])
   @@map("email_opt_outs")
+}
+
+model TwilioInboundMessage {
+  id                     String    @id @default(cuid())
+  messageSid             String?   @unique @db.VarChar(64)
+  accountSid             String?   @db.VarChar(64)
+  messagingServiceSid    String?   @db.VarChar(64)
+  fromPhone              String?   @db.VarChar(32)
+  toPhone                String?   @db.VarChar(32)
+  body                   String?   @db.VarChar(1600)
+  normalizedBody         String?   @db.VarChar(256)
+  parsedIntent           String    @default("UNKNOWN") @db.VarChar(64)
+  matchStatus            String    @default("UNPROCESSED") @db.VarChar(64)
+  deliveryConfirmationId String?
+  notificationEventId    String?
+  rawPayload             Json
+  receivedAt             DateTime  @default(now())
+  processedAt            DateTime?
+  responseSent           Boolean   @default(false)
+  responseMessage        String?   @db.VarChar(1600)
+  error                  String?   @db.VarChar(1024)
+
+  deliveryConfirmation DeliveryConfirmation? @relation(fields: [deliveryConfirmationId], references: [id], onDelete: SetNull)
+  notificationEvent    NotificationEvent?    @relation(fields: [notificationEventId], references: [id], onDelete: SetNull)
+
+  @@index([fromPhone])
+  @@index([toPhone])
+  @@index([messagingServiceSid])
+  @@index([parsedIntent])
+  @@index([matchStatus])
+  @@index([deliveryConfirmationId])
+  @@index([notificationEventId])
+  @@index([receivedAt])
+  @@map("twilio_inbound_messages")
+}
+
+model TwilioMessageStatusCallback {
+  id                     String    @id @default(cuid())
+  callbackKey            String    @unique @db.VarChar(256)
+  messageSid             String    @db.VarChar(64)
+  accountSid             String?   @db.VarChar(64)
+  messagingServiceSid    String?   @db.VarChar(64)
+  messageStatus          String    @db.VarChar(64)
+  errorCode              String?   @db.VarChar(64)
+  errorMessage           String?   @db.VarChar(1024)
+  fromPhone              String?   @db.VarChar(32)
+  toPhone                String?   @db.VarChar(32)
+  notificationEventId    String?
+  notificationAttemptId  String?
+  deliveryConfirmationId String?
+  matchStatus            String    @default("UNPROCESSED") @db.VarChar(64)
+  rawPayload             Json
+  receivedAt             DateTime  @default(now())
+  processedAt            DateTime?
+
+  notificationEvent    NotificationEvent?    @relation(fields: [notificationEventId], references: [id], onDelete: SetNull)
+  notificationAttempt  NotificationAttempt?  @relation(fields: [notificationAttemptId], references: [id], onDelete: SetNull)
+  deliveryConfirmation DeliveryConfirmation? @relation(fields: [deliveryConfirmationId], references: [id], onDelete: SetNull)
+
+  @@index([messageSid])
+  @@index([messageStatus])
+  @@index([errorCode])
+  @@index([toPhone])
+  @@index([fromPhone])
+  @@index([notificationEventId])
+  @@index([notificationAttemptId])
+  @@index([deliveryConfirmationId])
+  @@index([matchStatus])
+  @@index([receivedAt])
+  @@map("twilio_message_status_callbacks")
 }

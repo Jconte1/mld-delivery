@@ -58,6 +58,7 @@ export const ERP_MEANINGFUL_CHANGE_FIELDS = {
     contact_changed: ["contactId"],
     location_changed: ["locationId", "locationDescription"],
     buyer_group_changed: ["buyerGroup"],
+    salesperson_changed: ["salespersonNumber"],
     shipping_method_changed: ["shipVia"],
   },
   order_total: {

@@ -4,6 +4,10 @@ import {
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
 } from "@/lib/notifications/helpers";
+import {
+  renderSalespersonEmailFooterText,
+  type SalespersonContactInput,
+} from "@/lib/notifications/salespersonContactDisplay";
 
 const NO_REPLY_NOTICE =
   "This is an automated no-reply email. Please do not reply directly to this message.";
@@ -102,6 +106,7 @@ export function render42DayEmailConfirmationBody(params: {
   link: string;
   paymentReminderApplies?: boolean;
   amountDueNowRounded?: string | null;
+  salespersonContact?: SalespersonContactInput | null;
 }) {
   const contactName = cleanNotificationText(params.contactName) ?? "there";
   const jobName = safeEmailJobName(params.jobName);
@@ -109,6 +114,7 @@ export function render42DayEmailConfirmationBody(params: {
   const link = cleanNotificationText(params.link) ?? "";
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+  const salespersonFooter = renderSalespersonEmailFooterText(params.salespersonContact);
 
   return [
     `Hello ${contactName},`,
@@ -124,6 +130,8 @@ export function render42DayEmailConfirmationBody(params: {
     "To confirm/change delivery and view order details, click here:",
     link,
     "",
+    salespersonFooter,
+    salespersonFooter ? "" : null,
     NO_REPLY_NOTICE,
     "",
     "Thank you.",
@@ -143,6 +151,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
   link: string;
   paymentReminderApplies?: boolean;
   amountDueNowRounded?: string | null;
+  salespersonContact?: SalespersonContactInput | null;
 }) {
   const contactName = cleanNotificationText(params.contactName) ?? "there";
   const jobName = safeEmailJobName(params.jobName);
@@ -155,6 +164,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
     : null;
   const paragraph = (value: string) => `<p>${escapeHtml(value)}</p>`;
   const paymentAmount = formatBalanceOwedAmount(params.amountDueNowRounded);
+  const salespersonFooter = renderSalespersonEmailFooterText(params.salespersonContact);
 
   return [
     paragraph(`Hello ${contactName},`),
@@ -173,6 +183,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
     `<p><a href="${escapeHtml(
       link
     )}" style="display:inline-block;background-color:#1f2937;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:600;">Confirm/ Change Delivery</a></p>`,
+    salespersonFooter ? paragraph(salespersonFooter) : null,
     paragraph(NO_REPLY_NOTICE),
     paragraph("Thank you."),
   ]
@@ -191,6 +202,7 @@ export function render42DayEmailConfirmationMessage(params: {
   link: string;
   paymentReminderApplies?: boolean;
   amountDueNowRounded?: string | null;
+  salespersonContact?: SalespersonContactInput | null;
 }) {
   return {
     subject: render42DayEmailConfirmationSubject(params),

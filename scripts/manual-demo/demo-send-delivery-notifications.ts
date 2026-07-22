@@ -20,6 +20,9 @@ import {
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
 } from "../../lib/notifications/helpers";
+import { renderDeliveryReminderEmailBody } from "../../lib/notifications/deliveryReminderEmail";
+import { getActiveSalespersonContact } from "../../lib/notifications/salespersonContactCache";
+import type { SalespersonContactInput } from "../../lib/notifications/salespersonContactDisplay";
 import {
   sendDemoEmail,
   sendDemoSms,
@@ -280,6 +283,7 @@ function buildReminderMessages(params: {
   jobAddress: string;
   testEmail: string;
   testPhone: string;
+  salespersonContact?: SalespersonContactInput | null;
 }) {
   const messages: DemoMessage[] = [];
 
@@ -291,13 +295,22 @@ function buildReminderMessages(params: {
       jobName: params.jobName,
       deliveryDate: params.group.deliveryDate,
     });
-    const body = renderDeliveryReminderMessage({
+    const smsBody = renderDeliveryReminderMessage({
       intervalType: interval.intervalType,
       contactName: params.contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName: params.jobName,
       jobAddress: params.jobAddress,
       deliveryDate: params.group.deliveryDate,
+    });
+    const emailBody = renderDeliveryReminderEmailBody({
+      intervalType: interval.intervalType,
+      contactName: params.contactName,
+      buyerGroup: params.group.order.buyerGroup,
+      jobName: params.jobName,
+      jobAddress: params.jobAddress,
+      deliveryDate: params.group.deliveryDate,
+      salespersonContact: params.salespersonContact,
     });
 
     messages.push({
@@ -307,7 +320,7 @@ function buildReminderMessages(params: {
       recipientEnvVar: "NOTIFICATIONS_TEST_EMAIL",
       to: params.testEmail,
       subject: demoSubject(interval.label, subject),
-      body: demoBody(interval.label, body),
+      body: demoBody(interval.label, emailBody),
     });
     messages.push({
       label: interval.label,
@@ -315,7 +328,7 @@ function buildReminderMessages(params: {
       channel: "SMS",
       recipientEnvVar: "NOTIFICATIONS_TEST_PHONE",
       to: params.testPhone,
-      body: demoBody(interval.label, body),
+      body: demoBody(interval.label, smsBody),
     });
   }
 
@@ -329,6 +342,7 @@ async function build42DayMessages(params: {
   jobAddress: string;
   testEmail: string;
   testPhone: string;
+  salespersonContact?: SalespersonContactInput | null;
 }) {
   const { confirmation, link, linkToken } = await ensureDemoConfirmation(params.group);
   const payment = await getDeliveryGroupPaymentEvaluation(params.group.id);
@@ -344,6 +358,7 @@ async function build42DayMessages(params: {
     link,
     paymentReminderApplies: applies,
     amountDueNowRounded: payment.amountDueNowRounded,
+    salespersonContact: params.salespersonContact,
   });
   const sms = render42DaySmsConfirmationMessage({
     contactName: params.contactName,
@@ -519,6 +534,7 @@ async function main() {
     locationDescription: group.order.locationDescription,
   });
   const jobAddress = safeJobAddress(group);
+  const salespersonContact = await getActiveSalespersonContact(group.order.salespersonNumber);
   const reminderMessages = buildReminderMessages({
     interval: args.interval,
     group,
@@ -527,6 +543,7 @@ async function main() {
     jobAddress,
     testEmail,
     testPhone,
+    salespersonContact,
   });
   const confirmation = linkIntervalSelected
     ? await build42DayMessages({
@@ -536,6 +553,7 @@ async function main() {
         jobAddress,
         testEmail,
         testPhone,
+        salespersonContact,
       })
     : null;
   const messages = [...reminderMessages, ...(confirmation?.messages ?? [])];

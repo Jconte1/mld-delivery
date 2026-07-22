@@ -3,6 +3,7 @@ import { dateKey } from "@/lib/notifications/helpers";
 export const DELIVERY_CONFIRMATION_ATTRIBUTE_WRITEBACK_ROUTE =
   "/api/erp/jobs/delivery/confirmation-attributes";
 export const WEBPAGE_CONFIRMED_VIA_VALUE = "WEBPAGE";
+export const SMS_CONFIRMED_VIA_VALUE = "AUTOTXT";
 export const DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV =
   "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN";
 const DEFAULT_ENQUEUE_TIMEOUT_MS = 5_000;
@@ -15,6 +16,7 @@ export type ConfirmationWritebackContactInput = {
   firstName?: string | null;
   lastName?: string | null;
   email?: string | null;
+  phone?: string | null;
 };
 
 export type DeliveryConfirmationAttributeWritebackPayload = {
@@ -25,7 +27,7 @@ export type DeliveryConfirmationAttributeWritebackPayload = {
   deliveryConfirmationId: string;
   deliveryGroupId: string;
   deliveryDate: string;
-  source: "WEBPAGE";
+  source: string;
   dryRun: boolean;
 };
 
@@ -36,6 +38,8 @@ export type EnqueueDeliveryConfirmationAttributeWritebackParams = {
   deliveryGroupId: string;
   deliveryDate: Date | string;
   contact: ConfirmationWritebackContactInput;
+  confirmedVia?: string;
+  source?: string;
 };
 
 export type EnqueueDeliveryConfirmationAttributeWritebackOptions = {
@@ -79,6 +83,7 @@ export function resolveConfirmedWith(contact: ConfirmationWritebackContactInput)
     clean(contact.companyName) ??
     clean(fullName) ??
     clean(contact.email) ??
+    clean(contact.phone) ??
     "Customer"
   );
 }
@@ -99,12 +104,12 @@ export function buildDeliveryConfirmationAttributeWritebackPayload(
   return {
     orderType: params.orderType.trim().toUpperCase(),
     orderNumber,
-    confirmedVia: WEBPAGE_CONFIRMED_VIA_VALUE,
+    confirmedVia: clean(params.confirmedVia) ?? WEBPAGE_CONFIRMED_VIA_VALUE,
     confirmedWith: resolveConfirmedWith(params.contact),
     deliveryConfirmationId: params.deliveryConfirmationId,
     deliveryGroupId: params.deliveryGroupId,
     deliveryDate: dateKey(params.deliveryDate),
-    source: "WEBPAGE",
+    source: clean(params.source) ?? "WEBPAGE",
     dryRun: shouldDryRunDeliveryConfirmationAttributeWriteback(),
   };
 }

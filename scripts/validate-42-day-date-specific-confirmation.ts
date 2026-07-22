@@ -6,6 +6,7 @@ import {
 import {
   create42DayDeliveryConfirmationEvents,
   DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+  DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON,
   type DeliveryConfirmation42DayClient,
 } from "../lib/notifications/create42DayDeliveryConfirmationEvents";
 import { dateKey } from "../lib/notifications/helpers";
@@ -80,6 +81,7 @@ async function createFixture(params: {
   emailOptIn?: boolean;
   email?: string | null;
   phone1?: string | null;
+  confirmVia?: string | null;
 }) {
   const contact = await params.tx.contact.create({
     data: {
@@ -99,6 +101,7 @@ async function createFixture(params: {
       customerDescription: "Date Specific Confirmation Fixture",
       locationDescription: params.suffix,
       contactId: contact.contactId,
+      confirmVia: params.confirmVia ?? null,
     },
   });
   const deliveryGroup = await params.tx.orderDeliveryGroup.create({
@@ -154,6 +157,13 @@ async function main() {
           unique,
           suffix: "OPEN",
           deliveryDate: targetDate,
+        });
+        const acumaticaConfirmed = await createFixture({
+          tx,
+          unique,
+          suffix: "ACU",
+          deliveryDate: targetDate,
+          confirmVia: "WEBPAGE",
         });
 
         const oldDateConfirmed = await createFixture({
@@ -217,6 +227,7 @@ async function main() {
         const orderNumbers = [
           sameDateConfirmed.order.orderNumber,
           notConfirmed.order.orderNumber,
+          acumaticaConfirmed.order.orderNumber,
           oldDateConfirmed.order.orderNumber,
           noChannel.order.orderNumber,
         ];
@@ -253,6 +264,12 @@ async function main() {
         const openEvent = eventByOrder.get(notConfirmed.order.orderNumber);
         const openReport = reportByOrder.get(notConfirmed.order.orderNumber);
         const openConfirmation = confirmationFor(notConfirmed.order.orderNumber, targetDate);
+        const acumaticaEvent = eventByOrder.get(acumaticaConfirmed.order.orderNumber);
+        const acumaticaReport = reportByOrder.get(acumaticaConfirmed.order.orderNumber);
+        const acumaticaConfirmation = confirmationFor(
+          acumaticaConfirmed.order.orderNumber,
+          targetDate
+        );
         const oldEvent = eventByOrder.get(oldDateConfirmed.order.orderNumber);
         const oldReport = reportByOrder.get(oldDateConfirmed.order.orderNumber);
         const oldConfirmation = confirmationFor(oldDateConfirmed.order.orderNumber, oldDate);
@@ -273,6 +290,8 @@ async function main() {
                 sameEvent?.recipientPhone === null,
                 sameEvent?.scheduledAt === null,
                 sameReport?.alreadyConfirmedForDeliveryDate === true,
+                sameReport?.alreadyConfirmedInAcumatica === false,
+                sameReport?.acumaticaConfirmVia === null,
                 sameReport?.linkTokenPresent === false,
                 sameConfirmation?.status === DeliveryConfirmationStatus.CONFIRMED,
                 sameConfirmation?.linkToken === null
@@ -283,6 +302,8 @@ async function main() {
                 selectedChannel: sameEvent?.selectedChannel,
                 linkTokenPresent: sameReport?.linkTokenPresent,
                 alreadyConfirmedForDeliveryDate: sameReport?.alreadyConfirmedForDeliveryDate,
+                alreadyConfirmedInAcumatica: sameReport?.alreadyConfirmedInAcumatica,
+                acumaticaConfirmVia: sameReport?.acumaticaConfirmVia,
                 confirmationStatus: sameConfirmation?.status,
                 confirmationLinkToken: sameConfirmation?.linkToken,
               },
@@ -293,6 +314,8 @@ async function main() {
                 openEvent?.selectedChannel === NotificationChannel.SMS,
                 openEvent?.reasonSkipped === null,
                 openReport?.alreadyConfirmedForDeliveryDate === false,
+                openReport?.alreadyConfirmedInAcumatica === false,
+                openReport?.acumaticaConfirmVia === null,
                 openReport?.linkTokenPresent === true,
                 openConfirmation?.status === DeliveryConfirmationStatus.PENDING,
                 Boolean(openConfirmation?.linkToken)
@@ -302,8 +325,40 @@ async function main() {
                 selectedChannel: openEvent?.selectedChannel,
                 reasonSkipped: openEvent?.reasonSkipped,
                 alreadyConfirmedForDeliveryDate: openReport?.alreadyConfirmedForDeliveryDate,
+                alreadyConfirmedInAcumatica: openReport?.alreadyConfirmedInAcumatica,
+                acumaticaConfirmVia: openReport?.acumaticaConfirmVia,
                 confirmationStatus: openConfirmation?.status,
                 linkTokenPresent: Boolean(openConfirmation?.linkToken),
+              },
+            },
+            acumaticaConfirmViaSkipped: {
+              passed: isPassed(
+                acumaticaEvent?.status === NotificationEventStatus.SKIPPED,
+                acumaticaEvent?.reasonSkipped ===
+                  DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON,
+                acumaticaEvent?.selectedChannel === null,
+                acumaticaEvent?.recipientEmail === null,
+                acumaticaEvent?.recipientPhone === null,
+                acumaticaEvent?.scheduledAt === null,
+                acumaticaReport?.alreadyConfirmedInAcumatica === true,
+                acumaticaReport?.acumaticaConfirmVia === "WEBPAGE",
+                acumaticaReport?.alreadyConfirmedForDeliveryDate === false,
+                acumaticaReport?.linkTokenPresent === false,
+                acumaticaConfirmation === undefined
+              ),
+              details: {
+                status: acumaticaEvent?.status,
+                reasonSkipped: acumaticaEvent?.reasonSkipped,
+                selectedChannel: acumaticaEvent?.selectedChannel,
+                recipientEmail: acumaticaEvent?.recipientEmail,
+                recipientPhone: acumaticaEvent?.recipientPhone,
+                scheduledAt: acumaticaEvent?.scheduledAt,
+                alreadyConfirmedInAcumatica: acumaticaReport?.alreadyConfirmedInAcumatica,
+                acumaticaConfirmVia: acumaticaReport?.acumaticaConfirmVia,
+                alreadyConfirmedForDeliveryDate:
+                  acumaticaReport?.alreadyConfirmedForDeliveryDate,
+                linkTokenPresent: acumaticaReport?.linkTokenPresent,
+                confirmationCreated: Boolean(acumaticaConfirmation),
               },
             },
             oldDateDoesNotBlockNewDate: {
@@ -313,6 +368,7 @@ async function main() {
                 oldEvent?.status === NotificationEventStatus.SCHEDULED,
                 oldEvent?.reasonSkipped !== DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
                 oldReport?.alreadyConfirmedForDeliveryDate === false,
+                oldReport?.alreadyConfirmedInAcumatica === false,
                 newConfirmation?.status === DeliveryConfirmationStatus.PENDING,
                 dateKey(newConfirmation?.deliveryDate ?? targetDate) === dateKey(targetDate)
               ),
@@ -324,6 +380,7 @@ async function main() {
                 newEventStatus: oldEvent?.status,
                 newEventReasonSkipped: oldEvent?.reasonSkipped,
                 newReportAlreadyConfirmed: oldReport?.alreadyConfirmedForDeliveryDate,
+                newReportAlreadyConfirmedInAcumatica: oldReport?.alreadyConfirmedInAcumatica,
                 newConfirmationStatus: newConfirmation?.status,
                 newConfirmationDeliveryDate: newConfirmation
                   ? dateKey(newConfirmation.deliveryDate)
@@ -334,35 +391,29 @@ async function main() {
               passed: isPassed(
                 noChannelEvent?.status === NotificationEventStatus.SKIPPED,
                 noChannelEvent?.reasonSkipped === "no_automated_channel_available",
-                noChannelReport?.alreadyConfirmedForDeliveryDate === false
+                noChannelReport?.alreadyConfirmedForDeliveryDate === false,
+                noChannelReport?.alreadyConfirmedInAcumatica === false
               ),
               details: {
                 status: noChannelEvent?.status,
                 reasonSkipped: noChannelEvent?.reasonSkipped,
                 alreadyConfirmedForDeliveryDate:
                   noChannelReport?.alreadyConfirmedForDeliveryDate,
+                alreadyConfirmedInAcumatica: noChannelReport?.alreadyConfirmedInAcumatica,
               },
             },
             sameDateRerunDedupes: {
               passed: isPassed(
-                firstRun.eventsCreated === 4,
+                firstRun.eventsCreated === 5,
                 secondRun.eventsCreated === 0,
-                secondRun.eventsDeduped === 4,
-                events.length === 4
+                secondRun.eventsDeduped === 5,
+                events.length === 5
               ),
               details: {
                 firstRunEventsCreated: firstRun.eventsCreated,
                 secondRunEventsCreated: secondRun.eventsCreated,
                 secondRunEventsDeduped: secondRun.eventsDeduped,
                 notificationEventsForFixtures: events.length,
-              },
-            },
-            acumaticaMetadataAloneDoesNotBlock: {
-              passed: true,
-              details: {
-                applicable: false,
-                reason:
-                  "CONFIRMVIA/CONFIRMWTH are not imported or stored in delivery, and the 42-day service only checks DeliveryConfirmation by deliveryGroupId + deliveryDate.",
               },
             },
             noNotificationAttemptsCreated: {

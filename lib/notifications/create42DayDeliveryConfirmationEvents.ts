@@ -31,16 +31,20 @@ import {
   getNotificationTargetDate,
   selectNotificationChannel,
 } from "@/lib/notifications/helpers";
+import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
 export const DELIVERY_CONFIRMATION_42_DAY_INTERVAL_DAYS = 42;
 export const DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON =
   "already_confirmed_for_delivery_date";
+export const DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON =
+  "already_confirmed_in_acumatica";
 
 export type DeliveryConfirmation42DayClient = Pick<
   typeof prisma,
   "orderDeliveryGroup" | "notificationEvent" | "deliveryConfirmation"
->;
+> &
+  Partial<Pick<typeof prisma, "salespersonContact">>;
 
 export type DeliveryConfirmation42DayEventReport = {
   orderType: string;
@@ -57,6 +61,8 @@ export type DeliveryConfirmation42DayEventReport = {
   recipientPhone: string | null;
   reasonSkipped: string | null;
   alreadyConfirmedForDeliveryDate: boolean;
+  alreadyConfirmedInAcumatica: boolean;
+  acumaticaConfirmVia: string | null;
   subject: string | null;
   renderedMessagePreview: string;
   linkTokenPresent: boolean;
@@ -127,6 +133,16 @@ function isBlockedLifecycleStatus(value: string | null | undefined) {
     InternalOrderLifecycleStatus.CANCELLED,
   ]);
   return blockedStatuses.has(value ?? "");
+}
+
+export function normalizeAcumaticaConfirmVia(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
+}
+
+export function isAlreadyConfirmedInAcumatica(confirmVia: unknown) {
+  return normalizeAcumaticaConfirmVia(confirmVia) !== null;
 }
 
 function emptySummary(params: {
@@ -305,6 +321,8 @@ export async function find42DayDeliveryConfirmationTargetGroups(
           status: true,
           internalLifecycleStatus: true,
           buyerGroup: true,
+          confirmVia: true,
+          salespersonNumber: true,
           customerDescription: true,
           locationDescription: true,
           address: {
@@ -363,6 +381,10 @@ export async function create42DayDeliveryConfirmationEvents(
   );
   const summary = emptySummary({ runDate, targetDeliveryDate });
   const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
+  const salespersonContactsByNumber = await getActiveSalespersonContactMap(
+    deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
+    client
+  );
   summary.targetDeliveryGroups = deliveryGroups.length;
 
   for (const deliveryGroup of deliveryGroups) {
@@ -380,6 +402,13 @@ export async function create42DayDeliveryConfirmationEvents(
       deliveryDate: deliveryGroup.deliveryDate,
       client,
     });
+    const acumaticaConfirmVia = normalizeAcumaticaConfirmVia(order.confirmVia);
+    const alreadyConfirmedInAcumatica = acumaticaConfirmVia !== null;
+    const confirmationSkipReason = alreadyConfirmedInAcumatica
+      ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON
+      : alreadyConfirmedForDeliveryDate
+        ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
+        : null;
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -388,7 +417,7 @@ export async function create42DayDeliveryConfirmationEvents(
       actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
     });
 
-    const channel = alreadyConfirmedForDeliveryDate
+    const channel = confirmationSkipReason
       ? null
       : selectNotificationChannel(order.contact, {
           activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
@@ -403,16 +432,16 @@ export async function create42DayDeliveryConfirmationEvents(
 
     if (event) {
       summary.eventsDeduped += 1;
-      if (alreadyConfirmedForDeliveryDate) {
+      if (confirmationSkipReason) {
         event = await client.notificationEvent.update({
           where: { id: event.id },
           data: {
             selectedChannel: null,
-            channelReason: DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+            channelReason: confirmationSkipReason,
             recipientEmail: null,
             recipientPhone: null,
             status: NotificationEventStatus.SKIPPED,
-            reasonSkipped: DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+            reasonSkipped: confirmationSkipReason,
             scheduledAt: null,
           },
           select: notificationEventSelect,
@@ -431,22 +460,20 @@ export async function create42DayDeliveryConfirmationEvents(
           actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
           dedupeKey,
           selectedChannel: channel?.selectedChannel ?? null,
-          channelReason: alreadyConfirmedForDeliveryDate
-            ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
-            : channel?.channelReason,
+          channelReason: confirmationSkipReason ?? channel?.channelReason,
           recipientEmail: channel?.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
           recipientPhone: channel?.selectedChannel === "SMS" ? channel.recipientPhone : null,
           status:
-            alreadyConfirmedForDeliveryDate || shouldSkipForNoChannel
+            confirmationSkipReason || shouldSkipForNoChannel
               ? NotificationEventStatus.SKIPPED
               : NotificationEventStatus.SCHEDULED,
-          reasonSkipped: alreadyConfirmedForDeliveryDate
-            ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
+          reasonSkipped: confirmationSkipReason
+            ? confirmationSkipReason
             : shouldSkipForNoChannel
               ? channel?.channelReason
               : null,
           scheduledAt:
-            alreadyConfirmedForDeliveryDate || shouldSkipForNoChannel ? null : dateFromKey(runDate),
+            confirmationSkipReason || shouldSkipForNoChannel ? null : dateFromKey(runDate),
         },
         select: notificationEventSelect,
       });
@@ -473,6 +500,9 @@ export async function create42DayDeliveryConfirmationEvents(
       locationDescription: order.locationDescription,
     });
     const jobAddress = safeJobAddress(order.address ?? {});
+    const salespersonContact = order.salespersonNumber
+      ? salespersonContactsByNumber.get(order.salespersonNumber) ?? null
+      : null;
     let linkToken: string | null = null;
     let linkScopeKey: string | null = null;
     let confirmationState: string | null = null;
@@ -527,6 +557,7 @@ export async function create42DayDeliveryConfirmationEvents(
             jobName,
             deliveryDate: deliveryGroup.deliveryDate,
             link,
+            deliveryAddress: order.address,
           })
         : "";
     const emailMessage =
@@ -542,6 +573,7 @@ export async function create42DayDeliveryConfirmationEvents(
             link,
             paymentReminderApplies: showPaymentReminder,
             amountDueNowRounded: paymentReport.amountDueNowRounded,
+            salespersonContact,
           })
         : null;
     const subject =
@@ -577,6 +609,8 @@ export async function create42DayDeliveryConfirmationEvents(
       recipientPhone: event.recipientPhone,
       reasonSkipped: event.reasonSkipped,
       alreadyConfirmedForDeliveryDate,
+      alreadyConfirmedInAcumatica,
+      acumaticaConfirmVia,
       subject,
       renderedMessagePreview,
       linkTokenPresent: Boolean(linkToken),

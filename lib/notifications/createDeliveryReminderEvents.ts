@@ -19,6 +19,8 @@ import {
   selectNotificationChannel,
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
+import { renderDeliveryReminderEmailBody } from "@/lib/notifications/deliveryReminderEmail";
+import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
 export type DeliveryReminderIntervalType =
@@ -166,6 +168,7 @@ export async function createDeliveryReminderEvents(
           customerDescription: true,
           locationDescription: true,
           buyerGroup: true,
+          salespersonNumber: true,
           address: {
             select: {
               addressLine1: true,
@@ -202,6 +205,9 @@ export async function createDeliveryReminderEvents(
     },
   });
   summary.targetDeliveryGroups = deliveryGroups.length;
+  const salespersonContactsByNumber = await getActiveSalespersonContactMap(
+    deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber)
+  );
 
   for (const deliveryGroup of deliveryGroups) {
     const order = deliveryGroup.order;
@@ -244,13 +250,16 @@ export async function createDeliveryReminderEvents(
       locationDescription: order.locationDescription,
     });
     const jobAddress = safeJobAddress(order.address ?? {});
+    const salespersonContact = order.salespersonNumber
+      ? salespersonContactsByNumber.get(order.salespersonNumber) ?? null
+      : null;
     const subject = renderSubject({
       useLegacy180Subject: options.useLegacy180Subject,
       buyerGroup: order.buyerGroup,
       jobName,
       deliveryDate: deliveryGroup.deliveryDate,
     });
-    const body = renderDeliveryReminderMessage({
+    const smsBody = renderDeliveryReminderMessage({
       intervalType: options.intervalType,
       contactName,
       buyerGroup: order.buyerGroup,
@@ -258,6 +267,16 @@ export async function createDeliveryReminderEvents(
       jobAddress,
       deliveryDate: deliveryGroup.deliveryDate,
     });
+    const emailBody = renderDeliveryReminderEmailBody({
+      intervalType: options.intervalType,
+      contactName,
+      buyerGroup: order.buyerGroup,
+      jobName,
+      jobAddress,
+      deliveryDate: deliveryGroup.deliveryDate,
+      salespersonContact,
+    });
+    const body = channel.selectedChannel === "EMAIL" ? emailBody : smsBody;
 
     if (summary.messagePreviews.length < 3) {
       summary.messagePreviews.push({

@@ -11,6 +11,7 @@ import { syncOrderDeliveryGroups } from "../lib/erp/syncOrderDeliveryGroups";
 import {
   create42DayDeliveryConfirmationEvents,
   DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON,
+  DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON,
   type DeliveryConfirmation42DayClient,
 } from "../lib/notifications/create42DayDeliveryConfirmationEvents";
 import { dateKey } from "../lib/notifications/helpers";
@@ -110,6 +111,7 @@ async function createFixture(params: {
   emailOptIn?: boolean;
   email?: string | null;
   phone1?: string | null;
+  confirmVia?: string | null;
 }) {
   const contact = await params.tx.contact.create({
     data: {
@@ -133,6 +135,7 @@ async function createFixture(params: {
       customerDescription: "42-Day Scenario Validation",
       locationDescription: params.suffix,
       contactId: contact.contactId,
+      confirmVia: params.confirmVia ?? null,
     },
   });
   const deliveryGroup = await params.tx.orderDeliveryGroup.create({
@@ -222,6 +225,7 @@ function markdownReport(report: ValidationReport) {
     "## C. What Creates A SKIPPED Event Instead Of SCHEDULED",
     "",
     "- Same deliveryGroupId + deliveryDate has DeliveryConfirmation.status = CONFIRMED.",
+    "- Acumatica Document.AttributeCONFIRMVIA is populated.",
     "- No automated SMS/email channel is available.",
     "",
     "## D. Same-Date Already Confirmed",
@@ -246,8 +250,9 @@ function markdownReport(report: ValidationReport) {
     "",
     "## H. Acumatica Confirmation Fields",
     "",
-    "- CONFIRMVIA / CONFIRMWTH / CONFIRMWITH are not imported or stored in delivery.",
-    "- They are not used as 42-day skip conditions.",
+    "- CONFIRMVIA is stored as Order.confirmVia.",
+    "- A non-empty CONFIRMVIA value skips only the 42-day confirmation request.",
+    "- CONFIRMWTH / CONFIRMWITH do not control the skip.",
     "",
     "## I. Remaining Business Questions",
     "",
@@ -408,6 +413,13 @@ async function main() {
           email: null,
           phone1: null,
         });
+        const scenarioE = await createFixture({
+          tx,
+          unique,
+          suffix: "E-ACUMATICA",
+          deliveryDate: targetDeliveryDate,
+          confirmVia: "WEBPAGE",
+        });
 
         const ineligibleFixtures = [
           await createFixture({
@@ -457,6 +469,7 @@ async function main() {
           scenarioB.order.orderNumber,
           scenarioC.order.orderNumber,
           scenarioD.order.orderNumber,
+          scenarioE.order.orderNumber,
           scenarioF.order.orderNumber,
           ...ineligibleFixtures.map((fixture) => fixture.order.orderNumber),
         ];
@@ -479,11 +492,13 @@ async function main() {
         const eventB = findByOrder(events, scenarioB.order.orderNumber);
         const eventC = findByOrder(events, scenarioC.order.orderNumber);
         const eventD = findByOrder(events, scenarioD.order.orderNumber);
+        const eventE = findByOrder(events, scenarioE.order.orderNumber);
         const eventF = findByOrder(events, scenarioF.order.orderNumber);
         const reportA = reportByOrder.get(scenarioA.order.orderNumber);
         const reportB = reportByOrder.get(scenarioB.order.orderNumber);
         const reportC = reportByOrder.get(scenarioC.order.orderNumber);
         const reportD = reportByOrder.get(scenarioD.order.orderNumber);
+        const reportE = reportByOrder.get(scenarioE.order.orderNumber);
         const reportF = reportByOrder.get(scenarioF.order.orderNumber);
         const confirmationA = findConfirmation(
           confirmations,
@@ -508,6 +523,11 @@ async function main() {
         const confirmationD = findConfirmation(
           confirmations,
           scenarioD.order.orderNumber,
+          targetDeliveryDate
+        );
+        const confirmationE = findConfirmation(
+          confirmations,
+          scenarioE.order.orderNumber,
           targetDeliveryDate
         );
         const confirmationF = findConfirmation(
@@ -538,7 +558,7 @@ async function main() {
             ineligibleFilteringStillFirst: true,
             readinessRulesChanged: false,
             paymentRulesChanged: false,
-            acumaticaConfirmationFieldsUsedAsSkipConditions: false,
+            acumaticaConfirmationFieldsUsedAsSkipConditions: true,
           },
           firstRun: firstRunSummary,
           secondRun: secondRunSummary,
@@ -642,12 +662,33 @@ async function main() {
                   "Current behavior treats same deliveryGroupId + same deliveryDate as the same confirmation scope after reactivation.",
               },
             },
-            acumaticaMetadataAloneDoesNotBlock: {
-              passed: true,
+            acumaticaConfirmViaSkipped: {
+              passed: passed(
+                eventE?.status === NotificationEventStatus.SKIPPED,
+                eventE?.reasonSkipped ===
+                  DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON,
+                eventE?.selectedChannel === null,
+                eventE?.recipientEmail === null,
+                eventE?.recipientPhone === null,
+                eventE?.scheduledAt === null,
+                reportE?.alreadyConfirmedInAcumatica === true,
+                reportE?.acumaticaConfirmVia === "WEBPAGE",
+                reportE?.alreadyConfirmedForDeliveryDate === false,
+                reportE?.linkTokenPresent === false,
+                confirmationE === undefined
+              ),
               details: {
-                applicable: false,
-                reason:
-                  "CONFIRMVIA/CONFIRMWTH/CONFIRMWITH are not imported or stored in delivery, and code search found no 42-day skip logic based on those fields.",
+                status: eventE?.status,
+                reasonSkipped: eventE?.reasonSkipped,
+                selectedChannel: eventE?.selectedChannel,
+                recipientEmail: eventE?.recipientEmail,
+                recipientPhone: eventE?.recipientPhone,
+                scheduledAt: eventE?.scheduledAt?.toISOString() ?? null,
+                alreadyConfirmedInAcumatica: reportE?.alreadyConfirmedInAcumatica,
+                acumaticaConfirmVia: reportE?.acumaticaConfirmVia,
+                alreadyConfirmedForDeliveryDate: reportE?.alreadyConfirmedForDeliveryDate,
+                linkTokenPresent: reportE?.linkTokenPresent,
+                deliveryConfirmationCreated: Boolean(confirmationE),
               },
             },
             noAutomatedChannel: {
@@ -688,11 +729,11 @@ async function main() {
             },
             dedupeAndOutput: {
               passed: passed(
-                firstRun.eventsCreated === 5,
+                firstRun.eventsCreated === 6,
                 secondRun.eventsCreated === 0,
-                secondRun.eventsDeduped === 5,
-                events.length === 5,
-                [eventA, eventB, eventC, eventD, eventF].every((event) =>
+                secondRun.eventsDeduped === 6,
+                events.length === 6,
+                [eventA, eventB, eventC, eventD, eventE, eventF].every((event) =>
                   event?.dedupeKey.includes(dateKey(targetDeliveryDate))
                 )
               ),
@@ -701,12 +742,17 @@ async function main() {
                 secondRunEventsCreated: secondRun.eventsCreated,
                 secondRunEventsDeduped: secondRun.eventsDeduped,
                 notificationEventsForEligibleFixtures: events.length,
-                dedupeKeys: [eventA, eventB, eventC, eventD, eventF].map((event) => event?.dedupeKey),
+                dedupeKeys: [eventA, eventB, eventC, eventD, eventE, eventF].map(
+                  (event) => event?.dedupeKey
+                ),
                 deliveryDateInDedupeKey: true,
                 channelInDedupeKey: false,
                 reportsIncludeAlreadyConfirmedForDeliveryDate: firstRun.eventReports.every(
                   (eventReport) =>
                     typeof eventReport.alreadyConfirmedForDeliveryDate === "boolean"
+                ),
+                reportsIncludeAlreadyConfirmedInAcumatica: firstRun.eventReports.every(
+                  (eventReport) => typeof eventReport.alreadyConfirmedInAcumatica === "boolean"
                 ),
               },
             },

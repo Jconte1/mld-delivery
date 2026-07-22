@@ -1,4 +1,8 @@
 import {
+  getRequestedDeliveryDateRouteNote,
+  type DeliveryDateEligibilityAddress,
+} from "@/lib/notifications/deliveryDateEligibility";
+import {
   cleanNotificationText,
   dateKey,
   formatCustomerFriendlyDate,
@@ -100,13 +104,16 @@ export function render42DaySmsConfirmationMessage(params: {
   jobName: string;
   deliveryDate: Date | string;
   link: string;
+  deliveryAddress?: DeliveryDateEligibilityAddress | null;
 }) {
   const contactName = cleanNotificationText(params.contactName) ?? "there";
   const jobName = cleanNotificationText(params.jobName) ?? "your delivery";
   const link = cleanNotificationText(params.link) ?? "";
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
+  const routeNote = getRequestedDeliveryDateRouteNote(params.deliveryAddress, "sms");
+  const routeNoteSentence = routeNote ? ` ${routeNote}` : "";
 
-  return `Hello ${contactName}, we are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}. Reply Y to confirm or N to change your delivery date. For ETAs and delivery details: ${link}`;
+  return `Hello ${contactName}, we are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}. Reply Y to confirm or N to request a different delivery date.${routeNoteSentence} For ETAs and delivery details: ${link} Reply STOP to opt out.`;
 }
 
 export function buildDeliveryConfirmationScopeKey(params: {

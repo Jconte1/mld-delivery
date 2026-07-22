@@ -6,7 +6,15 @@ import {
 } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
+import { DELIVERY_MANUAL_REVIEW_REASONS } from "@/lib/notifications/deliveryConfirmationManualReview";
 import { confirmDeliveryFromWebpage } from "@/lib/notifications/confirmDeliveryFromWebpage";
+import {
+  getRequestedDeliveryDateWebInstruction,
+  getRequestedDeliveryDateWebMessageForCode,
+  parseDateInputValue,
+  validateRequestedDeliveryDateEligibility,
+  type DeliveryDateEligibilityAddress,
+} from "@/lib/notifications/deliveryDateEligibility";
 import {
   dateFromKey,
   dateKey,
@@ -15,7 +23,9 @@ import {
   formatJobAddress,
   formatJobName,
 } from "@/lib/notifications/helpers";
+import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
+import { SalespersonContactBlock } from "../../components/SalespersonContactBlock";
 import { DeliveryConfirmationActions } from "./DeliveryConfirmationActions";
 
 type PageProps = {
@@ -58,8 +68,13 @@ async function loadConfirmation(token: string) {
 
   if (!confirmation) return null;
 
+  const salespersonContact = await getActiveSalespersonContact(
+    confirmation.orderDeliveryGroup.order.salespersonNumber
+  );
+
   return {
     ...confirmation,
+    salespersonContact,
     isExpired: Boolean(
       confirmation.linkExpiresAt && confirmation.linkExpiresAt.getTime() < Date.now()
     ),
@@ -104,19 +119,6 @@ function nextDateKey(value: Date | string) {
   return dateKey(date);
 }
 
-function isWeekendDate(value: Date | string) {
-  const day = dateFromKey(value).getUTCDay();
-  return day === 0 || day === 6;
-}
-
-function parseDateKeyOrNull(value: string) {
-  try {
-    return dateFromKey(value);
-  } catch {
-    return null;
-  }
-}
-
 function isFinalConfirmationStatus(value: DeliveryConfirmationStatus) {
   return (
     value === DeliveryConfirmationStatus.CONFIRMED ||
@@ -125,16 +127,7 @@ function isFinalConfirmationStatus(value: DeliveryConfirmationStatus) {
 }
 
 function requestDateErrorMessage(value: string | undefined) {
-  switch (value) {
-    case "missing_date":
-      return "Please choose a requested delivery date.";
-    case "earlier_date":
-      return "Please choose a date later than your current scheduled delivery date.";
-    case "weekend_date":
-      return "Please choose a weekday delivery date.";
-    default:
-      return null;
-  }
+  return getRequestedDeliveryDateWebMessageForCode(value);
 }
 
 function redirectToConfirmation(token: string, params: Record<string, string>): never {
@@ -199,7 +192,16 @@ async function requestDifferentDate(formData: FormData) {
       id: true,
       status: true,
       deliveryDate: true,
-      requestedNewDate: true,
+      order: {
+        select: {
+          address: {
+            select: {
+              state: true,
+              postalCode: true,
+            },
+          },
+        },
+      },
     },
   });
   if (confirmation) {
@@ -207,32 +209,30 @@ async function requestDifferentDate(formData: FormData) {
       redirectToConfirmation(token, { updated: "already_final" });
     }
 
-    if (!requestedNewDateRaw) {
-      redirectToConfirmation(token, { error: "missing_date" });
+    const parsed = parseDateInputValue(requestedNewDateRaw);
+    const validation = validateRequestedDeliveryDateEligibility({
+      requestedDate: parsed.valid ? parsed.date : null,
+      currentDeliveryDate: confirmation.deliveryDate,
+      address: confirmation.order.address,
+    });
+    if (!validation.allowed) {
+      redirectToConfirmation(token, { error: validation.reason });
     }
 
-    const requestedNewDate = parseDateKeyOrNull(requestedNewDateRaw);
-    if (!requestedNewDate) {
-      redirectToConfirmation(token, { error: "missing_date" });
-    }
-
-    const currentDate = confirmation.requestedNewDate ?? confirmation.deliveryDate;
-    if (requestedNewDate.getTime() <= dateFromKey(currentDate).getTime()) {
-      redirectToConfirmation(token, { error: "earlier_date" });
-    }
-
-    if (isWeekendDate(requestedNewDate)) {
-      redirectToConfirmation(token, { error: "weekend_date" });
-    }
-
+    const now = new Date();
     await prisma.deliveryConfirmation.update({
       where: { id: confirmation.id },
       data: {
         status: DeliveryConfirmationStatus.NEW_DATE_REQUESTED,
-        changeRequestedAt: new Date(),
-        requestedNewDate,
+        changeRequestedAt: now,
+        requestedNewDate: validation.date,
         requestedNewDateRaw,
-        requestedNewDateAt: new Date(),
+        requestedNewDateAt: now,
+        manualReviewRequired: true,
+        manualReviewReason: DELIVERY_MANUAL_REVIEW_REASONS.NEW_DATE_REQUESTED,
+        manualReviewMarkedAt: now,
+        manualReviewNotes:
+          "Customer requested a different delivery date through the webpage confirmation link.",
       },
     });
   }
@@ -293,7 +293,9 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
     ? formatCustomerFriendlyDate(confirmation.requestedNewDate)
     : null;
   const isFinalStatus = isFinalConfirmationStatus(confirmation.status);
-  const minimumRequestedDate = nextDateKey(confirmation.requestedNewDate ?? group.deliveryDate);
+  const minimumRequestedDate = nextDateKey(new Date());
+  const deliveryAddress: DeliveryDateEligibilityAddress | null = order.address;
+  const requestedDateInstruction = getRequestedDeliveryDateWebInstruction(deliveryAddress);
   const errorMessage = requestDateErrorMessage(search.error);
   const headerDateLine =
     confirmation.status === DeliveryConfirmationStatus.CONFIRMED
@@ -320,6 +322,8 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
               <div>Status: {statusLabel}</div>
             </div>
           </div>
+
+          <SalespersonContactBlock contact={confirmation.salespersonContact} />
 
           {search.updated ? (
             <div className="mt-5 rounded-md bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200">
@@ -373,6 +377,10 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
               scheduledDateLabel={scheduledDateLabel}
               requestedNewDateLabel={requestedNewDateLabel}
               minimumRequestedDate={minimumRequestedDate}
+              currentDeliveryDate={deliveryDate}
+              deliveryAddressState={deliveryAddress?.state ?? null}
+              deliveryAddressPostalCode={deliveryAddress?.postalCode ?? null}
+              requestedDateInstruction={requestedDateInstruction}
               isLocked={isFinalStatus}
               errorMessage={errorMessage}
               confirmDeliveryAction={confirmDelivery}

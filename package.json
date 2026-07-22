@@ -7,7 +7,12 @@
     "build": "prisma generate && next build",
     "start": "next start",
     "lint": "eslint",
-    "prisma:generate": "prisma generate"
+    "prisma:generate": "prisma generate",
+    "sync:salesperson-contacts": "tsx -r dotenv/config scripts/sync-salesperson-contacts.ts",
+    "validate:salesperson-contact-sync": "tsx scripts/validate-salesperson-contact-sync.ts",
+    "validate:salesperson-import": "tsx scripts/validate-salesperson-import.ts",
+    "validate:salesperson-rendering": "tsx scripts/validate-salesperson-rendering.ts",
+    "validate:twilio-inbound": "tsx scripts/validate-twilio-inbound-sms-foundation.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",
@@ -16,7 +21,8 @@
     "pg": "^8.22.0",
     "prisma": "^7.8.0",
     "react": "19.2.4",
-    "react-dom": "19.2.4"
+    "react-dom": "19.2.4",
+    "twilio": "^6.0.2"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

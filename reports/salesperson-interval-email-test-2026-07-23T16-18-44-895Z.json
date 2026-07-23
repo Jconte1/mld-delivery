@@ -1,0 +1,118 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-23",
+  "recipient": {
+    "envVar": "DELIVERY_TEST_EMAIL_TO",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "42",
+      "targetDate": "2026-09-03",
+      "requestedOn": "2026-09-03T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-09-03",
+        "qualifyingOrdersFetched": 272,
+        "fullOrdersFetched": 14,
+        "contactsUpserted": 8,
+        "ordersCreated": 8,
+        "ordersUpdated": 0,
+        "totalsUpserted": 8,
+        "taxDetailsUpserted": 13,
+        "linesUpserted": 117,
+        "allocationsUpserted": 130,
+        "addressesUpserted": 8,
+        "deliveryGroupsUpserted": 12,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 6,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "PG04563",
+            "orderType": "PG",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PL02627",
+            "orderType": "PL",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PU01373",
+            "orderType": "PU",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO37775",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO38768",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO40398",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BQ00923",
+      "salespersonNumber": "3170",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "DELIVERY_TEST_EMAIL_TO",
+      "sentToTestEmail": true,
+      "previewOnly": false,
+      "confirmation": {
+        "confirmationId": "cmrxpucvs008g6cmb7460itod",
+        "confirmationStatus": "PENDING",
+        "confirmationCreated": true,
+        "confirmationUpdated": false,
+        "tokenAvailable": true,
+        "skippedReason": null
+      },
+      "webpageSalespersonBlockIncluded": true,
+      "requestDifferentDateBehaviorUnchanged": true,
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 25
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

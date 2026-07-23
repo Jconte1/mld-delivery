@@ -401,12 +401,14 @@ model NotificationEvent {
   scheduledAt       DateTime?
   triggeredAt       DateTime?
   sentAt            DateTime?
+  detailsLinkId     String?
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 
   orderDeliveryGroup    OrderDeliveryGroup            @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
   order                 Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
   contact               Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  detailsLink           DeliveryDetailsLink?          @relation("NotificationEventDetailsLink", fields: [detailsLinkId], references: [id], onDelete: SetNull)
   attempts              NotificationAttempt[]
   deliveryConfirmations DeliveryConfirmation[]
   twilioInboundMessages TwilioInboundMessage[]
@@ -424,6 +426,7 @@ model NotificationEvent {
   @@index([scheduledAt])
   @@index([triggeredAt])
   @@index([sentAt])
+  @@index([detailsLinkId])
   @@map("notification_events")
 }
 
@@ -451,6 +454,27 @@ model NotificationAttempt {
   @@index([success])
   @@index([externalMessageId])
   @@map("notification_attempts")
+}
+
+model DeliveryDetailsLink {
+  id                             String    @id @default(cuid())
+  token                          String    @unique @db.VarChar(128)
+  orderId                        String
+  orderDeliveryGroupId           String
+  deliveryDate                   DateTime  @db.Date
+  createdFromNotificationEventId String?
+  expiresAt                      DateTime?
+  lastViewedAt                   DateTime?
+  createdAt                      DateTime  @default(now())
+  updatedAt                      DateTime  @updatedAt
+
+  notificationEvents NotificationEvent[] @relation("NotificationEventDetailsLink")
+
+  @@unique([orderDeliveryGroupId, deliveryDate])
+  @@index([orderId])
+  @@index([orderDeliveryGroupId])
+  @@index([deliveryDate])
+  @@map("delivery_details_links")
 }
 
 model DeliveryConfirmation {

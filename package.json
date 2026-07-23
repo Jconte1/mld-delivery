@@ -8,11 +8,18 @@
     "start": "next start",
     "lint": "eslint",
     "prisma:generate": "prisma generate",
+    "manual-demo:test-interval-emails-with-salesperson": "tsx -r dotenv/config scripts/manual-demo/test-interval-emails-with-salesperson.ts",
+    "create:30-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-30-day-delivery-reminder-events.ts",
     "sync:salesperson-contacts": "tsx -r dotenv/config scripts/sync-salesperson-contacts.ts",
+    "verify:salesperson-contact-counts": "tsx -r dotenv/config scripts/verify-salesperson-contact-counts.ts",
+    "verify:salesperson-number-import": "tsx -r dotenv/config scripts/verify-salesperson-number-import.ts",
     "validate:salesperson-contact-sync": "tsx scripts/validate-salesperson-contact-sync.ts",
     "validate:salesperson-import": "tsx scripts/validate-salesperson-import.ts",
     "validate:salesperson-rendering": "tsx scripts/validate-salesperson-rendering.ts",
-    "validate:twilio-inbound": "tsx scripts/validate-twilio-inbound-sms-foundation.ts"
+    "validate:twilio-inbound": "tsx scripts/validate-twilio-inbound-sms-foundation.ts",
+    "validate:delivery-details-link-safety": "tsx scripts/validate-delivery-details-link-safety.ts",
+    "validate:30-day-notification": "tsx scripts/validate-30-day-notification-creation.ts",
+    "validate:30-day-rendering": "tsx scripts/validate-30-day-rendering.ts"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.8.0",

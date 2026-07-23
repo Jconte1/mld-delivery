@@ -351,6 +351,7 @@ function getConfirmVia(fullOrder: unknown) {
 
 export function getSalespersonNumber(fullOrder: unknown) {
   return firstString(
+    firstStringField(fullOrder, ["SalespersonNumber", "SalesPersonNumber", "salespersonNumber"]),
     getString(getNestedField(fullOrder, ["custom", "Document", "AttributeSALESNEW"])),
     firstStringField(fullOrder, [
       "AttributeSALESNEW",

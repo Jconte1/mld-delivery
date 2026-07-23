@@ -1,0 +1,247 @@
+{
+  "mode": "preview",
+  "runDate": "2026-07-22",
+  "recipient": {
+    "envVar": "DELIVERY_TEST_EMAIL_TO",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "180",
+      "targetDate": "2027-01-18",
+      "requestedOn": "2027-01-18T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2027-01-18",
+        "qualifyingOrdersFetched": 0,
+        "fullOrdersFetched": 0,
+        "contactsUpserted": 0,
+        "ordersCreated": 0,
+        "ordersUpdated": 0,
+        "totalsUpserted": 0,
+        "taxDetailsUpserted": 0,
+        "linesUpserted": 0,
+        "allocationsUpserted": 0,
+        "addressesUpserted": 0,
+        "deliveryGroupsUpserted": 0,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 0,
+        "failedOrders": 0,
+        "errors": []
+      },
+      "selectedOrderNumber": null,
+      "salespersonNumberPresent": false,
+      "hasActiveSalespersonContact": false,
+      "hasSalespersonEmail": false,
+      "hasSalespersonPhone": false,
+      "emailFooterIncluded": false,
+      "sentToTestEmail": false,
+      "previewOnly": true,
+      "reason": "no_active_eligible_delivery_group_with_salesperson_number"
+    },
+    {
+      "interval": "90",
+      "targetDate": "2026-10-20",
+      "requestedOn": "2026-10-20T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-10-20",
+        "qualifyingOrdersFetched": 191,
+        "fullOrdersFetched": 4,
+        "contactsUpserted": 3,
+        "ordersCreated": 3,
+        "ordersUpdated": 0,
+        "totalsUpserted": 3,
+        "taxDetailsUpserted": 6,
+        "linesUpserted": 52,
+        "allocationsUpserted": 51,
+        "addressesUpserted": 3,
+        "deliveryGroupsUpserted": 4,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 1,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "PG04389",
+            "orderType": "PG",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BQ00974",
+      "salespersonNumber": "3030",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "DELIVERY_TEST_EMAIL_TO",
+      "sentToTestEmail": false,
+      "previewOnly": true,
+      "confirmation": null,
+      "webpageSalespersonBlockIncluded": null,
+      "requestDifferentDateBehaviorUnchanged": null,
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    },
+    {
+      "interval": "60",
+      "targetDate": "2026-09-20",
+      "requestedOn": "2026-09-20T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-09-20",
+        "qualifyingOrdersFetched": 0,
+        "fullOrdersFetched": 0,
+        "contactsUpserted": 0,
+        "ordersCreated": 0,
+        "ordersUpdated": 0,
+        "totalsUpserted": 0,
+        "taxDetailsUpserted": 0,
+        "linesUpserted": 0,
+        "allocationsUpserted": 0,
+        "addressesUpserted": 0,
+        "deliveryGroupsUpserted": 0,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 0,
+        "failedOrders": 0,
+        "errors": []
+      },
+      "selectedOrderNumber": null,
+      "salespersonNumberPresent": false,
+      "hasActiveSalespersonContact": false,
+      "hasSalespersonEmail": false,
+      "hasSalespersonPhone": false,
+      "emailFooterIncluded": false,
+      "sentToTestEmail": false,
+      "previewOnly": true,
+      "reason": "no_active_eligible_delivery_group_with_salesperson_number"
+    },
+    {
+      "interval": "42",
+      "targetDate": "2026-09-02",
+      "requestedOn": "2026-09-02T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-09-02",
+        "qualifyingOrdersFetched": 352,
+        "fullOrdersFetched": 20,
+        "contactsUpserted": 11,
+        "ordersCreated": 11,
+        "ordersUpdated": 0,
+        "totalsUpserted": 11,
+        "taxDetailsUpserted": 22,
+        "linesUpserted": 211,
+        "allocationsUpserted": 156,
+        "addressesUpserted": 11,
+        "deliveryGroupsUpserted": 20,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 8,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "ARFS00000400",
+            "orderType": "AF",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "ARFS00000405",
+            "orderType": "AF",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "ARFS00000410",
+            "orderType": "AF",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "HW06023",
+            "orderType": "HW",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "HW06023",
+            "orderType": "HW",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PG03888",
+            "orderType": "PG",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO38078",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SRB00243",
+            "orderType": "SR",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BQ00921",
+      "salespersonNumber": "3170",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "DELIVERY_TEST_EMAIL_TO",
+      "sentToTestEmail": false,
+      "previewOnly": true,
+      "confirmation": {
+        "confirmationId": "cmrwkh2h300g2ywmbk9tp38kz",
+        "confirmationStatus": "PENDING",
+        "confirmationCreated": true,
+        "confirmationUpdated": false,
+        "tokenAvailable": true,
+        "skippedReason": null
+      },
+      "webpageSalespersonBlockIncluded": true,
+      "requestDifferentDateBehaviorUnchanged": true,
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 23
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": true,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

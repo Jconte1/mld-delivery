@@ -150,11 +150,16 @@ async function main() {
   assertIncludes(confirmationSms, "Reply Y to confirm or N", "42-day SMS route/response note remains");
 
   const projectRoot = path.resolve(__dirname, "..");
-  const [page, block, emailRenderer, reminderEmailRenderer] = await Promise.all([
+  const [page, block, emailRenderer, reminderEmailRenderer, intervalTestScript] =
+    await Promise.all([
     readFile(path.join(projectRoot, "app/delivery/confirm/[token]/page.tsx"), "utf8"),
     readFile(path.join(projectRoot, "app/delivery/components/SalespersonContactBlock.tsx"), "utf8"),
     readFile(path.join(projectRoot, "lib/notifications/deliveryConfirmationEmail.ts"), "utf8"),
     readFile(path.join(projectRoot, "lib/notifications/deliveryReminderEmail.ts"), "utf8"),
+    readFile(
+      path.join(projectRoot, "scripts/manual-demo/test-interval-emails-with-salesperson.ts"),
+      "utf8"
+    ),
   ]);
 
   assert(page.includes("SalespersonContactBlock"), "confirmation webpage should render contact block");
@@ -166,6 +171,26 @@ async function main() {
     assert(!source.includes("CATALOGUE_DATABASE_URL"), "rendering should not require catalogue-db");
     assert(!source.includes("fetchCatalogueSalespersonStaffUsers"), "rendering should not query catalogue-db");
   }
+  assert(
+    intervalTestScript.includes('requireEnv("DELIVERY_TEST_EMAIL_TO")'),
+    "interval email test should require explicit DELIVERY_TEST_EMAIL_TO"
+  );
+  assert(
+    !intervalTestScript.includes("sendDemoSms") &&
+      !intervalTestScript.includes("render42DaySmsConfirmationMessage") &&
+      !intervalTestScript.includes("TWILIO_"),
+    "interval email test should not use SMS or Twilio"
+  );
+  assert(
+    !intervalTestScript.includes("confirmDeliveryFromWebpage") &&
+      !intervalTestScript.includes("enqueueDeliveryConfirmationAttributeWriteback"),
+    "interval email/page test should not invoke Acumatica confirmation writeback"
+  );
+  assert(
+    intervalTestScript.includes("noRealCustomerEmailSent") &&
+      intervalTestScript.includes("noNotificationEventCreatedByScript"),
+    "interval email test should report customer-recipient and notification-event safety"
+  );
 
   console.log(
     JSON.stringify(
@@ -175,6 +200,9 @@ async function main() {
         confirmationEmailIncludesSalespersonFooter: true,
         missingOrInactiveContactOmitted: true,
         webpageBlockWired: true,
+        intervalEmailTestRequiresExplicitTestRecipient: true,
+        intervalEmailTestIsEmailOnly: true,
+        intervalEmailTestDoesNotInvokeAcumaticaWriteback: true,
         smsSalespersonContactOmitted: true,
         normalRenderingDoesNotRequireCatalogueDb: true,
         noLiveMessagesSent: true,

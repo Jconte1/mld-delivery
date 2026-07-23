@@ -1,0 +1,111 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-23",
+  "recipient": {
+    "envVar": "DELIVERY_TEST_EMAIL_TO",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "60",
+      "targetDate": "2026-09-21",
+      "requestedOn": "2026-09-21T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-09-21",
+        "qualifyingOrdersFetched": 171,
+        "fullOrdersFetched": 17,
+        "contactsUpserted": 8,
+        "ordersCreated": 8,
+        "ordersUpdated": 0,
+        "totalsUpserted": 8,
+        "taxDetailsUpserted": 14,
+        "linesUpserted": 103,
+        "allocationsUpserted": 84,
+        "addressesUpserted": 8,
+        "deliveryGroupsUpserted": 12,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 6,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "ARFS00000414",
+            "orderType": "AF",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "CB00571",
+            "orderType": "CB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "CB00577",
+            "orderType": "CB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "BPB00341",
+            "orderType": "PB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO38762",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO40119",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BQ00922",
+      "salespersonNumber": "3170",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "DELIVERY_TEST_EMAIL_TO",
+      "sentToTestEmail": true,
+      "previewOnly": false,
+      "confirmation": null,
+      "webpageSalespersonBlockIncluded": null,
+      "requestDifferentDateBehaviorUnchanged": null,
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

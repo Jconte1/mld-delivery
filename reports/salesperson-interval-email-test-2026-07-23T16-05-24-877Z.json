@@ -1,0 +1,69 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-23",
+  "recipient": {
+    "envVar": "DELIVERY_TEST_EMAIL_TO",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "180",
+      "targetDate": "2027-01-19",
+      "requestedOn": "2027-01-19T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2027-01-19",
+        "qualifyingOrdersFetched": 0,
+        "fullOrdersFetched": 0,
+        "contactsUpserted": 0,
+        "ordersCreated": 0,
+        "ordersUpdated": 0,
+        "totalsUpserted": 0,
+        "taxDetailsUpserted": 0,
+        "linesUpserted": 0,
+        "allocationsUpserted": 0,
+        "addressesUpserted": 0,
+        "deliveryGroupsUpserted": 0,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 0,
+        "failedOrders": 0,
+        "errors": []
+      },
+      "selectedOrderNumber": null,
+      "salespersonNumberPresent": false,
+      "hasActiveSalespersonContact": false,
+      "hasSalespersonEmail": false,
+      "hasSalespersonPhone": false,
+      "emailFooterIncluded": false,
+      "sentToTestEmail": false,
+      "previewOnly": false,
+      "reason": "no_active_eligible_delivery_group_with_salesperson_number"
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

@@ -1,0 +1,86 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-23",
+  "recipient": {
+    "envVar": "DELIVERY_TEST_EMAIL_TO",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "90",
+      "targetDate": "2026-10-21",
+      "requestedOn": "2026-10-21T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-10-21",
+        "qualifyingOrdersFetched": 28,
+        "fullOrdersFetched": 3,
+        "contactsUpserted": 2,
+        "ordersCreated": 2,
+        "ordersUpdated": 0,
+        "totalsUpserted": 2,
+        "taxDetailsUpserted": 4,
+        "linesUpserted": 16,
+        "allocationsUpserted": 12,
+        "addressesUpserted": 2,
+        "deliveryGroupsUpserted": 3,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 1,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "SO37789",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BPB00400",
+      "salespersonNumber": "3210",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "DELIVERY_TEST_EMAIL_TO",
+      "sentToTestEmail": true,
+      "previewOnly": false,
+      "confirmation": null,
+      "webpageSalespersonBlockIncluded": null,
+      "requestDifferentDateBehaviorUnchanged": null,
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 24
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

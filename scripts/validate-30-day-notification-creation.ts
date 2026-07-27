@@ -30,8 +30,12 @@ function main() {
   const renderer = read("lib/notifications/deliveryReminder30Day.ts");
   const script = read("scripts/create-30-day-delivery-reminder-events.ts");
   const helper = read("lib/notifications/deliveryDetailsLinks.ts");
+  const notificationHelper = read("lib/notifications/helpers.ts");
 
   const weekendIndex = source.indexOf("shouldSkipNotificationRunForWeekend(runDate)");
+  const deliveryDateWeekendIndex = source.indexOf(
+    "getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate)"
+  );
   const importIndex = source.indexOf(
     "summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn)"
   );
@@ -40,11 +44,34 @@ function main() {
   );
 
   assert(weekendIndex >= 0, "30-day creator checks global weekend skip", failures);
+  assert(
+    deliveryDateWeekendIndex > weekendIndex,
+    "30-day creator checks weekend delivery dates after weekend run skip",
+    failures
+  );
   assert(importIndex >= 0, "30-day creator imports fresh target-date data", failures);
   assert(targetQueryIndex >= 0, "30-day creator queries target delivery groups", failures);
   assert(
-    importIndex > weekendIndex && importIndex < targetQueryIndex,
-    "fresh Acumatica import occurs before target group query/qualification",
+    importIndex > deliveryDateWeekendIndex && importIndex < targetQueryIndex,
+    "fresh Acumatica import occurs only after weekend delivery-date eligibility check",
+    failures
+  );
+  assertIncludes(
+    notificationHelper,
+    "DELIVERY_DATE_WEEKEND_SKIP_REASON = \"delivery_date_weekend\"",
+    "shared helper defines weekend delivery-date skip reason",
+    failures
+  );
+  assertIncludes(
+    source,
+    "deliveryGroupsSkippedWeekendDeliveryDate",
+    "30-day summary reports weekend delivery-date skips",
+    failures
+  );
+  assertIncludes(
+    source,
+    "detailsLinkId: null",
+    "30-day weekend delivery-date dedupe branch detaches details links",
     failures
   );
 
@@ -158,10 +185,10 @@ function main() {
     "30-day email renderer has exact payment wording",
     failures
   );
-  assertIncludes(
+  assertNotIncludes(
     renderer,
     "Items For This Delivery",
-    "30-day email renderer includes item section",
+    "30-day email renderer omits item section",
     failures
   );
   assertNotIncludes(

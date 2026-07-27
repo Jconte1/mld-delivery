@@ -28,6 +28,7 @@ import {
   formatContactName,
   formatJobAddress,
   formatJobName,
+  getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
   selectNotificationChannel,
 } from "@/lib/notifications/helpers";
@@ -91,6 +92,7 @@ export type Create42DayDeliveryConfirmationEventsSummary = {
   targetDeliveryDate: string;
   targetDeliveryGroups: number;
   eligibleDeliveryGroups: number;
+  deliveryGroupsSkippedWeekendDeliveryDate: number;
   deliveryGroupsSkippedIneligible: number;
   eventsCreated: number;
   eventsDeduped: number;
@@ -154,6 +156,7 @@ function emptySummary(params: {
     targetDeliveryDate: params.targetDeliveryDate,
     targetDeliveryGroups: 0,
     eligibleDeliveryGroups: 0,
+    deliveryGroupsSkippedWeekendDeliveryDate: 0,
     deliveryGroupsSkippedIneligible: 0,
     eventsCreated: 0,
     eventsDeduped: 0,
@@ -270,6 +273,25 @@ function paymentReportFromError(error: unknown): DeliveryConfirmation42DayPaymen
     remainingUndeliveredValueAfterCurrentDelivery: null,
     requiredDownOnRemaining: null,
     paymentCalculationWarnings: [`Payment evaluation failed: ${message}`],
+  };
+}
+
+function emptyPaymentReport(): DeliveryConfirmation42DayPaymentReport {
+  return {
+    paymentTerms: null,
+    unpaidBalance: null,
+    orderTotal: null,
+    paidToDate: null,
+    paymentApplicabilityStatus: null,
+    paymentStatus: null,
+    amountDueNow: null,
+    amountDueNowRounded: null,
+    currentDeliveryGroupValue: null,
+    currentDeliveryGroupMerchandiseValue: null,
+    currentDeliveryGroupTaxAmount: null,
+    remainingUndeliveredValueAfterCurrentDelivery: null,
+    requiredDownOnRemaining: null,
+    paymentCalculationWarnings: [],
   };
 }
 
@@ -394,6 +416,113 @@ export async function create42DayDeliveryConfirmationEvents(
       continue;
     }
 
+    const dedupeKey = buildNotificationDedupeKey({
+      orderType: order.orderType,
+      orderNumber: order.orderNumber,
+      deliveryDate: deliveryGroup.deliveryDate,
+      intervalType: NotificationIntervalType.DAY_42,
+      actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+    });
+    const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
+      deliveryGroup.deliveryDate
+    );
+    if (deliveryDateSkipReason) {
+      summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
+      let event = await client.notificationEvent.findUnique({
+        where: { dedupeKey },
+        select: notificationEventSelect,
+      });
+
+      if (event) {
+        summary.eventsDeduped += 1;
+        event = await client.notificationEvent.update({
+          where: { id: event.id },
+          data: {
+            selectedChannel: null,
+            channelReason: deliveryDateSkipReason,
+            recipientEmail: null,
+            recipientPhone: null,
+            status: NotificationEventStatus.SKIPPED,
+            reasonSkipped: deliveryDateSkipReason,
+            scheduledAt: null,
+          },
+          select: notificationEventSelect,
+        });
+      } else {
+        event = await client.notificationEvent.create({
+          data: {
+            orderId: order.id,
+            deliveryGroupId: deliveryGroup.id,
+            contactId: order.contact.contactId,
+            orderType: order.orderType,
+            orderNumber: order.orderNumber,
+            deliveryDate: deliveryGroup.deliveryDate,
+            intervalType: NotificationIntervalType.DAY_42,
+            actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+            dedupeKey,
+            selectedChannel: null,
+            channelReason: deliveryDateSkipReason,
+            recipientEmail: null,
+            recipientPhone: null,
+            status: NotificationEventStatus.SKIPPED,
+            reasonSkipped: deliveryDateSkipReason,
+            scheduledAt: null,
+          },
+          select: notificationEventSelect,
+        });
+        summary.eventsCreated += 1;
+      }
+
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, deliveryDateSkipReason);
+      const paymentReport = emptyPaymentReport();
+      const acumaticaConfirmVia = normalizeAcumaticaConfirmVia(order.confirmVia);
+      const alreadyConfirmedInAcumatica = isAlreadyConfirmedInAcumatica(acumaticaConfirmVia);
+
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: event.id,
+        dedupeKey: event.dedupeKey,
+        intervalType: event.intervalType,
+        actionType: event.actionType,
+        status: event.status,
+        selectedChannel: null,
+        recipientEmail: null,
+        recipientPhone: null,
+        reasonSkipped: deliveryDateSkipReason,
+        alreadyConfirmedForDeliveryDate: false,
+        alreadyConfirmedInAcumatica,
+        acumaticaConfirmVia,
+        subject: null,
+        renderedMessagePreview: deliveryDateSkipReason,
+        linkTokenPresent: false,
+        linkScopeKey: null,
+        confirmationState: null,
+        paymentTerms: paymentReport.paymentTerms,
+        unpaidBalance: paymentReport.unpaidBalance,
+        orderTotal: paymentReport.orderTotal,
+        paidToDate: paymentReport.paidToDate,
+        paymentApplicabilityStatus: paymentReport.paymentApplicabilityStatus,
+        paymentStatus: paymentReport.paymentStatus,
+        amountDueNow: paymentReport.amountDueNow,
+        amountDueNowRounded: paymentReport.amountDueNowRounded,
+        currentDeliveryGroupValue: paymentReport.currentDeliveryGroupValue,
+        currentDeliveryGroupMerchandiseValue: paymentReport.currentDeliveryGroupMerchandiseValue,
+        currentDeliveryGroupTaxAmount: paymentReport.currentDeliveryGroupTaxAmount,
+        remainingUndeliveredValueAfterCurrentDelivery:
+          paymentReport.remainingUndeliveredValueAfterCurrentDelivery,
+        requiredDownOnRemaining: paymentReport.requiredDownOnRemaining,
+        paymentReminderApplies: false,
+        emailPaymentReminderIncluded: false,
+        paymentCalculationWarnings: paymentReport.paymentCalculationWarnings,
+      });
+
+      continue;
+    }
+
     summary.eligibleDeliveryGroups += 1;
     const paymentReport = await evaluate42DayDeliveryGroupPayment(deliveryGroup.id);
     const showPaymentReminder = paymentReminderApplies(paymentReport);
@@ -409,14 +538,6 @@ export async function create42DayDeliveryConfirmationEvents(
       : alreadyConfirmedForDeliveryDate
         ? DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON
         : null;
-    const dedupeKey = buildNotificationDedupeKey({
-      orderType: order.orderType,
-      orderNumber: order.orderNumber,
-      deliveryDate: deliveryGroup.deliveryDate,
-      intervalType: NotificationIntervalType.DAY_42,
-      actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
-    });
-
     const channel = confirmationSkipReason
       ? null
       : selectNotificationChannel(order.contact, {

@@ -111,6 +111,18 @@ function main() {
     "details page documents no-write lastViewedAt choice",
     failures
   );
+  assertIncludes(
+    detailsPage,
+    "DeliveryItemsForThisDelivery",
+    "details page still renders Items For This Delivery component",
+    failures
+  );
+  assertIncludes(
+    read("app/delivery/components/DeliveryItemsForThisDelivery.tsx"),
+    "Items For This Delivery",
+    "shared details component still contains Items For This Delivery heading",
+    failures
+  );
 
   for (const forbidden of [
     "DeliveryConfirmationActions",
@@ -147,6 +159,12 @@ function main() {
     confirmationPage,
     "requestDifferentDate",
     "42-day confirmation page still supports request-different-date",
+    failures
+  );
+  assertIncludes(
+    confirmationPage,
+    "Items For This Delivery",
+    "42-day confirmation page still renders Items For This Delivery heading",
     failures
   );
 

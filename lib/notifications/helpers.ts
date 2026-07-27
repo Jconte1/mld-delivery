@@ -25,6 +25,8 @@ export type NotificationIntervalType = (typeof NOTIFICATION_INTERVAL_TYPES)[numb
 export type NotificationActionType = (typeof NOTIFICATION_ACTION_TYPES)[number];
 export type NotificationChannel = "SMS" | "EMAIL";
 
+export const DELIVERY_DATE_WEEKEND_SKIP_REASON = "delivery_date_weekend";
+
 export type NotificationContactInput = {
   smsOptIn?: boolean | null;
   emailOptIn?: boolean | null;
@@ -105,12 +107,30 @@ export function getNotificationTargetDate(runDate: Date | string, intervalDays: 
 }
 
 export function isNotificationBusinessDay(runDate: Date | string) {
-  const day = dateFromKey(runDate).getUTCDay();
-  return day !== 0 && day !== 6;
+  return !isWeekendDate(runDate);
 }
 
 export function shouldSkipNotificationRunForWeekend(runDate: Date | string) {
   return !isNotificationBusinessDay(runDate);
+}
+
+export function isWeekendDate(value: Date | string) {
+  const day = dateFromKey(value).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+export function isWeekendDeliveryDate(deliveryDate: Date | string) {
+  return isWeekendDate(deliveryDate);
+}
+
+export function isEligibleDeliveryDateForCustomerNotification(deliveryDate: Date | string) {
+  return !isWeekendDeliveryDate(deliveryDate);
+}
+
+export function getDeliveryDateCustomerNotificationSkipReason(deliveryDate: Date | string) {
+  return isEligibleDeliveryDateForCustomerNotification(deliveryDate)
+    ? null
+    : DELIVERY_DATE_WEEKEND_SKIP_REASON;
 }
 
 export function assertNotificationBusinessDay(runDate: Date | string) {

@@ -121,7 +121,9 @@ const ONE = BigInt(1);
 const TWO = BigInt(2);
 const TEN = BigInt(10);
 const SCALE = BigInt(1_000_000);
-const ELIGIBLE_PAYMENT_TERMS = new Set(["PIF", "PP", "PPP", "PPT"]);
+export const APPROVED_DELIVERY_PAYMENT_TERMS = ["PIF", "PP", "PPP", "PPT"] as const;
+
+const ELIGIBLE_PAYMENT_TERMS = new Set<string>(APPROVED_DELIVERY_PAYMENT_TERMS);
 const MEANINGFUL_BALANCE_THRESHOLD = TWO * SCALE;
 const DOWN_PAYMENT_RATE_NUMERATOR = BigInt(45);
 const DOWN_PAYMENT_RATE_DENOMINATOR = BigInt(100);
@@ -270,6 +272,15 @@ function moneyOrNull(value: ScaledDecimal | null) {
   return value === null ? null : formatMoney(value);
 }
 
+export function normalizeDeliveryPaymentTerms(value: string | null | undefined) {
+  return value?.trim().toUpperCase() || null;
+}
+
+export function isEligibleDeliveryPaymentTerm(value: string | null | undefined) {
+  const normalized = normalizeDeliveryPaymentTerms(value);
+  return normalized !== null && ELIGIBLE_PAYMENT_TERMS.has(normalized);
+}
+
 export function evaluateDeliveryGroupPayment(
   input: DeliveryGroupPaymentInput
 ): DeliveryGroupPaymentEvaluation {
@@ -279,11 +290,11 @@ export function evaluateDeliveryGroupPayment(
     throw new Error(`Invalid delivery group date: ${String(input.deliveryDate)}`);
   }
 
-  const paymentTerms = input.paymentTerms?.trim().toUpperCase() || null;
+  const paymentTerms = normalizeDeliveryPaymentTerms(input.paymentTerms);
   const unpaidBalance = parseScaledDecimal(input.unpaidBalance);
   const orderTotal = parseScaledDecimal(input.orderTotal);
   const taxTotal = parseScaledDecimal(input.taxTotal) ?? ZERO;
-  const eligibleTerms = paymentTerms !== null && ELIGIBLE_PAYMENT_TERMS.has(paymentTerms);
+  const eligibleTerms = isEligibleDeliveryPaymentTerm(paymentTerms);
   const nonZeroTaxRates = taxTotal > ZERO ? uniqueNonZeroTaxRates(input.taxDetails) : [];
   const seenWarnings = new Set<string>();
 

@@ -13,6 +13,7 @@ import {
   formatContactName,
   formatJobAddress,
   formatJobName,
+  getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
@@ -27,6 +28,12 @@ export type DeliveryReminderIntervalType =
   | typeof NotificationIntervalType.DAY_180
   | typeof NotificationIntervalType.DAY_90
   | typeof NotificationIntervalType.DAY_60;
+
+type DeliveryReminderEventsClient = Pick<
+  typeof prisma,
+  "orderDeliveryGroup" | "notificationEvent"
+> &
+  Partial<Pick<typeof prisma, "salespersonContact">>;
 
 export type MessagePreview = {
   orderNumber: string;
@@ -43,9 +50,11 @@ export type CreateDeliveryReminderEventsSummary = {
   eventsSkipped: number;
   eventsDeduped: number;
   weekendSkipped: boolean;
+  deliveryGroupsSkippedWeekendDeliveryDate: number;
   targetDeliveryGroups: number;
   deliveryGroupsSkippedIneligible: number;
   deliveryGroupsSkippedNoChannel: number;
+  skippedReasons: Record<string, number>;
   dryRun: boolean;
   eventsWouldCreate: number;
   messagePreviews: MessagePreview[];
@@ -57,6 +66,7 @@ export type CreateDeliveryReminderEventsOptions = {
   intervalType: DeliveryReminderIntervalType;
   intervalDays: number;
   useLegacy180Subject?: boolean;
+  prismaClient?: DeliveryReminderEventsClient;
 };
 
 function emptySummary(params: {
@@ -72,9 +82,11 @@ function emptySummary(params: {
     eventsSkipped: 0,
     eventsDeduped: 0,
     weekendSkipped: false,
+    deliveryGroupsSkippedWeekendDeliveryDate: 0,
     targetDeliveryGroups: 0,
     deliveryGroupsSkippedIneligible: 0,
     deliveryGroupsSkippedNoChannel: 0,
+    skippedReasons: {},
     dryRun: params.dryRun,
     eventsWouldCreate: 0,
     messagePreviews: [],
@@ -101,6 +113,10 @@ function isBlockedLifecycleStatus(value: string | null | undefined) {
 
 function isUniqueConstraintError(error: unknown) {
   return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
+}
+
+function addSkippedReason(summary: CreateDeliveryReminderEventsSummary, reason: string) {
+  summary.skippedReasons[reason] = (summary.skippedReasons[reason] ?? 0) + 1;
 }
 
 function safeJobAddress(address: {
@@ -133,6 +149,7 @@ function renderSubject(params: {
 export async function createDeliveryReminderEvents(
   options: CreateDeliveryReminderEventsOptions
 ): Promise<CreateDeliveryReminderEventsSummary> {
+  const client = options.prismaClient ?? prisma;
   const runDate = dateKey(options.runDate ?? new Date());
   const targetDeliveryDate = getNotificationTargetDate(runDate, options.intervalDays);
   const targetDeliveryDateKey = dateKey(targetDeliveryDate);
@@ -148,7 +165,7 @@ export async function createDeliveryReminderEvents(
     return summary;
   }
 
-  const deliveryGroups = await prisma.orderDeliveryGroup.findMany({
+  const deliveryGroups = await client.orderDeliveryGroup.findMany({
     where: { deliveryDate: targetDeliveryDate, isActive: true },
     orderBy: [{ orderNumber: "asc" }, { id: "asc" }],
     select: {
@@ -206,7 +223,8 @@ export async function createDeliveryReminderEvents(
   });
   summary.targetDeliveryGroups = deliveryGroups.length;
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
-    deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber)
+    deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
+    client
   );
 
   for (const deliveryGroup of deliveryGroups) {
@@ -220,8 +238,6 @@ export async function createDeliveryReminderEvents(
       continue;
     }
 
-    summary.eligibleDeliveryGroups += 1;
-
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -230,14 +246,80 @@ export async function createDeliveryReminderEvents(
       actionType: NotificationActionType.DELIVERY_REMINDER,
     });
 
-    const existingEvent = await prisma.notificationEvent.findUnique({
+    const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
+      deliveryGroup.deliveryDate
+    );
+
+    const existingEvent = await client.notificationEvent.findUnique({
       where: { dedupeKey },
       select: { id: true },
     });
     if (existingEvent) {
       summary.eventsDeduped += 1;
+      if (deliveryDateSkipReason) {
+        summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
+        summary.eventsSkipped += 1;
+        addSkippedReason(summary, deliveryDateSkipReason);
+
+        if (!dryRun) {
+          await client.notificationEvent.update({
+            where: { id: existingEvent.id },
+            data: {
+              selectedChannel: null,
+              channelReason: deliveryDateSkipReason,
+              recipientEmail: null,
+              recipientPhone: null,
+              status: NotificationEventStatus.SKIPPED,
+              reasonSkipped: deliveryDateSkipReason,
+              scheduledAt: null,
+            },
+          });
+        }
+      }
       continue;
     }
+
+    if (deliveryDateSkipReason) {
+      summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
+      summary.eventsSkipped += 1;
+      summary.eventsWouldCreate += dryRun ? 1 : 0;
+      addSkippedReason(summary, deliveryDateSkipReason);
+
+      if (!dryRun) {
+        try {
+          await client.notificationEvent.create({
+            data: {
+              orderId: order.id,
+              deliveryGroupId: deliveryGroup.id,
+              contactId: order.contact.contactId,
+              orderType: order.orderType,
+              orderNumber: order.orderNumber,
+              deliveryDate: deliveryGroup.deliveryDate,
+              intervalType: options.intervalType,
+              actionType: NotificationActionType.DELIVERY_REMINDER,
+              dedupeKey,
+              selectedChannel: null,
+              channelReason: deliveryDateSkipReason,
+              recipientEmail: null,
+              recipientPhone: null,
+              status: NotificationEventStatus.SKIPPED,
+              reasonSkipped: deliveryDateSkipReason,
+              scheduledAt: null,
+            },
+          });
+          summary.eventsCreated += 1;
+        } catch (error) {
+          if (!isUniqueConstraintError(error)) {
+            throw error;
+          }
+          summary.eventsDeduped += 1;
+        }
+      }
+
+      continue;
+    }
+
+    summary.eligibleDeliveryGroups += 1;
 
     const channel = selectNotificationChannel(order.contact, {
       activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
@@ -299,7 +381,7 @@ export async function createDeliveryReminderEvents(
     }
 
     try {
-      await prisma.notificationEvent.create({
+      await client.notificationEvent.create({
         data: {
           orderId: order.id,
           deliveryGroupId: deliveryGroup.id,

@@ -26,12 +26,16 @@ import {
   formatContactName,
   formatJobAddress,
   formatJobName,
+  getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
   renderDeliveryReminderEmailSubject,
 } from "../../lib/notifications/helpers";
 import { render30DayDeliveryReminderEmail } from "../../lib/notifications/deliveryReminder30Day";
+import { render14DayDeliveryReminderEmail } from "../../lib/notifications/deliveryReminder14Day";
+import { render12DayDeliveryPaymentReminderEmail } from "../../lib/notifications/deliveryPaymentReminder12Day";
 import { renderDeliveryReminderEmailBody } from "../../lib/notifications/deliveryReminderEmail";
 import { getActiveSalespersonContactMap } from "../../lib/notifications/salespersonContactCache";
+import { getPaymentDeadlineDate } from "../../lib/notifications/paymentDeadlineBusinessDays";
 import {
   getSalespersonContactDisplay,
   renderSalespersonEmailFooterText,
@@ -41,7 +45,7 @@ import {
 import { prisma } from "../../lib/prisma";
 
 type Mode = "preview" | "send";
-type IntervalKey = "180" | "90" | "60" | "42" | "30";
+type IntervalKey = "180" | "90" | "60" | "42" | "30" | "14" | "12";
 type IntervalArg = IntervalKey | "all";
 
 type Args = {
@@ -83,6 +87,18 @@ const INTERVALS = [
     days: 30,
     label: "30-day reminder",
     intervalType: NotificationIntervalType.DAY_30,
+  },
+  {
+    key: "14",
+    days: 14,
+    label: "14-day reminder",
+    intervalType: NotificationIntervalType.DAY_14,
+  },
+  {
+    key: "12",
+    days: 12,
+    label: "12-day payment reminder",
+    intervalType: NotificationIntervalType.DAY_12,
   },
 ] as const;
 
@@ -139,8 +155,8 @@ function parseArgs(argv: string[]): Args {
     }
     if (arg.startsWith("--interval=")) {
       const value = arg.slice("--interval=".length).trim();
-      if (!["180", "90", "60", "42", "30", "all"].includes(value)) {
-        throw new Error("--interval must be 180, 90, 60, 42, 30, or all");
+      if (!["180", "90", "60", "42", "30", "14", "12", "all"].includes(value)) {
+        throw new Error("--interval must be 180, 90, 60, 42, 30, 14, 12, or all");
       }
       interval = value as IntervalArg;
       continue;
@@ -351,6 +367,14 @@ function normalizeConfirmVia(value: string | null | undefined) {
   return trimmed || null;
 }
 
+function isDetailsLinkReminderInterval(interval: IntervalKey) {
+  return interval === "30" || interval === "14" || interval === "12";
+}
+
+function isPaymentRequestInterval(interval: IntervalKey) {
+  return interval === "12";
+}
+
 async function selectDeliveryGroup(targetDeliveryDate: string, interval: IntervalKey) {
   const groups = await loadCandidateGroups(targetDeliveryDate);
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
@@ -362,12 +386,12 @@ async function selectDeliveryGroup(targetDeliveryDate: string, interval: Interva
       !isCompletedOrCancelledStatus(order.status) &&
       !isCompletedOrCancelledStatus(group.status) &&
       !isBlockedLifecycleStatus(order.internalLifecycleStatus) &&
-      (interval !== "30" || Boolean(normalizeConfirmVia(order.confirmVia))) &&
+      (!isDetailsLinkReminderInterval(interval) || Boolean(normalizeConfirmVia(order.confirmVia))) &&
       Boolean(order.salespersonNumber)
     );
   });
 
-  const decorated = eligible.map((group) => {
+  let decorated = eligible.map((group) => {
     const contact = group.order.salespersonNumber
       ? salespersonContactsByNumber.get(group.order.salespersonNumber) ?? null
       : null;
@@ -377,6 +401,21 @@ async function selectDeliveryGroup(targetDeliveryDate: string, interval: Interva
       salespersonDisplay: getSalespersonContactDisplay(contact),
     };
   });
+
+  if (isPaymentRequestInterval(interval)) {
+    const paymentCandidates = [];
+    for (const candidate of decorated) {
+      const payment = await getDeliveryGroupPaymentEvaluation(candidate.group.id);
+      const paymentReminderApplies =
+        payment.paymentStatus === "balance_due" &&
+        Number(payment.amountDueNowRounded ?? "0") > 0 &&
+        payment.calculationWarnings.length === 0;
+      if (paymentReminderApplies) {
+        paymentCandidates.push(candidate);
+      }
+    }
+    decorated = paymentCandidates;
+  }
 
   return (
     decorated.find((candidate) => Boolean(candidate.salespersonDisplay)) ??
@@ -473,7 +512,7 @@ async function renderIntervalEmail(params: {
   const jobAddress = safeJobAddress(params.group);
   const footer = renderSalespersonEmailFooterText(params.salespersonContact);
 
-  if (params.interval.key === "30") {
+  if (isDetailsLinkReminderInterval(params.interval.key)) {
     const details = await ensureTestDeliveryDetailsLink(params.group);
     const readiness = await getDeliveryGroupReadiness(params.group.id);
     const payment = await getDeliveryGroupPaymentEvaluation(params.group.id);
@@ -481,7 +520,7 @@ async function renderIntervalEmail(params: {
       payment.paymentStatus === "balance_due" &&
       Number(payment.amountDueNowRounded ?? "0") > 2 &&
       payment.calculationWarnings.length === 0;
-    const email = render30DayDeliveryReminderEmail({
+    const emailParams = {
       contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName,
@@ -492,7 +531,18 @@ async function renderIntervalEmail(params: {
       amountDueNowRounded: payment.amountDueNowRounded,
       lines: readiness.lines,
       salespersonContact: params.salespersonContact,
-    });
+    };
+    const paymentDeadlineDate = getPaymentDeadlineDate(params.group.deliveryDate);
+    const email =
+      params.interval.key === "12"
+        ? render12DayDeliveryPaymentReminderEmail({
+            ...emailParams,
+            amountDueNowRounded: payment.amountDueNowRounded ?? "0.00",
+            paymentDeadlineDate,
+          })
+        : params.interval.key === "14"
+          ? render14DayDeliveryReminderEmail(emailParams)
+          : render30DayDeliveryReminderEmail(emailParams);
 
     return {
       subject: email.subject,
@@ -511,6 +561,7 @@ async function renderIntervalEmail(params: {
         paymentStatus: payment.paymentStatus,
         amountDueNowRounded: payment.amountDueNowRounded,
         paymentReminderApplies,
+        paymentDeadlineDate: params.interval.key === "12" ? paymentDeadlineDate : null,
       },
     };
   }
@@ -599,8 +650,35 @@ async function runInterval(params: {
 }) {
   const targetDate = dateKey(getNotificationTargetDate(params.runDate, params.interval.days));
   const requestedOn = requestedOnForTargetDate(targetDate);
+  const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDate);
 
-  if (params.interval.key === "30") {
+  if (deliveryDateSkipReason) {
+    return {
+      interval: params.interval.key,
+      targetDate,
+      requestedOn,
+      importSummary: null,
+      selectedOrderNumber: null,
+      salespersonNumberPresent: false,
+      hasActiveSalespersonContact: false,
+      hasSalespersonEmail: false,
+      hasSalespersonPhone: false,
+      emailFooterIncluded: false,
+      sentToTestEmail: false,
+      previewOnly: params.mode === "preview",
+      reason: deliveryDateSkipReason,
+      deliveryDateWeekendSkipped: true,
+      safety: {
+        noSmsSent: true,
+        noRealCustomerEmailSent: true,
+        noNotificationEventCreatedByScript: true,
+        noNotificationAttemptCreatedByScript: true,
+        noAcumaticaWritePerformed: true,
+      },
+    };
+  }
+
+  if (isDetailsLinkReminderInterval(params.interval.key)) {
     await assert30DayDetailsLinkSchemaReady();
   }
 
@@ -624,7 +702,9 @@ async function runInterval(params: {
       sentToTestEmail: false,
       previewOnly: params.mode === "preview",
       reason:
-        params.interval.key === "30"
+        isPaymentRequestInterval(params.interval.key)
+          ? "no_active_eligible_confirmed_payment_due_delivery_group_with_salesperson_number"
+          : isDetailsLinkReminderInterval(params.interval.key)
           ? "no_active_eligible_confirmed_delivery_group_with_salesperson_number"
           : "no_active_eligible_delivery_group_with_salesperson_number",
     };

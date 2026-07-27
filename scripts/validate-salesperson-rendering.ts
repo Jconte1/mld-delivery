@@ -39,7 +39,8 @@ async function main() {
     isActive: true,
   };
   const footer =
-    "For additional information or changes to this order, please reach out to John Smith at 801-555-1234 or john.smith@mld.com.";
+    "To make a payment, for additional information, or to make changes to this order, please reach out to John Smith at 801-555-1234 or john.smith@mld.com.";
+  const oldFooterPrefix = "For additional information or changes to this order";
   const webpageText =
     "Questions or changes? Contact John Smith at 801-555-1234 or john.smith@mld.com.";
 
@@ -54,7 +55,7 @@ async function main() {
       salespersonEmail: "john.smith@mld.com",
       isActive: true,
     }) ===
-      "For additional information or changes to this order, please reach out to John Smith at john.smith@mld.com.",
+      "To make a payment, for additional information, or to make changes to this order, please reach out to John Smith at john.smith@mld.com.",
     "name and email partial should render"
   );
   assert(
@@ -63,17 +64,17 @@ async function main() {
       salespersonPhone: "8015551234",
       isActive: true,
     }) ===
-      "For additional information or changes to this order, please reach out to John Smith at 801-555-1234.",
+      "To make a payment, for additional information, or to make changes to this order, please reach out to John Smith at 801-555-1234.",
     "name and phone partial should render"
   );
   assert(
     renderSalespersonEmailFooterText({ salespersonEmail: "john.smith@mld.com", isActive: true }) ===
-      "For additional information or changes to this order, please reach out to john.smith@mld.com.",
+      "To make a payment, for additional information, or to make changes to this order, please reach out to john.smith@mld.com.",
     "email-only partial should render"
   );
   assert(
     renderSalespersonEmailFooterText({ salespersonPhone: "8015551234", isActive: true }) ===
-      "For additional information or changes to this order, please reach out to 801-555-1234.",
+      "To make a payment, for additional information, or to make changes to this order, please reach out to 801-555-1234.",
     "phone-only partial should render"
   );
   assert(
@@ -101,6 +102,7 @@ async function main() {
       salespersonContact: contact,
     });
     assertIncludes(emailBody, footer, `${intervalType} email should include salesperson footer`);
+    assertNotIncludes(emailBody, oldFooterPrefix, `${intervalType} email should not use old footer copy`);
 
     const smsBody = renderDeliveryReminderMessage({ ...reminderBase, intervalType });
     assertNotIncludes(smsBody, "John Smith", `${intervalType} SMS should not include salesperson name`);
@@ -114,6 +116,7 @@ async function main() {
     salespersonContact: contact,
   });
   assertIncludes(confirmationBody, footer, "42-day email should include salesperson footer");
+  assertNotIncludes(confirmationBody, oldFooterPrefix, "42-day email should not use old footer copy");
   assertNotIncludes(
     render42DayEmailConfirmationBody({
       ...reminderBase,

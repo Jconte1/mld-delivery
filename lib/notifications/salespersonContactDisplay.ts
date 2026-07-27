@@ -72,7 +72,7 @@ export function getSalespersonContactDisplay(
     phoneHref: phoneHref(phone),
     targetText: target,
     emailFooterText:
-      `For additional information or changes to this order, please reach out to ${target}.`,
+      `To make a payment, for additional information, or to make changes to this order, please reach out to ${target}.`,
     webpageText: `Questions or changes? Contact ${target}.`,
   };
 }

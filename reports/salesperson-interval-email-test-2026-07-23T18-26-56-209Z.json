@@ -1,0 +1,92 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-23",
+  "recipient": {
+    "envVar": "NOTIFICATIONS_TEST_EMAIL",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "30",
+      "targetDate": "2026-08-22",
+      "requestedOn": "2026-08-22T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-08-22",
+        "qualifyingOrdersFetched": 29,
+        "fullOrdersFetched": 1,
+        "contactsUpserted": 1,
+        "ordersCreated": 1,
+        "ordersUpdated": 0,
+        "totalsUpserted": 1,
+        "taxDetailsUpserted": 2,
+        "linesUpserted": 29,
+        "allocationsUpserted": 17,
+        "addressesUpserted": 1,
+        "deliveryGroupsUpserted": 3,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 0,
+        "failedOrders": 0,
+        "errors": []
+      },
+      "selectedOrderNumber": "PH00229",
+      "salespersonNumber": "1230",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "NOTIFICATIONS_TEST_EMAIL",
+      "sentToTestEmail": true,
+      "previewOnly": false,
+      "confirmation": null,
+      "webpageSalespersonBlockIncluded": null,
+      "requestDifferentDateBehaviorUnchanged": null,
+      "detailsLink": {
+        "detailsLinkId": "cmrxuf70x001jwcmb9hfgnhxn",
+        "detailsLinkCreated": true,
+        "detailsLinkReused": false,
+        "linkPresent": true
+      },
+      "itemLineCount": 1,
+      "payment": {
+        "paymentStatus": "no_balance_due",
+        "amountDueNowRounded": null,
+        "paymentReminderApplies": false
+      },
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 25
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 25
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

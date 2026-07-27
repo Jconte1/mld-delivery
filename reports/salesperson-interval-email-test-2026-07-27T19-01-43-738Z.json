@@ -1,0 +1,149 @@
+{
+  "mode": "send",
+  "runDate": "2026-07-27",
+  "recipient": {
+    "envVar": "NOTIFICATIONS_TEST_EMAIL",
+    "redacted": "j***@mld.com"
+  },
+  "deliveryAppBaseUrl": {
+    "envVarUsed": "DELIVERY_APP_BASE_URL",
+    "isDefault": false,
+    "isLocalhost": false
+  },
+  "intervals": [
+    {
+      "interval": "14",
+      "targetDate": "2026-08-10",
+      "requestedOn": "2026-08-10T09:19:00.000Z",
+      "importSummary": {
+        "requestedOn": "2026-08-10",
+        "qualifyingOrdersFetched": 1343,
+        "fullOrdersFetched": 60,
+        "contactsUpserted": 45,
+        "ordersCreated": 45,
+        "ordersUpdated": 0,
+        "totalsUpserted": 45,
+        "taxDetailsUpserted": 84,
+        "linesUpserted": 1207,
+        "allocationsUpserted": 1389,
+        "addressesUpserted": 45,
+        "deliveryGroupsUpserted": 92,
+        "changeEventsDetected": 0,
+        "changeEventsCreated": 0,
+        "changeEventsDeduped": 0,
+        "skippedOrders": 11,
+        "failedOrders": 0,
+        "errors": [
+          {
+            "orderNumber": "BPB00301",
+            "orderType": "PB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "BPB00301",
+            "orderType": "PB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "BPB00404",
+            "orderType": "PB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "BPB00404",
+            "orderType": "PB",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PG03059",
+            "orderType": "PG",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PG03379",
+            "orderType": "PG",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PH00227",
+            "orderType": "PH",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PL02802",
+            "orderType": "PL",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "PL02857",
+            "orderType": "PL",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO39666",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          },
+          {
+            "orderNumber": "SO40579",
+            "orderType": "SO",
+            "reason": "Full SalesOrder payload is missing required ContactID"
+          }
+        ]
+      },
+      "selectedOrderNumber": "BQ00907",
+      "salespersonNumber": "3030",
+      "salespersonNumberPresent": true,
+      "hasActiveSalespersonContact": true,
+      "hasSalespersonEmail": true,
+      "hasSalespersonPhone": true,
+      "emailFooterIncluded": true,
+      "recipient": "NOTIFICATIONS_TEST_EMAIL",
+      "sentToTestEmail": true,
+      "previewOnly": false,
+      "confirmation": null,
+      "webpageSalespersonBlockIncluded": null,
+      "requestDifferentDateBehaviorUnchanged": null,
+      "detailsLink": {
+        "detailsLinkId": "cms3lfch702a0e4mbuhef7fxv",
+        "detailsLinkCreated": true,
+        "detailsLinkReused": false,
+        "linkPresent": true
+      },
+      "itemLineCount": 6,
+      "payment": {
+        "paymentStatus": "not_applicable",
+        "amountDueNowRounded": null,
+        "paymentReminderApplies": false,
+        "paymentDeadlineDate": null
+      },
+      "safety": {
+        "noSmsSent": true,
+        "noRealCustomerEmailSent": true,
+        "noNotificationEventCreatedByScript": true,
+        "noNotificationAttemptCreatedByScript": true,
+        "noAcumaticaWritePerformed": true
+      }
+    }
+  ],
+  "safetyCounts": {
+    "before": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 25
+    },
+    "after": {
+      "notificationEvents": 25,
+      "notificationAttempts": 0,
+      "deliveryConfirmations": 25
+    }
+  },
+  "safety": {
+    "noSmsSent": true,
+    "noRealCustomerEmailSent": true,
+    "noProviderDispatchInPreview": false,
+    "noAcumaticaWritePerformed": true,
+    "noNotificationEventCreatedByScript": true,
+    "noNotificationAttemptCreatedByScript": true
+  }
+}

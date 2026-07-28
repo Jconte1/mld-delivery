@@ -67,6 +67,37 @@ enum DeliveryConfirmationStatus {
   EXPIRED            @map("expired")
 }
 
+enum DeliveryOrderHoldActionStatus {
+  PENDING
+  QUEUED
+  SUCCEEDED
+  FAILED
+  SKIPPED
+}
+
+enum DeliveryOrderHoldActionReason {
+  PAYMENT_NOT_RECEIVED_BY_DEADLINE
+}
+
+enum InternalNotificationAudienceType {
+  SALESPERSON
+  FALLBACK
+  INTERNAL
+}
+
+enum InternalNotificationStatus {
+  PENDING
+  SCHEDULED
+  SENT
+  FAILED
+  SKIPPED
+}
+
+enum InternalNotificationPurpose {
+  PAYMENT_ENFORCEMENT_HOLD_SUCCEEDED
+  PAYMENT_ENFORCEMENT_HOLD_FAILED
+}
+
 model Contact {
   id             String    @id @default(cuid())
   contactId      String    @unique @db.VarChar(64)
@@ -129,6 +160,8 @@ model Order {
   deliveryGroups        OrderDeliveryGroup[]
   notificationEvents    NotificationEvent[]
   deliveryConfirmations DeliveryConfirmation[]
+  deliveryOrderHoldActions DeliveryOrderHoldAction[]
+  internalNotificationEvents InternalNotificationEvent[]
 
   @@unique([orderType, orderNumber])
   @@index([orderNumber])
@@ -312,6 +345,8 @@ model OrderDeliveryGroup {
   order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
   notificationEvents    NotificationEvent[]
   deliveryConfirmations DeliveryConfirmation[]
+  deliveryOrderHoldActions DeliveryOrderHoldAction[]
+  internalNotificationEvents InternalNotificationEvent[]
 
   @@unique([orderId, deliveryDate])
   @@index([orderNumber])
@@ -413,6 +448,7 @@ model NotificationEvent {
   deliveryConfirmations DeliveryConfirmation[]
   twilioInboundMessages TwilioInboundMessage[]
   twilioStatusCallbacks TwilioMessageStatusCallback[]
+  paymentEnforcementHoldActions DeliveryOrderHoldAction[] @relation("DeliveryOrderHoldCustomerNotification")
 
   @@index([deliveryGroupId])
   @@index([orderId])
@@ -454,6 +490,84 @@ model NotificationAttempt {
   @@index([success])
   @@index([externalMessageId])
   @@map("notification_attempts")
+}
+
+model DeliveryOrderHoldAction {
+  id                          String                        @id @default(cuid())
+  orderId                     String
+  orderDeliveryGroupId        String
+  deliveryDate                DateTime                      @db.Date
+  orderType                   String                        @db.VarChar(16)
+  orderNumber                 String                        @db.VarChar(64)
+  customerId                  String?                       @db.VarChar(64)
+  customerDescription         String?                       @db.VarChar(256)
+  salespersonNumber           String?                       @db.VarChar(16)
+  amountDueAtTrigger          Decimal                       @db.Decimal(18, 2)
+  paymentDeadline             DateTime                      @db.Date
+  reason                      DeliveryOrderHoldActionReason
+  status                      DeliveryOrderHoldActionStatus @default(PENDING)
+  queueJobId                  String?                       @db.VarChar(64)
+  errorMessage                String?                       @db.VarChar(2048)
+  acumaticaResponseSummary    Json?
+  customerNotificationEventId String?
+  queuedAt                    DateTime?
+  completedAt                 DateTime?
+  createdAt                   DateTime                      @default(now())
+  updatedAt                   DateTime                      @updatedAt
+
+  order                     Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderDeliveryGroup        OrderDeliveryGroup          @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  customerNotificationEvent NotificationEvent?          @relation("DeliveryOrderHoldCustomerNotification", fields: [customerNotificationEventId], references: [id], onDelete: SetNull)
+  internalNotificationEvents InternalNotificationEvent[]
+
+  @@unique([orderDeliveryGroupId, deliveryDate, reason])
+  @@index([status])
+  @@index([deliveryDate])
+  @@index([orderType, orderNumber])
+  @@index([queueJobId])
+  @@index([customerNotificationEventId])
+  @@map("delivery_order_hold_actions")
+}
+
+model InternalNotificationEvent {
+  id                        String                           @id @default(cuid())
+  orderId                   String?
+  orderDeliveryGroupId      String?
+  deliveryOrderHoldActionId String?
+  orderType                 String                           @db.VarChar(16)
+  orderNumber               String                           @db.VarChar(64)
+  deliveryDate              DateTime                         @db.Date
+  purpose                   InternalNotificationPurpose
+  audienceType              InternalNotificationAudienceType
+  recipientEmail            String?                          @db.VarChar(256)
+  recipientName             String?                          @db.VarChar(128)
+  subject                   String?                          @db.VarChar(512)
+  bodyPreview               String?                          @db.VarChar(2048)
+  messageSummary            String?                          @db.VarChar(1024)
+  status                    InternalNotificationStatus       @default(PENDING)
+  reasonSkipped             String?                          @db.VarChar(1024)
+  reasonFailed              String?                          @db.VarChar(1024)
+  providerName              String?                          @db.VarChar(64)
+  providerMessageId         String?                          @db.VarChar(256)
+  sentAt                    DateTime?
+  createdAt                 DateTime                         @default(now())
+  updatedAt                 DateTime                         @updatedAt
+
+  order                   Order?                   @relation(fields: [orderId], references: [id], onDelete: SetNull)
+  orderDeliveryGroup      OrderDeliveryGroup?      @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: SetNull)
+  deliveryOrderHoldAction DeliveryOrderHoldAction? @relation(fields: [deliveryOrderHoldActionId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+  @@index([orderDeliveryGroupId])
+  @@index([deliveryOrderHoldActionId])
+  @@index([orderType, orderNumber])
+  @@index([deliveryDate])
+  @@index([purpose])
+  @@index([audienceType])
+  @@index([status])
+  @@index([recipientEmail])
+  @@index([sentAt])
+  @@map("internal_notification_events")
 }
 
 model DeliveryDetailsLink {

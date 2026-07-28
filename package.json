@@ -12,6 +12,7 @@
     "create:30-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-30-day-delivery-reminder-events.ts",
     "create:14-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-14-day-delivery-reminder-events.ts",
     "create:12-day-delivery-payment-request-events": "tsx -r dotenv/config scripts/create-12-day-delivery-payment-request-events.ts",
+    "create:10-day-delivery-payment-request-events": "tsx -r dotenv/config scripts/create-10-day-delivery-payment-request-events.ts",
     "sync:salesperson-contacts": "tsx -r dotenv/config scripts/sync-salesperson-contacts.ts",
     "verify:salesperson-contact-counts": "tsx -r dotenv/config scripts/verify-salesperson-contact-counts.ts",
     "verify:salesperson-number-import": "tsx -r dotenv/config scripts/verify-salesperson-number-import.ts",
@@ -28,6 +29,9 @@
     "validate:payment-deadline-business-days": "tsx scripts/validate-payment-deadline-business-days.ts",
     "validate:12-day-notification": "tsx scripts/validate-12-day-notification-creation.ts",
     "validate:12-day-rendering": "tsx scripts/validate-12-day-rendering.ts",
+    "validate:10-day-notification": "tsx scripts/validate-10-day-notification-creation.ts",
+    "validate:10-day-rendering": "tsx scripts/validate-10-day-rendering.ts",
+    "validate:8-day-foundation": "tsx scripts/validate-8-day-foundation.ts",
     "validate:weekend-delivery-date-notification": "tsx scripts/validate-weekend-delivery-date-notification-qualification.ts"
   },
   "dependencies": {

@@ -1,6 +1,4 @@
-import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
-import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
-import { importSalesOrdersForLineRequestedOn } from "@/lib/erp/importSalesOrders";
+import { importSalesOrdersForLineRequestedOn, type ImportSalesOrdersResult } from "@/lib/erp/importSalesOrders";
 import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
@@ -18,6 +16,7 @@ import {
   buildNotificationDedupeKey,
   dateFromKey,
   dateKey,
+  DELIVERY_DATE_WEEKEND_SKIP_REASON,
   formatContactName,
   formatJobAddress,
   formatJobName,
@@ -27,38 +26,49 @@ import {
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import {
-  render30DayDeliveryReminderEmail,
-  render30DayDeliveryReminderSms,
-} from "@/lib/notifications/deliveryReminder30Day";
+  render2DayDeliveryReminderEmail,
+  render2DayDeliveryReminderSms,
+} from "@/lib/notifications/deliveryReminder2Day";
 import {
-  evaluateAndRecordDeliveryTenDayConfirmation,
-  type DeliveryTenDayConfirmationEvaluationResult,
+  DELIVERY_TEN_DAY_CONFIRMATION_REASONS,
+  isCompleteTenDayConfirmationWritebackStatus,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
-export const DELIVERY_REMINDER_30_DAY_INTERVAL_DAYS = 30;
-export const DELIVERY_REMINDER_30_DAY_REQUESTED_ON_TIME = "09:19:00.000Z";
-export const DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON =
-  "not_confirmed_in_acumatica";
+export const DELIVERY_REMINDER_2_DAY_INTERVAL_DAYS = 2;
+export const DELIVERY_REMINDER_2_DAY_REQUESTED_ON_TIME = "09:19:00.000Z";
 
-export type ConfirmedDeliveryReminderIntervalType =
-  | typeof NotificationIntervalType.DAY_30
-  | typeof NotificationIntervalType.DAY_14;
+export const DELIVERY_REMINDER_2_DAY_SKIP_REASONS = {
+  deliveryDateWeekend: DELIVERY_DATE_WEEKEND_SKIP_REASON,
+  notConfirmedInAcumatica: "not_confirmed_in_acumatica",
+  oneWeekConfirmationMissing: "one_week_confirmation_missing",
+  noAutomatedChannelAvailable: "no_automated_channel_available",
+} as const;
 
-type DeliveryReminder30DayClient = Pick<
+export type DeliveryReminder2DaySkipReason =
+  (typeof DELIVERY_REMINDER_2_DAY_SKIP_REASONS)[keyof typeof DELIVERY_REMINDER_2_DAY_SKIP_REASONS];
+
+type DeliveryReminder2DayClient = Pick<
   typeof prisma,
   "orderDeliveryGroup" | "notificationEvent" | "deliveryDetailsLink"
 > &
   Partial<Pick<typeof prisma, "salespersonContact">>;
 
-export type DeliveryReminder30DayEventReport = {
+type DeliveryReminder2DayTargetGroup = Awaited<
+  ReturnType<typeof find2DayDeliveryReminderTargetGroups>
+>[number];
+
+type ImportSalesOrdersLoader = typeof importSalesOrdersForLineRequestedOn;
+type SalespersonContactMapLoader = typeof getActiveSalespersonContactMap;
+
+export type DeliveryReminder2DayEventReport = {
   orderType: string;
   orderNumber: string;
   deliveryGroupId: string;
   deliveryDate: string;
   eventId: string | null;
-  dedupeKey: string;
+  dedupeKey: string | null;
   status: string;
   selectedChannel: string | null;
   reasonSkipped: string | null;
@@ -69,27 +79,24 @@ export type DeliveryReminder30DayEventReport = {
   detailsLinkUrl: string | null;
   subject: string | null;
   renderedMessagePreview: string;
-  itemLineCount: number;
-  paymentStatus: string | null;
-  amountDueNowRounded: string | null;
-  paymentReminderApplies: boolean;
+  acumaticaOneWeekConfirmed?: boolean | null;
   tenDayConfirmationStatus?: string | null;
-  tenDayConfirmationReason?: string | null;
-  tenDayConfirmationJobId?: string | null;
   tenDayConfirmationMismatchReason?: string | null;
-  tenDayConfirmationLocalConfirmed?: boolean;
+  tenDayConfirmationLocalConfirmed?: boolean | null;
 };
 
-export type Create30DayDeliveryReminderEventsSummary = {
+export type Create2DayDeliveryReminderEventsSummary = {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
-  importResult: Awaited<ReturnType<typeof importSalesOrdersForLineRequestedOn>> | null;
+  importResult: ImportSalesOrdersResult | null;
   targetDeliveryGroups: number;
   eligibleDeliveryGroups: number;
   deliveryGroupsSkippedWeekendDeliveryDate: number;
   deliveryGroupsSkippedIneligible: number;
+  deliveryGroupsSkippedFailedImport: number;
   deliveryGroupsSkippedNotConfirmedInAcumatica: number;
+  deliveryGroupsSkippedTenDayConfirmationMissing: number;
   deliveryGroupsSkippedNoChannel: number;
   eventsCreated: number;
   eventsDeduped: number;
@@ -102,36 +109,31 @@ export type Create30DayDeliveryReminderEventsSummary = {
   };
   detailsLinksCreated: number;
   detailsLinksReused: number;
-  paymentDueCount: number;
   weekendSkipped: boolean;
   dryRun: boolean;
   skippedReasons: Record<string, number>;
-  eventReports: DeliveryReminder30DayEventReport[];
+  failedImportExclusions: Array<{
+    orderType: string | null;
+    orderNumber: string;
+    reason: string;
+  }>;
+  eventReports: DeliveryReminder2DayEventReport[];
 };
 
-export type Create30DayDeliveryReminderEventsOptions = {
+export type Create2DayDeliveryReminderEventsOptions = {
   runDate?: Date | string;
   dryRun?: boolean;
-  now?: Date;
-  prismaClient?: DeliveryReminder30DayClient;
+  prismaClient?: DeliveryReminder2DayClient;
+  importSalesOrders?: ImportSalesOrdersLoader;
+  getSalespersonContactMap?: SalespersonContactMapLoader;
 };
-
-export type CreateConfirmedDeliveryReminderEventsOptions =
-  Create30DayDeliveryReminderEventsOptions & {
-    intervalType: ConfirmedDeliveryReminderIntervalType;
-    intervalDays: number;
-  };
-
-type DeliveryReminder30DayTargetGroup = Awaited<
-  ReturnType<typeof find30DayDeliveryReminderTargetGroups>
->[number];
 
 function emptySummary(params: {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
   dryRun: boolean;
-}): Create30DayDeliveryReminderEventsSummary {
+}): Create2DayDeliveryReminderEventsSummary {
   return {
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
@@ -141,7 +143,9 @@ function emptySummary(params: {
     eligibleDeliveryGroups: 0,
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
     deliveryGroupsSkippedIneligible: 0,
+    deliveryGroupsSkippedFailedImport: 0,
     deliveryGroupsSkippedNotConfirmedInAcumatica: 0,
+    deliveryGroupsSkippedTenDayConfirmationMissing: 0,
     deliveryGroupsSkippedNoChannel: 0,
     eventsCreated: 0,
     eventsDeduped: 0,
@@ -154,10 +158,10 @@ function emptySummary(params: {
     },
     detailsLinksCreated: 0,
     detailsLinksReused: 0,
-    paymentDueCount: 0,
     weekendSkipped: false,
     dryRun: params.dryRun,
     skippedReasons: {},
+    failedImportExclusions: [],
     eventReports: [],
   };
 }
@@ -180,7 +184,7 @@ function isBlockedLifecycleStatus(value: string | null | undefined) {
   return blockedStatuses.has(value ?? "");
 }
 
-function addSkippedReason(summary: Create30DayDeliveryReminderEventsSummary, reason: string) {
+function addSkippedReason(summary: Create2DayDeliveryReminderEventsSummary, reason: string) {
   summary.skippedReasons[reason] = (summary.skippedReasons[reason] ?? 0) + 1;
 }
 
@@ -194,34 +198,20 @@ function safeJobAddress(address: {
   return formatJobAddress(address) || "the job site";
 }
 
-function amountIsMeaningful(value: string | null | undefined) {
-  if (!value) return false;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 2;
+function isUniqueConstraintError(error: unknown) {
+  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
 }
 
-function paymentReminderApplies(
-  payment: Awaited<ReturnType<typeof getDeliveryGroupPaymentEvaluation>>
-) {
-  return (
-    payment.paymentStatus === "balance_due" &&
-    amountIsMeaningful(payment.amountDueNowRounded) &&
-    payment.calculationWarnings.length === 0
-  );
+function importErrorLooksLikeFailedOrder(error: ImportSalesOrdersResult["errors"][number]) {
+  return /failed|did not return/i.test(error.reason);
 }
 
-function tenDayConfirmationReport(
-  result: DeliveryTenDayConfirmationEvaluationResult | null
+function importErrorMatchesOrder(
+  error: ImportSalesOrdersResult["errors"][number],
+  order: { orderType: string; orderNumber: string }
 ) {
-  return result
-    ? {
-        tenDayConfirmationStatus: result.acumaticaWritebackStatus,
-        tenDayConfirmationReason: result.reason,
-        tenDayConfirmationJobId: result.acumaticaWritebackJobId,
-        tenDayConfirmationMismatchReason: result.mismatchReason,
-        tenDayConfirmationLocalConfirmed: result.localConfirmed,
-      }
-    : {};
+  if (!error.orderNumber || error.orderNumber !== order.orderNumber) return false;
+  return !error.orderType || error.orderType === order.orderType;
 }
 
 function validateRenderedMessage(params: {
@@ -233,32 +223,42 @@ function validateRenderedMessage(params: {
   const combined = [params.subject, params.renderedMessagePreview].filter(Boolean).join("\n");
   if (/\b(null|undefined)\b/i.test(combined) || /:\s*MAIN\s*$/m.test(combined)) {
     throw new Error(
-      `Rendered 30-day message contains placeholder text order=${params.orderType} ${params.orderNumber}`
+      `Rendered 2-day final reminder contains placeholder text order=${params.orderType} ${params.orderNumber}`
     );
   }
 }
 
-function isUniqueConstraintError(error: unknown) {
-  return error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002";
-}
-
-export function normalize30DayConfirmVia(value: unknown) {
+export function normalize2DayConfirmVia(value: unknown) {
   if (value === null || value === undefined) return null;
   const trimmed = String(value).trim();
   return trimmed || null;
 }
 
-export function requestedOnFor30DayTargetDate(targetDeliveryDate: Date | string) {
-  return `${dateKey(targetDeliveryDate)}T${DELIVERY_REMINDER_30_DAY_REQUESTED_ON_TIME}`;
+export function requestedOnFor2DayTargetDate(targetDeliveryDate: Date | string) {
+  return `${dateKey(targetDeliveryDate)}T${DELIVERY_REMINDER_2_DAY_REQUESTED_ON_TIME}`;
 }
 
-export function requestedOnForConfirmedDeliveryReminderTargetDate(
-  targetDeliveryDate: Date | string
-) {
-  return requestedOnFor30DayTargetDate(targetDeliveryDate);
+export function get2DayFailedImportExclusions(importResult: ImportSalesOrdersResult) {
+  return importResult.errors
+    .filter((error) => error.orderNumber && importErrorLooksLikeFailedOrder(error))
+    .map((error) => ({
+      orderType: error.orderType ?? null,
+      orderNumber: error.orderNumber as string,
+      reason: error.reason,
+    }));
 }
 
-export function is30DayDeliveryGroupEligible(group: DeliveryReminder30DayTargetGroup) {
+export function isOrderExcludedBy2DayFailedImport(params: {
+  importResult: ImportSalesOrdersResult;
+  orderType: string;
+  orderNumber: string;
+}) {
+  return params.importResult.errors.some(
+    (error) => importErrorLooksLikeFailedOrder(error) && importErrorMatchesOrder(error, params)
+  );
+}
+
+export function is2DayDeliveryGroupEligible(group: DeliveryReminder2DayTargetGroup) {
   return !(
     isCompletedOrCancelledStatus(group.order.status) ||
     isCompletedOrCancelledStatus(group.status) ||
@@ -266,9 +266,36 @@ export function is30DayDeliveryGroupEligible(group: DeliveryReminder30DayTargetG
   );
 }
 
-export async function find30DayDeliveryReminderTargetGroups(
+export function hasRequired2DayOneWeekConfirmation(
+  group: DeliveryReminder2DayTargetGroup
+) {
+  const confirmation = group.tenDayConfirmation;
+  if (!confirmation?.localConfirmed) return false;
+  if (
+    confirmation.mismatchReason ===
+    DELIVERY_TEN_DAY_CONFIRMATION_REASONS.mismatchPaymentNotCleared
+  ) {
+    return false;
+  }
+
+  return (
+    isCompleteTenDayConfirmationWritebackStatus(confirmation.acumaticaWritebackStatus) ||
+    group.order.acumaticaOneWeekConfirmed === true
+  );
+}
+
+function tenDayConfirmationReport(group: DeliveryReminder2DayTargetGroup) {
+  return {
+    acumaticaOneWeekConfirmed: group.order.acumaticaOneWeekConfirmed ?? null,
+    tenDayConfirmationStatus: group.tenDayConfirmation?.acumaticaWritebackStatus ?? null,
+    tenDayConfirmationMismatchReason: group.tenDayConfirmation?.mismatchReason ?? null,
+    tenDayConfirmationLocalConfirmed: group.tenDayConfirmation?.localConfirmed ?? null,
+  };
+}
+
+export async function find2DayDeliveryReminderTargetGroups(
   targetDeliveryDate: Date | string,
-  client: DeliveryReminder30DayClient = prisma
+  client: DeliveryReminder2DayClient = prisma
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
@@ -287,6 +314,13 @@ export async function find30DayDeliveryReminderTargetGroups(
       lineCount: true,
       lastSeenAt: true,
       status: true,
+      tenDayConfirmation: {
+        select: {
+          localConfirmed: true,
+          acumaticaWritebackStatus: true,
+          mismatchReason: true,
+        },
+      },
       order: {
         select: {
           id: true,
@@ -337,12 +371,22 @@ export async function find30DayDeliveryReminderTargetGroups(
   });
 }
 
+const notificationEventSelect = {
+  id: true,
+  dedupeKey: true,
+  intervalType: true,
+  actionType: true,
+  status: true,
+  selectedChannel: true,
+  reasonSkipped: true,
+  detailsLinkId: true,
+} as const;
+
 async function createSkippedEvent(params: {
-  client: DeliveryReminder30DayClient;
-  deliveryGroup: DeliveryReminder30DayTargetGroup;
+  client: DeliveryReminder2DayClient;
+  deliveryGroup: DeliveryReminder2DayTargetGroup;
   dedupeKey: string;
-  intervalType: ConfirmedDeliveryReminderIntervalType;
-  reason: string;
+  reason: DeliveryReminder2DaySkipReason;
   dryRun: boolean;
 }) {
   if (params.dryRun) {
@@ -357,7 +401,7 @@ async function createSkippedEvent(params: {
       orderType: params.deliveryGroup.order.orderType,
       orderNumber: params.deliveryGroup.order.orderNumber,
       deliveryDate: params.deliveryGroup.deliveryDate,
-      intervalType: params.intervalType,
+      intervalType: NotificationIntervalType.DAY_2,
       actionType: NotificationActionType.DELIVERY_REMINDER,
       dedupeKey: params.dedupeKey,
       selectedChannel: null,
@@ -372,35 +416,73 @@ async function createSkippedEvent(params: {
   });
 }
 
-const notificationEventSelect = {
-  id: true,
-  dedupeKey: true,
-  intervalType: true,
-  actionType: true,
-  status: true,
-  selectedChannel: true,
-  reasonSkipped: true,
-  detailsLinkId: true,
-} as const;
+async function skipDeliveryGroup(params: {
+  summary: Create2DayDeliveryReminderEventsSummary;
+  client: DeliveryReminder2DayClient;
+  deliveryGroup: DeliveryReminder2DayTargetGroup;
+  dedupeKey: string;
+  reason: DeliveryReminder2DaySkipReason;
+  dryRun: boolean;
+  acumaticaConfirmVia: string | null;
+  renderedMessagePreview: string;
+}) {
+  params.summary.eventsSkipped += 1;
+  params.summary.eventsWouldCreate += params.dryRun ? 1 : 0;
+  addSkippedReason(params.summary, params.reason);
 
-export async function create30DayDeliveryReminderEvents(
-  options: Create30DayDeliveryReminderEventsOptions = {}
-): Promise<Create30DayDeliveryReminderEventsSummary> {
-  return createConfirmedDeliveryReminderEvents({
-    ...options,
-    intervalType: NotificationIntervalType.DAY_30,
-    intervalDays: DELIVERY_REMINDER_30_DAY_INTERVAL_DAYS,
+  let skippedEventId: string | null = null;
+  try {
+    const skippedEvent = await createSkippedEvent({
+      client: params.client,
+      deliveryGroup: params.deliveryGroup,
+      dedupeKey: params.dedupeKey,
+      reason: params.reason,
+      dryRun: params.dryRun,
+    });
+    if (skippedEvent) {
+      params.summary.eventsCreated += 1;
+      skippedEventId = skippedEvent.id;
+    }
+  } catch (error) {
+    if (!isUniqueConstraintError(error)) throw error;
+    params.summary.eventsDeduped += 1;
+  }
+
+  const order = params.deliveryGroup.order;
+  params.summary.eventReports.push({
+    orderType: order.orderType,
+    orderNumber: order.orderNumber,
+    deliveryGroupId: params.deliveryGroup.id,
+    deliveryDate: dateKey(params.deliveryGroup.deliveryDate),
+    eventId: skippedEventId,
+    dedupeKey: params.dedupeKey,
+    status: NotificationEventStatus.SKIPPED,
+    selectedChannel: null,
+    reasonSkipped: params.reason,
+    acumaticaConfirmVia: params.acumaticaConfirmVia,
+    detailsLinkCreated: false,
+    detailsLinkReused: false,
+    detailsLinkTokenPresent: false,
+    detailsLinkUrl: null,
+    subject: null,
+    renderedMessagePreview: params.renderedMessagePreview,
+    ...tenDayConfirmationReport(params.deliveryGroup),
   });
 }
 
-export async function createConfirmedDeliveryReminderEvents(
-  options: CreateConfirmedDeliveryReminderEventsOptions
-): Promise<Create30DayDeliveryReminderEventsSummary> {
+export async function create2DayDeliveryReminderEvents(
+  options: Create2DayDeliveryReminderEventsOptions = {}
+): Promise<Create2DayDeliveryReminderEventsSummary> {
   const client = options.prismaClient ?? prisma;
+  const importSalesOrders = options.importSalesOrders ?? importSalesOrdersForLineRequestedOn;
+  const loadSalespersonContactMap =
+    options.getSalespersonContactMap ?? getActiveSalespersonContactMap;
   const runDate = dateKey(options.runDate ?? new Date());
   const dryRun = options.dryRun ?? false;
-  const targetDeliveryDate = dateKey(getNotificationTargetDate(runDate, options.intervalDays));
-  const importRequestedOn = requestedOnForConfirmedDeliveryReminderTargetDate(targetDeliveryDate);
+  const targetDeliveryDate = dateKey(
+    getNotificationTargetDate(runDate, DELIVERY_REMINDER_2_DAY_INTERVAL_DAYS)
+  );
+  const importRequestedOn = requestedOnFor2DayTargetDate(targetDeliveryDate);
   const summary = emptySummary({
     runDate,
     targetDeliveryDate,
@@ -415,23 +497,54 @@ export async function createConfirmedDeliveryReminderEvents(
 
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate);
   if (!deliveryDateSkipReason) {
-    summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn);
+    summary.importResult = await importSalesOrders(importRequestedOn);
+    summary.failedImportExclusions = get2DayFailedImportExclusions(summary.importResult);
   }
 
-  const deliveryGroups = await find30DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
+  const deliveryGroups = await find2DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
   summary.targetDeliveryGroups = deliveryGroups.length;
 
   const salespersonContactsByNumber = deliveryDateSkipReason
     ? new Map()
-    : await getActiveSalespersonContactMap(
+    : await loadSalespersonContactMap(
         deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
         client
       );
 
   for (const deliveryGroup of deliveryGroups) {
     const order = deliveryGroup.order;
-    if (!is30DayDeliveryGroupEligible(deliveryGroup)) {
+    if (!is2DayDeliveryGroupEligible(deliveryGroup)) {
       summary.deliveryGroupsSkippedIneligible += 1;
+      continue;
+    }
+
+    if (
+      summary.importResult &&
+      isOrderExcludedBy2DayFailedImport({
+        importResult: summary.importResult,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: null,
+        dedupeKey: null,
+        status: "IMPORT_FAILED_EXCLUDED",
+        selectedChannel: null,
+        reasonSkipped: null,
+        acumaticaConfirmVia: normalize2DayConfirmVia(order.confirmVia),
+        detailsLinkCreated: false,
+        detailsLinkReused: false,
+        detailsLinkTokenPresent: false,
+        detailsLinkUrl: null,
+        subject: null,
+        renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+      });
       continue;
     }
 
@@ -439,7 +552,7 @@ export async function createConfirmedDeliveryReminderEvents(
       orderType: order.orderType,
       orderNumber: order.orderNumber,
       deliveryDate: deliveryGroup.deliveryDate,
-      intervalType: options.intervalType,
+      intervalType: NotificationIntervalType.DAY_2,
       actionType: NotificationActionType.DELIVERY_REMINDER,
     });
 
@@ -480,7 +593,7 @@ export async function createConfirmedDeliveryReminderEvents(
         status: deliveryDateSkipReason ? NotificationEventStatus.SKIPPED : existingEvent.status,
         selectedChannel: deliveryDateSkipReason ? null : existingEvent.selectedChannel,
         reasonSkipped: deliveryDateSkipReason ?? existingEvent.reasonSkipped,
-        acumaticaConfirmVia: normalize30DayConfirmVia(order.confirmVia),
+        acumaticaConfirmVia: normalize2DayConfirmVia(order.confirmVia),
         detailsLinkCreated: false,
         detailsLinkReused: deliveryDateSkipReason ? false : Boolean(existingEvent.detailsLinkId),
         detailsLinkTokenPresent: deliveryDateSkipReason ? false : Boolean(existingEvent.detailsLinkId),
@@ -488,108 +601,54 @@ export async function createConfirmedDeliveryReminderEvents(
         subject: null,
         renderedMessagePreview:
           deliveryDateSkipReason ?? existingEvent.reasonSkipped ?? "Existing event deduped.",
-        itemLineCount: 0,
-        paymentStatus: null,
-        amountDueNowRounded: null,
-        paymentReminderApplies: false,
       });
       continue;
     }
 
     if (deliveryDateSkipReason) {
       summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
-      summary.eventsSkipped += 1;
-      summary.eventsWouldCreate += dryRun ? 1 : 0;
-      addSkippedReason(summary, deliveryDateSkipReason);
-
-      try {
-        const skippedEvent = await createSkippedEvent({
-          client,
-          deliveryGroup,
-          dedupeKey,
-          intervalType: options.intervalType,
-          reason: deliveryDateSkipReason,
-          dryRun,
-        });
-        if (skippedEvent) summary.eventsCreated += 1;
-
-        summary.eventReports.push({
-          orderType: order.orderType,
-          orderNumber: order.orderNumber,
-          deliveryGroupId: deliveryGroup.id,
-          deliveryDate: dateKey(deliveryGroup.deliveryDate),
-          eventId: skippedEvent?.id ?? null,
-          dedupeKey,
-          status: NotificationEventStatus.SKIPPED,
-          selectedChannel: null,
-          reasonSkipped: deliveryDateSkipReason,
-          acumaticaConfirmVia: normalize30DayConfirmVia(order.confirmVia),
-          detailsLinkCreated: false,
-          detailsLinkReused: false,
-          detailsLinkTokenPresent: false,
-          detailsLinkUrl: null,
-          subject: null,
-          renderedMessagePreview: deliveryDateSkipReason,
-          itemLineCount: 0,
-          paymentStatus: null,
-          amountDueNowRounded: null,
-          paymentReminderApplies: false,
-        });
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
-        summary.eventsDeduped += 1;
-      }
-
+      await skipDeliveryGroup({
+        summary,
+        client,
+        deliveryGroup,
+        dedupeKey,
+        reason: deliveryDateSkipReason,
+        dryRun,
+        acumaticaConfirmVia: normalize2DayConfirmVia(order.confirmVia),
+        renderedMessagePreview: deliveryDateSkipReason,
+      });
       continue;
     }
 
-    summary.eligibleDeliveryGroups += 1;
-
-    const acumaticaConfirmVia = normalize30DayConfirmVia(order.confirmVia);
+    const acumaticaConfirmVia = normalize2DayConfirmVia(order.confirmVia);
     if (!acumaticaConfirmVia) {
       summary.deliveryGroupsSkippedNotConfirmedInAcumatica += 1;
-      summary.eventsSkipped += 1;
-      summary.eventsWouldCreate += dryRun ? 1 : 0;
-      addSkippedReason(summary, DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON);
+      await skipDeliveryGroup({
+        summary,
+        client,
+        deliveryGroup,
+        dedupeKey,
+        reason: DELIVERY_REMINDER_2_DAY_SKIP_REASONS.notConfirmedInAcumatica,
+        dryRun,
+        acumaticaConfirmVia: null,
+        renderedMessagePreview: DELIVERY_REMINDER_2_DAY_SKIP_REASONS.notConfirmedInAcumatica,
+      });
+      continue;
+    }
 
-      try {
-        const skippedEvent = await createSkippedEvent({
-          client,
-          deliveryGroup,
-          dedupeKey,
-          intervalType: options.intervalType,
-          reason: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
-          dryRun,
-        });
-        if (skippedEvent) summary.eventsCreated += 1;
-
-        summary.eventReports.push({
-          orderType: order.orderType,
-          orderNumber: order.orderNumber,
-          deliveryGroupId: deliveryGroup.id,
-          deliveryDate: dateKey(deliveryGroup.deliveryDate),
-          eventId: skippedEvent?.id ?? null,
-          dedupeKey,
-          status: NotificationEventStatus.SKIPPED,
-          selectedChannel: null,
-          reasonSkipped: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
-          acumaticaConfirmVia: null,
-          detailsLinkCreated: false,
-          detailsLinkReused: false,
-          detailsLinkTokenPresent: false,
-          detailsLinkUrl: null,
-          subject: null,
-          renderedMessagePreview: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
-          itemLineCount: 0,
-          paymentStatus: null,
-          amountDueNowRounded: null,
-          paymentReminderApplies: false,
-        });
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
-        summary.eventsDeduped += 1;
-      }
-
+    if (!hasRequired2DayOneWeekConfirmation(deliveryGroup)) {
+      summary.deliveryGroupsSkippedTenDayConfirmationMissing += 1;
+      await skipDeliveryGroup({
+        summary,
+        client,
+        deliveryGroup,
+        dedupeKey,
+        reason: DELIVERY_REMINDER_2_DAY_SKIP_REASONS.oneWeekConfirmationMissing,
+        dryRun,
+        acumaticaConfirmVia,
+        renderedMessagePreview:
+          DELIVERY_REMINDER_2_DAY_SKIP_REASONS.oneWeekConfirmationMissing,
+      });
       continue;
     }
 
@@ -597,56 +656,24 @@ export async function createConfirmedDeliveryReminderEvents(
       activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
       activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
     });
-    const shouldSkipForNoChannel = channel.selectedChannel === null;
-    if (shouldSkipForNoChannel) {
+
+    if (channel.selectedChannel === null) {
       summary.deliveryGroupsSkippedNoChannel += 1;
-      summary.eventsSkipped += 1;
-      summary.eventsWouldCreate += dryRun ? 1 : 0;
-      addSkippedReason(summary, channel.channelReason);
-
-      let skippedEventId: string | null = null;
-      try {
-        const skippedEvent = await createSkippedEvent({
-          client,
-          deliveryGroup,
-          dedupeKey,
-          intervalType: options.intervalType,
-          reason: channel.channelReason,
-          dryRun,
-        });
-        if (skippedEvent) {
-          summary.eventsCreated += 1;
-          skippedEventId = skippedEvent.id;
-        }
-      } catch (error) {
-        if (!isUniqueConstraintError(error)) throw error;
-        summary.eventsDeduped += 1;
-      }
-
-      summary.eventReports.push({
-        orderType: order.orderType,
-        orderNumber: order.orderNumber,
-        deliveryGroupId: deliveryGroup.id,
-        deliveryDate: dateKey(deliveryGroup.deliveryDate),
-        eventId: skippedEventId,
+      await skipDeliveryGroup({
+        summary,
+        client,
+        deliveryGroup,
         dedupeKey,
-        status: NotificationEventStatus.SKIPPED,
-        selectedChannel: null,
-        reasonSkipped: channel.channelReason,
+        reason: DELIVERY_REMINDER_2_DAY_SKIP_REASONS.noAutomatedChannelAvailable,
+        dryRun,
         acumaticaConfirmVia,
-        detailsLinkCreated: false,
-        detailsLinkReused: false,
-        detailsLinkTokenPresent: false,
-        detailsLinkUrl: null,
-        subject: null,
-        renderedMessagePreview: channel.channelReason,
-        itemLineCount: 0,
-        paymentStatus: null,
-        amountDueNowRounded: null,
-        paymentReminderApplies: false,
+        renderedMessagePreview:
+          DELIVERY_REMINDER_2_DAY_SKIP_REASONS.noAutomatedChannelAvailable,
       });
       continue;
     }
+
+    summary.eligibleDeliveryGroups += 1;
 
     const contactName = formatContactName(order.contact);
     const jobName = formatJobName({
@@ -657,24 +684,10 @@ export async function createConfirmedDeliveryReminderEvents(
     const salespersonContact = order.salespersonNumber
       ? salespersonContactsByNumber.get(order.salespersonNumber) ?? null
       : null;
-    const readiness = await getDeliveryGroupReadiness(deliveryGroup.id);
-    const payment = await getDeliveryGroupPaymentEvaluation(deliveryGroup.id);
-    const showPaymentReminder = paymentReminderApplies(payment);
-    const tenDayConfirmation =
-      options.intervalType === NotificationIntervalType.DAY_14
-        ? await evaluateAndRecordDeliveryTenDayConfirmation({
-            deliveryGroup,
-            payment,
-            sourceInterval: NotificationIntervalType.DAY_14,
-            dryRun,
-            prismaClient: client,
-          })
-        : null;
-    if (showPaymentReminder) summary.paymentDueCount += 1;
-
     let detailsLinkUrl = "https://mld-delivery.example.test/delivery/details/dry-run";
     let detailsLinkCreated = false;
     let detailsLinkId: string | null = null;
+
     if (!dryRun) {
       const detailsLink = await ensureDeliveryDetailsLink(
         {
@@ -691,28 +704,22 @@ export async function createConfirmedDeliveryReminderEvents(
       else summary.detailsLinksReused += 1;
     }
 
-    const smsMessage = render30DayDeliveryReminderSms({
+    const smsMessage = render2DayDeliveryReminderSms({
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
       jobAddress,
       deliveryDate: deliveryGroup.deliveryDate,
       detailsLink: detailsLinkUrl,
-      paymentDue: showPaymentReminder,
-      amountDueNowRounded: payment.amountDueNowRounded,
-      lines: readiness.lines,
       salespersonContact,
     });
-    const emailMessage = render30DayDeliveryReminderEmail({
+    const emailMessage = render2DayDeliveryReminderEmail({
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
       jobAddress,
       deliveryDate: deliveryGroup.deliveryDate,
       detailsLink: detailsLinkUrl,
-      paymentDue: showPaymentReminder,
-      amountDueNowRounded: payment.amountDueNowRounded,
-      lines: readiness.lines,
       salespersonContact,
     });
     const subject = channel.selectedChannel === "EMAIL" ? emailMessage.subject : null;
@@ -745,11 +752,7 @@ export async function createConfirmedDeliveryReminderEvents(
         detailsLinkUrl,
         subject,
         renderedMessagePreview,
-        itemLineCount: readiness.lines.length,
-        paymentStatus: payment.paymentStatus,
-        amountDueNowRounded: payment.amountDueNowRounded,
-        paymentReminderApplies: showPaymentReminder,
-        ...tenDayConfirmationReport(tenDayConfirmation),
+        ...tenDayConfirmationReport(deliveryGroup),
       });
       continue;
     }
@@ -763,7 +766,7 @@ export async function createConfirmedDeliveryReminderEvents(
           orderType: order.orderType,
           orderNumber: order.orderNumber,
           deliveryDate: deliveryGroup.deliveryDate,
-          intervalType: options.intervalType,
+          intervalType: NotificationIntervalType.DAY_2,
           actionType: NotificationActionType.DELIVERY_REMINDER,
           dedupeKey,
           selectedChannel: channel.selectedChannel,
@@ -811,11 +814,7 @@ export async function createConfirmedDeliveryReminderEvents(
         detailsLinkUrl,
         subject,
         renderedMessagePreview,
-        itemLineCount: readiness.lines.length,
-        paymentStatus: payment.paymentStatus,
-        amountDueNowRounded: payment.amountDueNowRounded,
-        paymentReminderApplies: showPaymentReminder,
-        ...tenDayConfirmationReport(tenDayConfirmation),
+        ...tenDayConfirmationReport(deliveryGroup),
       });
     } catch (error) {
       if (!isUniqueConstraintError(error)) throw error;

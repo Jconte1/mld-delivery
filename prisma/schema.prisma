@@ -129,39 +129,42 @@ model Contact {
 }
 
 model Order {
-  id                      String                       @id @default(cuid())
-  orderType               String                       @db.VarChar(16)
-  orderNumber             String                       @db.VarChar(64)
-  shipVia                 String?                      @db.VarChar(64)
-  status                  String?                      @db.VarChar(64)
-  headerRequestedOn       DateTime?                    @db.Date
-  customerId              String?                      @db.VarChar(64)
-  customerDescription     String?                      @db.VarChar(256)
-  contactId               String                       @db.VarChar(64)
-  locationId              String?                      @db.VarChar(64)
-  locationDescription     String?                      @db.VarChar(256)
-  turnInDate              DateTime?                    @db.Date
-  noteId                  String?                      @db.VarChar(64)
-  internalLifecycleStatus InternalOrderLifecycleStatus @default(ACTIVE)
-  lifecycleReason         String?                      @db.VarChar(1024)
-  lifecycleUpdatedAt      DateTime?
-  buyerGroup              String?                      @db.VarChar(64)
-  confirmVia              String?                      @db.VarChar(64)
-  salespersonNumber       String?                      @db.VarChar(16)
-  createdAt               DateTime                     @default(now())
-  updatedAt               DateTime                     @updatedAt
-  lastSyncedAt            DateTime?
+  id                        String                       @id @default(cuid())
+  orderType                 String                       @db.VarChar(16)
+  orderNumber               String                       @db.VarChar(64)
+  shipVia                   String?                      @db.VarChar(64)
+  status                    String?                      @db.VarChar(64)
+  headerRequestedOn         DateTime?                    @db.Date
+  customerId                String?                      @db.VarChar(64)
+  customerDescription       String?                      @db.VarChar(256)
+  contactId                 String                       @db.VarChar(64)
+  locationId                String?                      @db.VarChar(64)
+  locationDescription       String?                      @db.VarChar(256)
+  turnInDate                DateTime?                    @db.Date
+  noteId                    String?                      @db.VarChar(64)
+  internalLifecycleStatus   InternalOrderLifecycleStatus @default(ACTIVE)
+  lifecycleReason           String?                      @db.VarChar(1024)
+  lifecycleUpdatedAt        DateTime?
+  buyerGroup                String?                      @db.VarChar(64)
+  confirmVia                String?                      @db.VarChar(64)
+  acumaticaOneWeekConfirmed Boolean?
+  salespersonNumber         String?                      @db.VarChar(16)
+  createdAt                 DateTime                     @default(now())
+  updatedAt                 DateTime                     @updatedAt
+  lastSyncedAt              DateTime?
 
-  contact               Contact                @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
-  total                 OrderTotal?
-  lines                 OrderLine[]
-  address               OrderAddress?
-  taxDetails            OrderTaxDetail[]
-  deliveryGroups        OrderDeliveryGroup[]
-  notificationEvents    NotificationEvent[]
-  deliveryConfirmations DeliveryConfirmation[]
-  deliveryOrderHoldActions DeliveryOrderHoldAction[]
-  internalNotificationEvents InternalNotificationEvent[]
+  contact                          Contact                           @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  total                            OrderTotal?
+  lines                            OrderLine[]
+  deliveryGroupLines               OrderDeliveryGroupLine[]
+  address                          OrderAddress?
+  taxDetails                       OrderTaxDetail[]
+  deliveryGroups                   OrderDeliveryGroup[]
+  notificationEvents               NotificationEvent[]
+  deliveryConfirmations            DeliveryConfirmation[]
+  deliveryOrderHoldActions         DeliveryOrderHoldAction[]
+  deliveryGroupTenDayConfirmations DeliveryGroupTenDayConfirmation[]
+  internalNotificationEvents       InternalNotificationEvent[]
 
   @@unique([orderType, orderNumber])
   @@index([orderNumber])
@@ -171,6 +174,7 @@ model Order {
   @@index([status])
   @@index([internalLifecycleStatus])
   @@index([buyerGroup])
+  @@index([acumaticaOneWeekConfirmed])
   @@index([salespersonNumber])
   @@map("orders")
 }
@@ -241,8 +245,9 @@ model OrderLine {
   updatedAt             DateTime  @updatedAt
   lastSyncedAt          DateTime?
 
-  order       Order                 @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  allocations OrderLineAllocation[]
+  order              Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  allocations        OrderLineAllocation[]
+  deliveryGroupLines OrderDeliveryGroupLine[]
 
   @@unique([orderId, lineNbr])
   @@index([orderNumber])
@@ -342,10 +347,12 @@ model OrderDeliveryGroup {
   updatedAt        DateTime  @updatedAt
   lastSyncedAt     DateTime?
 
-  order                 Order                  @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  notificationEvents    NotificationEvent[]
-  deliveryConfirmations DeliveryConfirmation[]
-  deliveryOrderHoldActions DeliveryOrderHoldAction[]
+  order                      Order                            @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  deliveryGroupLines         OrderDeliveryGroupLine[]
+  notificationEvents         NotificationEvent[]
+  deliveryConfirmations      DeliveryConfirmation[]
+  deliveryOrderHoldActions   DeliveryOrderHoldAction[]
+  tenDayConfirmation         DeliveryGroupTenDayConfirmation?
   internalNotificationEvents InternalNotificationEvent[]
 
   @@unique([orderId, deliveryDate])
@@ -355,6 +362,69 @@ model OrderDeliveryGroup {
   @@index([isActive, deliveryDate])
   @@index([status])
   @@map("order_delivery_groups")
+}
+
+model DeliveryGroupTenDayConfirmation {
+  id                        String                    @id @default(cuid())
+  orderDeliveryGroupId      String                    @unique
+  orderId                   String
+  orderType                 String                    @db.VarChar(16)
+  orderNumber               String                    @db.VarChar(64)
+  deliveryDate              DateTime                  @db.Date
+  localConfirmed            Boolean                   @default(false)
+  acumaticaOneWeekConfirmed Boolean?
+  confirmedAt               DateTime?
+  confirmedReason           String?                   @db.VarChar(128)
+  sourceInterval            NotificationIntervalType?
+  paymentStatusAtEvaluation String?                   @db.VarChar(64)
+  amountDueAtEvaluation     Decimal?                  @db.Decimal(18, 2)
+  acumaticaWritebackStatus  String?                   @db.VarChar(64)
+  acumaticaWritebackJobId   String?                   @db.VarChar(128)
+  acumaticaWritebackError   String?                   @db.VarChar(2048)
+  mismatchReason            String?                   @db.VarChar(256)
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
+
+  orderDeliveryGroup OrderDeliveryGroup @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  order              Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([localConfirmed, deliveryDate])
+  @@index([orderId, deliveryDate])
+  @@index([orderType, orderNumber])
+  @@index([acumaticaWritebackStatus])
+  @@index([sourceInterval])
+  @@map("delivery_group_ten_day_confirmations")
+}
+
+model OrderDeliveryGroupLine {
+  id                   String    @id @default(cuid())
+  orderDeliveryGroupId String
+  orderLineId          String?
+  orderId              String
+  orderType            String    @db.VarChar(16)
+  orderNumber          String    @db.VarChar(64)
+  lineNbr              Int
+  inventoryId          String?   @db.VarChar(128)
+  deliveryDate         DateTime  @db.Date
+  isActive             Boolean   @default(true)
+  firstSeenAt          DateTime  @default(now())
+  lastSeenAt           DateTime
+  removedAt            DateTime?
+  removedReason        String?   @db.VarChar(256)
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  orderDeliveryGroup OrderDeliveryGroup @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  order              Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderLine          OrderLine?         @relation(fields: [orderLineId], references: [id], onDelete: SetNull)
+
+  @@unique([orderDeliveryGroupId, orderLineId])
+  @@index([orderDeliveryGroupId, isActive])
+  @@index([orderLineId])
+  @@index([orderId, deliveryDate])
+  @@index([orderType, orderNumber, lineNbr])
+  @@index([isActive, deliveryDate])
+  @@map("order_delivery_group_lines")
 }
 
 model ErpChangeEvent {
@@ -440,15 +510,15 @@ model NotificationEvent {
   createdAt         DateTime                 @default(now())
   updatedAt         DateTime                 @updatedAt
 
-  orderDeliveryGroup    OrderDeliveryGroup            @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
-  order                 Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  contact               Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
-  detailsLink           DeliveryDetailsLink?          @relation("NotificationEventDetailsLink", fields: [detailsLinkId], references: [id], onDelete: SetNull)
-  attempts              NotificationAttempt[]
-  deliveryConfirmations DeliveryConfirmation[]
-  twilioInboundMessages TwilioInboundMessage[]
-  twilioStatusCallbacks TwilioMessageStatusCallback[]
-  paymentEnforcementHoldActions DeliveryOrderHoldAction[] @relation("DeliveryOrderHoldCustomerNotification")
+  orderDeliveryGroup            OrderDeliveryGroup            @relation(fields: [deliveryGroupId], references: [id], onDelete: Cascade)
+  order                         Order                         @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  contact                       Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  detailsLink                   DeliveryDetailsLink?          @relation("NotificationEventDetailsLink", fields: [detailsLinkId], references: [id], onDelete: SetNull)
+  attempts                      NotificationAttempt[]
+  deliveryConfirmations         DeliveryConfirmation[]
+  twilioInboundMessages         TwilioInboundMessage[]
+  twilioStatusCallbacks         TwilioMessageStatusCallback[]
+  paymentEnforcementHoldActions DeliveryOrderHoldAction[]     @relation("DeliveryOrderHoldCustomerNotification")
 
   @@index([deliveryGroupId])
   @@index([orderId])
@@ -515,9 +585,9 @@ model DeliveryOrderHoldAction {
   createdAt                   DateTime                      @default(now())
   updatedAt                   DateTime                      @updatedAt
 
-  order                     Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  orderDeliveryGroup        OrderDeliveryGroup          @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
-  customerNotificationEvent NotificationEvent?          @relation("DeliveryOrderHoldCustomerNotification", fields: [customerNotificationEventId], references: [id], onDelete: SetNull)
+  order                      Order                       @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  orderDeliveryGroup         OrderDeliveryGroup          @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  customerNotificationEvent  NotificationEvent?          @relation("DeliveryOrderHoldCustomerNotification", fields: [customerNotificationEventId], references: [id], onDelete: SetNull)
   internalNotificationEvents InternalNotificationEvent[]
 
   @@unique([orderDeliveryGroupId, deliveryDate, reason])

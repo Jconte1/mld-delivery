@@ -34,6 +34,7 @@ import { render30DayDeliveryReminderEmail } from "../../lib/notifications/delive
 import { render14DayDeliveryReminderEmail } from "../../lib/notifications/deliveryReminder14Day";
 import { render12DayDeliveryPaymentReminderEmail } from "../../lib/notifications/deliveryPaymentReminder12Day";
 import { render10DayDeliveryPaymentReminderEmail } from "../../lib/notifications/deliveryPaymentReminder10Day";
+import { render2DayDeliveryReminderEmail } from "../../lib/notifications/deliveryReminder2Day";
 import { renderDeliveryReminderEmailBody } from "../../lib/notifications/deliveryReminderEmail";
 import { getActiveSalespersonContactMap } from "../../lib/notifications/salespersonContactCache";
 import { getPaymentDeadlineDate } from "../../lib/notifications/paymentDeadlineBusinessDays";
@@ -46,7 +47,7 @@ import {
 import { prisma } from "../../lib/prisma";
 
 type Mode = "preview" | "send";
-type IntervalKey = "180" | "90" | "60" | "42" | "30" | "14" | "12" | "10";
+type IntervalKey = "180" | "90" | "60" | "42" | "30" | "14" | "12" | "10" | "2";
 type IntervalArg = IntervalKey | "all";
 
 type Args = {
@@ -107,6 +108,12 @@ const INTERVALS = [
     label: "10-day payment reminder",
     intervalType: NotificationIntervalType.DAY_10,
   },
+  {
+    key: "2",
+    days: 2,
+    label: "2-day final delivery reminder",
+    intervalType: NotificationIntervalType.DAY_2,
+  },
 ] as const;
 
 type CandidateGroup = Awaited<ReturnType<typeof loadCandidateGroups>>[number];
@@ -162,8 +169,8 @@ function parseArgs(argv: string[]): Args {
     }
     if (arg.startsWith("--interval=")) {
       const value = arg.slice("--interval=".length).trim();
-      if (!["180", "90", "60", "42", "30", "14", "12", "10", "all"].includes(value)) {
-        throw new Error("--interval must be 180, 90, 60, 42, 30, 14, 12, 10, or all");
+      if (!["180", "90", "60", "42", "30", "14", "12", "10", "2", "all"].includes(value)) {
+        throw new Error("--interval must be 180, 90, 60, 42, 30, 14, 12, 10, 2, or all");
       }
       interval = value as IntervalArg;
       continue;
@@ -375,7 +382,13 @@ function normalizeConfirmVia(value: string | null | undefined) {
 }
 
 function isDetailsLinkReminderInterval(interval: IntervalKey) {
-  return interval === "30" || interval === "14" || interval === "12" || interval === "10";
+  return (
+    interval === "30" ||
+    interval === "14" ||
+    interval === "12" ||
+    interval === "10" ||
+    interval === "2"
+  );
 }
 
 function isPaymentRequestInterval(interval: IntervalKey) {
@@ -521,6 +534,34 @@ async function renderIntervalEmail(params: {
 
   if (isDetailsLinkReminderInterval(params.interval.key)) {
     const details = await ensureTestDeliveryDetailsLink(params.group);
+    if (params.interval.key === "2") {
+      const email = render2DayDeliveryReminderEmail({
+        contactName,
+        buyerGroup: params.group.order.buyerGroup,
+        jobName,
+        jobAddress,
+        deliveryDate: params.group.deliveryDate,
+        detailsLink: details.link,
+        salespersonContact: params.salespersonContact,
+      });
+
+      return {
+        subject: email.subject,
+        body: email.body,
+        htmlBody: email.htmlBody,
+        footerIncluded: Boolean(footer && email.body.includes("For additional information")),
+        confirmation: null,
+        webpageBlockIncluded: null,
+        requestDifferentDateUnchanged: null,
+        detailsLink: details.link,
+        detailsLinkCreated: details.detailsLinkCreated,
+        detailsLinkReused: details.detailsLinkReused,
+        detailsLinkId: details.detailsLinkId,
+        itemLineCount: null,
+        payment: null,
+      };
+    }
+
     const readiness = await getDeliveryGroupReadiness(params.group.id);
     const payment = await getDeliveryGroupPaymentEvaluation(params.group.id);
     const minimumAmountDue = isPaymentRequestInterval(params.interval.key) ? 0 : 2;

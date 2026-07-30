@@ -8,6 +8,10 @@ import {
   type ErpChangeDetectionResult,
 } from "@/lib/erp/detectErpChanges";
 import { createErpClientFromEnv } from "@/lib/erp/erpClient";
+import {
+  isDeliverableOrderLineItemType,
+  syncOrderDeliveryGroupLineMemberships,
+} from "@/lib/erp/orderDeliveryGroupLineMembership";
 import { syncOrderDeliveryGroups } from "@/lib/erp/syncOrderDeliveryGroups";
 import { persistOrderReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { prisma } from "@/lib/prisma";
@@ -25,6 +29,15 @@ export type ImportSalesOrdersResult = {
   allocationsUpserted: number;
   addressesUpserted: number;
   deliveryGroupsUpserted: number;
+  deliveryGroupLinesUpserted: number;
+  deliveryGroupLinesCreated: number;
+  deliveryGroupLinesReactivated: number;
+  deliveryGroupLinesDeactivated: number;
+  deliveryGroupLinesExcludedNonStock: number;
+  deliveryGroupLinesExcludedService: number;
+  deliveryGroupLinesExcludedUnknownItemType: number;
+  deliveryGroupLinesExcludedMissingRequestedOn: number;
+  deliveryGroupLinesExcludedMissingDeliveryGroup: number;
   changeEventsDetected: number;
   changeEventsCreated: number;
   changeEventsDeduped: number;
@@ -48,6 +61,15 @@ type ImportDeltas = Pick<
   | "allocationsUpserted"
   | "addressesUpserted"
   | "deliveryGroupsUpserted"
+  | "deliveryGroupLinesUpserted"
+  | "deliveryGroupLinesCreated"
+  | "deliveryGroupLinesReactivated"
+  | "deliveryGroupLinesDeactivated"
+  | "deliveryGroupLinesExcludedNonStock"
+  | "deliveryGroupLinesExcludedService"
+  | "deliveryGroupLinesExcludedUnknownItemType"
+  | "deliveryGroupLinesExcludedMissingRequestedOn"
+  | "deliveryGroupLinesExcludedMissingDeliveryGroup"
   | "changeEventsDetected"
   | "changeEventsCreated"
   | "changeEventsDeduped"
@@ -111,6 +133,15 @@ function emptyResult(requestedOn: string): ImportSalesOrdersResult {
     allocationsUpserted: 0,
     addressesUpserted: 0,
     deliveryGroupsUpserted: 0,
+    deliveryGroupLinesUpserted: 0,
+    deliveryGroupLinesCreated: 0,
+    deliveryGroupLinesReactivated: 0,
+    deliveryGroupLinesDeactivated: 0,
+    deliveryGroupLinesExcludedNonStock: 0,
+    deliveryGroupLinesExcludedService: 0,
+    deliveryGroupLinesExcludedUnknownItemType: 0,
+    deliveryGroupLinesExcludedMissingRequestedOn: 0,
+    deliveryGroupLinesExcludedMissingDeliveryGroup: 0,
     changeEventsDetected: 0,
     changeEventsCreated: 0,
     changeEventsDeduped: 0,
@@ -131,6 +162,15 @@ function emptyDeltas(): ImportDeltas {
     allocationsUpserted: 0,
     addressesUpserted: 0,
     deliveryGroupsUpserted: 0,
+    deliveryGroupLinesUpserted: 0,
+    deliveryGroupLinesCreated: 0,
+    deliveryGroupLinesReactivated: 0,
+    deliveryGroupLinesDeactivated: 0,
+    deliveryGroupLinesExcludedNonStock: 0,
+    deliveryGroupLinesExcludedService: 0,
+    deliveryGroupLinesExcludedUnknownItemType: 0,
+    deliveryGroupLinesExcludedMissingRequestedOn: 0,
+    deliveryGroupLinesExcludedMissingDeliveryGroup: 0,
     changeEventsDetected: 0,
     changeEventsCreated: 0,
     changeEventsDeduped: 0,
@@ -147,6 +187,18 @@ function addDeltas(result: ImportSalesOrdersResult, deltas: ImportDeltas) {
   result.allocationsUpserted += deltas.allocationsUpserted;
   result.addressesUpserted += deltas.addressesUpserted;
   result.deliveryGroupsUpserted += deltas.deliveryGroupsUpserted;
+  result.deliveryGroupLinesUpserted += deltas.deliveryGroupLinesUpserted;
+  result.deliveryGroupLinesCreated += deltas.deliveryGroupLinesCreated;
+  result.deliveryGroupLinesReactivated += deltas.deliveryGroupLinesReactivated;
+  result.deliveryGroupLinesDeactivated += deltas.deliveryGroupLinesDeactivated;
+  result.deliveryGroupLinesExcludedNonStock += deltas.deliveryGroupLinesExcludedNonStock;
+  result.deliveryGroupLinesExcludedService += deltas.deliveryGroupLinesExcludedService;
+  result.deliveryGroupLinesExcludedUnknownItemType +=
+    deltas.deliveryGroupLinesExcludedUnknownItemType;
+  result.deliveryGroupLinesExcludedMissingRequestedOn +=
+    deltas.deliveryGroupLinesExcludedMissingRequestedOn;
+  result.deliveryGroupLinesExcludedMissingDeliveryGroup +=
+    deltas.deliveryGroupLinesExcludedMissingDeliveryGroup;
   result.changeEventsDetected += deltas.changeEventsDetected;
   result.changeEventsCreated += deltas.changeEventsCreated;
   result.changeEventsDeduped += deltas.changeEventsDeduped;
@@ -347,6 +399,24 @@ function getConfirmVia(fullOrder: unknown) {
       "SOOrder.AttributeCONFIRMVIA",
     ])
   );
+}
+
+function getAcumaticaOneWeekConfirmed(fullOrder: unknown) {
+  const customValue = getNestedField(fullOrder, ["custom", "Document", "AttributeONEWEEKCON"]);
+  const parsedCustomValue = getBooleanValue(customValue);
+  if (parsedCustomValue !== null) return parsedCustomValue;
+
+  for (const key of [
+    "OneWeekConfirmed",
+    "AttributeONEWEEKCON",
+    "SOOrder_AttributeONEWEEKCON",
+    "SOOrder.AttributeONEWEEKCON",
+  ]) {
+    const parsed = getBooleanValue(getField(fullOrder, key));
+    if (parsed !== null) return parsed;
+  }
+
+  return null;
 }
 
 export function getSalespersonNumber(fullOrder: unknown) {
@@ -706,6 +776,7 @@ export async function importSalesOrdersForLineRequestedOn(
                 locationDescription: true,
                 buyerGroup: true,
                 confirmVia: true,
+                acumaticaOneWeekConfirmed: true,
                 salespersonNumber: true,
                 shipVia: true,
               },
@@ -722,6 +793,7 @@ export async function importSalesOrdersForLineRequestedOn(
               locationDescription,
               buyerGroup: getBuyerGroup(fullOrder),
               confirmVia: getConfirmVia(fullOrder),
+              acumaticaOneWeekConfirmed: getAcumaticaOneWeekConfirmed(fullOrder),
               salespersonNumber: getSalespersonNumber(fullOrder),
               turnInDate: getDateValue(getField(fullOrder, "Date")),
               noteId: getString(getField(fullOrder, "NoteID")),
@@ -897,10 +969,17 @@ export async function importSalesOrdersForLineRequestedOn(
             );
 
             const requestedDateKeys = new Set<string>();
-            const requestedDateLineCounts = new Map<string, number>();
+            const requestedDateDeliverableLineCounts = new Map<string, number>();
             const incomingLineNbrs = new Set<number>();
             const retainedOrderLineIds = new Set<string>();
             const incomingAllocationKeys = new Set<string>();
+            const currentOrderLinesForDeliveryGroups: Array<{
+              id: string;
+              lineNbr: number;
+              inventoryId: string | null;
+              itemType: string | null;
+              requestedOn: Date | null;
+            }> = [];
 
             for (const detail of details) {
               const lineNbr = getInteger(getField(detail, "LineNbr"));
@@ -919,10 +998,6 @@ export async function importSalesOrdersForLineRequestedOn(
               const requestedDateKey = requestedDate ? dateKeyFromValue(requestedDate) : null;
               if (requestedDateKey) {
                 requestedDateKeys.add(requestedDateKey);
-                requestedDateLineCounts.set(
-                  requestedDateKey,
-                  (requestedDateLineCounts.get(requestedDateKey) ?? 0) + 1
-                );
               }
 
               const lineData = {
@@ -942,6 +1017,13 @@ export async function importSalesOrdersForLineRequestedOn(
                 warehouseId: getString(getField(detail, "WarehouseID")),
                 lastSyncedAt: importAt,
               };
+              const deliverableLine = isDeliverableOrderLineItemType(lineData.itemType);
+              if (requestedDateKey && deliverableLine) {
+                requestedDateDeliverableLineCounts.set(
+                  requestedDateKey,
+                  (requestedDateDeliverableLineCounts.get(requestedDateKey) ?? 0) + 1
+                );
+              }
 
               const existingOrderLine = existingOrderLinesByLineNbr.get(lineNbr) ?? null;
 
@@ -976,6 +1058,13 @@ export async function importSalesOrdersForLineRequestedOn(
               });
               deltas.linesUpserted += 1;
               retainedOrderLineIds.add(orderLine.id);
+              currentOrderLinesForDeliveryGroups.push({
+                id: orderLine.id,
+                lineNbr,
+                inventoryId: lineData.inventoryId,
+                itemType: lineData.itemType,
+                requestedOn: lineData.requestedOn,
+              });
 
               for (const allocation of getArray(getField(detail, "Allocations"))) {
                 const splitLineNbr = getInteger(getField(allocation, "SplitLineNbr"));
@@ -1125,10 +1214,34 @@ export async function importSalesOrdersForLineRequestedOn(
               importAt,
               currentDeliveryGroups: [...requestedDateKeys].map((requestedDateKey) => ({
                 deliveryDate: dateFromKey(requestedDateKey),
-                lineCount: requestedDateLineCounts.get(requestedDateKey) ?? 0,
+                lineCount: requestedDateDeliverableLineCounts.get(requestedDateKey) ?? 0,
               })),
             });
             deltas.deliveryGroupsUpserted += deliveryGroupSync.upserted;
+            const deliveryGroupLineSync = await syncOrderDeliveryGroupLineMemberships(tx, {
+              orderId: order.id,
+              orderNumber,
+              orderType,
+              importAt,
+              currentLines: currentOrderLinesForDeliveryGroups,
+            });
+            deltas.deliveryGroupLinesUpserted +=
+              deliveryGroupLineSync.activeMembershipsUpserted;
+            deltas.deliveryGroupLinesCreated += deliveryGroupLineSync.membershipsCreated;
+            deltas.deliveryGroupLinesReactivated +=
+              deliveryGroupLineSync.membershipsReactivated;
+            deltas.deliveryGroupLinesDeactivated +=
+              deliveryGroupLineSync.membershipsDeactivated;
+            deltas.deliveryGroupLinesExcludedNonStock +=
+              deliveryGroupLineSync.excludedNonStockLines;
+            deltas.deliveryGroupLinesExcludedService +=
+              deliveryGroupLineSync.excludedServiceLines;
+            deltas.deliveryGroupLinesExcludedUnknownItemType +=
+              deliveryGroupLineSync.excludedUnknownItemTypeLines;
+            deltas.deliveryGroupLinesExcludedMissingRequestedOn +=
+              deliveryGroupLineSync.excludedMissingRequestedOnLines;
+            deltas.deliveryGroupLinesExcludedMissingDeliveryGroup +=
+              deliveryGroupLineSync.excludedMissingDeliveryGroupLines;
 
             return { orderId: order.id, deltas, errors };
           },

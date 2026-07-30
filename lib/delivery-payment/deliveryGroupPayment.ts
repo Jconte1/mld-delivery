@@ -536,7 +536,10 @@ async function getDeliveryGroupWithPaymentData(
       order: {
         include: {
           total: true,
-          lines: { orderBy: { lineNbr: "asc" } },
+          lines: {
+            where: { deliveryGroupLines: { some: { isActive: true } } },
+            orderBy: { lineNbr: "asc" },
+          },
           taxDetails: { orderBy: [{ rowNumber: "asc" }, { taxId: "asc" }] },
         },
       },
@@ -575,7 +578,10 @@ export async function getDeliveryGroupPaymentEvaluationByOrderDate(
       order: {
         include: {
           total: true,
-          lines: { orderBy: { lineNbr: "asc" } },
+          lines: {
+            where: { deliveryGroupLines: { some: { isActive: true } } },
+            orderBy: { lineNbr: "asc" },
+          },
           taxDetails: { orderBy: [{ rowNumber: "asc" }, { taxId: "asc" }] },
         },
       },
@@ -602,10 +608,16 @@ export async function getOrderPaymentEvaluations(
     where: { id: orderId },
     include: {
       total: true,
-      lines: { orderBy: { lineNbr: "asc" } },
+      lines: {
+        where: { deliveryGroupLines: { some: { isActive: true } } },
+        orderBy: { lineNbr: "asc" },
+      },
       taxDetails: { orderBy: [{ rowNumber: "asc" }, { taxId: "asc" }] },
       deliveryGroups: {
-        where: { isActive: true },
+        where: {
+          isActive: true,
+          deliveryGroupLines: { some: { isActive: true } },
+        },
         orderBy: { deliveryDate: "asc" },
       },
     },

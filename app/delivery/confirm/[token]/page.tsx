@@ -1,11 +1,11 @@
 import { redirect } from "next/navigation";
 
-import {
-  DeliveryConfirmationStatus,
-  type OrderLine,
-} from "@/lib/generated/prisma/client";
+import { DeliveryConfirmationStatus } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
-import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
+import {
+  getDeliveryGroupReadiness,
+  type OrderLineReadinessSummary,
+} from "@/lib/delivery-readiness/orderLineReadiness";
 import { DELIVERY_MANUAL_REVIEW_REASONS } from "@/lib/notifications/deliveryConfirmationManualReview";
 import { confirmDeliveryFromWebpage } from "@/lib/notifications/confirmDeliveryFromWebpage";
 import {
@@ -34,7 +34,7 @@ type PageProps = {
 };
 
 type DeliveryLine = Pick<
-  OrderLine,
+  OrderLineReadinessSummary,
   | "lineNbr"
   | "inventoryId"
   | "lineDescription"
@@ -56,9 +56,6 @@ async function loadConfirmation(token: string) {
             include: {
               address: true,
               contact: true,
-              lines: {
-                orderBy: { lineNbr: "asc" },
-              },
             },
           },
         },
@@ -81,7 +78,7 @@ async function loadConfirmation(token: string) {
   };
 }
 
-function quantity(value: { toString(): string } | null | undefined) {
+function quantity(value: number | string | { toString(): string } | null | undefined) {
   if (value === null || value === undefined) return "";
   const numeric = Number(value.toString());
   if (!Number.isFinite(numeric)) return value.toString();
@@ -281,10 +278,8 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
     locationDescription: order.locationDescription,
   });
   const jobAddress = formatJobAddress(order.address ?? {}) || "the job site";
-  const lines: DeliveryLine[] = order.lines.filter(
-    (line) => line.requestedOn && dateKey(line.requestedOn) === deliveryDate
-  );
   const readiness = await getDeliveryGroupReadiness(group.id);
+  const lines: DeliveryLine[] = readiness.lines;
   const payment = await getDeliveryGroupPaymentEvaluation(group.id);
   const showAmountDue = payment.paymentStatus === "balance_due" && payment.amountDueNowRounded;
   const statusLabel = titleCaseStatus(confirmation.status);

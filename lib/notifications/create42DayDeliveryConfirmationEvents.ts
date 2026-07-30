@@ -323,6 +323,7 @@ export async function find42DayDeliveryConfirmationTargetGroups(
     where: {
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
+      deliveryGroupLines: { some: { isActive: true } },
     },
     orderBy: [{ orderNumber: "asc" }, { id: "asc" }],
     select: {

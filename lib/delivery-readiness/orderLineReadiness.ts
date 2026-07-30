@@ -190,7 +190,7 @@ export function classifyOrderLineReadiness(
     (allocation) => allocation.completed
   ).length;
 
-  const isIgnored = line.itemType === "N";
+  const isIgnored = line.itemType?.trim().toUpperCase() !== "F";
   const isComplete = !isIgnored && openQty === 0;
   const isAllocated = !isIgnored && openQty !== null && openQty > 0 && activeAllocatedQty >= openQty;
   const isPartiallyAllocated =
@@ -327,41 +327,32 @@ export async function getDeliveryGroupReadiness(
       orderType: true,
       orderNumber: true,
       deliveryDate: true,
-    },
-  });
-
-  if (!deliveryGroup) {
-    throw new Error(`Delivery group not found: ${orderDeliveryGroupId}`);
-  }
-
-  const order = await db.order.findUnique({
-    where: { id: deliveryGroup.orderId },
-    select: {
-      id: true,
-      orderType: true,
-      orderNumber: true,
-      lines: {
-        where: { requestedOn: deliveryGroup.deliveryDate },
+      deliveryGroupLines: {
+        where: { isActive: true },
         orderBy: { lineNbr: "asc" },
         select: {
-          id: true,
-          lineNbr: true,
-          inventoryId: true,
-          lineDescription: true,
-          itemType: true,
-          itemClass: true,
-          requestedOn: true,
-          eta: true,
-          orderQty: true,
-          openQty: true,
-          allocations: {
-            orderBy: { splitLineNbr: "asc" },
+          orderLine: {
             select: {
               id: true,
-              splitLineNbr: true,
-              allocated: true,
-              completed: true,
-              qty: true,
+              lineNbr: true,
+              inventoryId: true,
+              lineDescription: true,
+              itemType: true,
+              itemClass: true,
+              requestedOn: true,
+              eta: true,
+              orderQty: true,
+              openQty: true,
+              allocations: {
+                orderBy: { splitLineNbr: "asc" },
+                select: {
+                  id: true,
+                  splitLineNbr: true,
+                  allocated: true,
+                  completed: true,
+                  qty: true,
+                },
+              },
             },
           },
         },
@@ -369,17 +360,19 @@ export async function getDeliveryGroupReadiness(
     },
   });
 
-  if (!order) {
-    throw new Error(`Order not found for delivery group: ${orderDeliveryGroupId}`);
+  if (!deliveryGroup) {
+    throw new Error(`Delivery group not found: ${orderDeliveryGroupId}`);
   }
 
   return summarizeDeliveryGroupReadiness({
     orderDeliveryGroupId: deliveryGroup.id,
-    orderId: order.id,
-    orderType: order.orderType,
-    orderNumber: order.orderNumber,
+    orderId: deliveryGroup.orderId,
+    orderType: deliveryGroup.orderType,
+    orderNumber: deliveryGroup.orderNumber,
     deliveryDate: deliveryGroup.deliveryDate,
-    lines: order.lines,
+    lines: deliveryGroup.deliveryGroupLines
+      .map((membership) => membership.orderLine)
+      .filter((line): line is NonNullable<typeof line> => Boolean(line)),
   });
 }
 
@@ -460,19 +453,19 @@ export async function persistOrderReadiness(orderId: string, client?: ReadinessP
   }
 
   const deliveryGroups: PersistedDeliveryGroupReadinessResult[] = [];
+  const activeMembershipLineIds = new Set<string>();
   for (const deliveryGroup of order.deliveryGroups) {
-    deliveryGroups.push(await persistDeliveryGroupReadiness(deliveryGroup.id, db));
+    const readiness = await persistDeliveryGroupReadiness(deliveryGroup.id, db);
+    deliveryGroups.push(readiness);
+    for (const line of readiness.lines) {
+      activeMembershipLineIds.add(line.orderLineId);
+    }
   }
 
-  const deliveryDates = order.deliveryGroups.map((deliveryGroup) => deliveryGroup.deliveryDate);
   await db.orderLine.updateMany({
     where: {
       orderId: order.id,
-      ...(deliveryDates.length > 0
-        ? {
-            OR: [{ requestedOn: null }, { requestedOn: { notIn: deliveryDates } }],
-          }
-        : {}),
+      ...(activeMembershipLineIds.size > 0 ? { id: { notIn: [...activeMembershipLineIds] } } : {}),
     },
     data: {
       activeAllocatedQty: null,

@@ -40,6 +40,10 @@ import {
   render10DayDeliveryPaymentReminderEmail,
   render10DayDeliveryPaymentReminderSms,
 } from "@/lib/notifications/deliveryPaymentReminder10Day";
+import {
+  evaluateAndRecordDeliveryTenDayConfirmation,
+  type DeliveryTenDayConfirmationEvaluationResult,
+} from "@/lib/notifications/deliveryTenDayConfirmation";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
@@ -99,6 +103,11 @@ export type DeliveryPaymentRequest10DayEventReport = {
   subject: string | null;
   renderedMessagePreview: string;
   itemLineCount: number;
+  tenDayConfirmationStatus?: string | null;
+  tenDayConfirmationReason?: string | null;
+  tenDayConfirmationJobId?: string | null;
+  tenDayConfirmationMismatchReason?: string | null;
+  tenDayConfirmationLocalConfirmed?: boolean;
 };
 
 export type Create10DayDeliveryPaymentRequestEventsSummary = {
@@ -320,6 +329,20 @@ function validateRenderedMessage(params: {
   }
 }
 
+function tenDayConfirmationReport(
+  result: DeliveryTenDayConfirmationEvaluationResult | null
+) {
+  return result
+    ? {
+        tenDayConfirmationStatus: result.acumaticaWritebackStatus,
+        tenDayConfirmationReason: result.reason,
+        tenDayConfirmationJobId: result.acumaticaWritebackJobId,
+        tenDayConfirmationMismatchReason: result.mismatchReason,
+        tenDayConfirmationLocalConfirmed: result.localConfirmed,
+      }
+    : {};
+}
+
 export async function find10DayDeliveryPaymentRequestTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryPaymentRequest10DayClient = prisma
@@ -328,6 +351,7 @@ export async function find10DayDeliveryPaymentRequestTargetGroups(
     where: {
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
+      deliveryGroupLines: { some: { isActive: true } },
     },
     orderBy: [{ orderNumber: "asc" }, { id: "asc" }],
     select: {
@@ -349,6 +373,7 @@ export async function find10DayDeliveryPaymentRequestTargetGroups(
           internalLifecycleStatus: true,
           buyerGroup: true,
           confirmVia: true,
+          acumaticaOneWeekConfirmed: true,
           salespersonNumber: true,
           customerDescription: true,
           locationDescription: true,
@@ -633,6 +658,16 @@ export async function create10DayDeliveryPaymentRequestEvents(
     });
 
     if (paymentSkipReason) {
+      const tenDayConfirmation =
+        paymentSkipReason === DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.noBalanceDue
+          ? await evaluateAndRecordDeliveryTenDayConfirmation({
+              deliveryGroup,
+              payment,
+              sourceInterval: NotificationIntervalType.DAY_10,
+              dryRun,
+              prismaClient: client,
+            })
+          : null;
       await skipDeliveryGroup({
         summary,
         client,
@@ -642,6 +677,7 @@ export async function create10DayDeliveryPaymentRequestEvents(
         dryRun,
         acumaticaConfirmVia,
         payment,
+        tenDayConfirmation,
         renderedMessagePreview: paymentSkipReason,
       });
       continue;
@@ -847,6 +883,7 @@ async function skipDeliveryGroup(params: {
   dryRun: boolean;
   acumaticaConfirmVia: string | null;
   payment?: DeliveryGroupPaymentEvaluation | null;
+  tenDayConfirmation?: DeliveryTenDayConfirmationEvaluationResult | null;
   renderedMessagePreview: string;
 }) {
   params.summary.eventsSkipped += 1;
@@ -895,6 +932,7 @@ async function skipDeliveryGroup(params: {
     subject: null,
     renderedMessagePreview: params.renderedMessagePreview,
     itemLineCount: 0,
+    ...tenDayConfirmationReport(params.tenDayConfirmation ?? null),
   });
 }
 

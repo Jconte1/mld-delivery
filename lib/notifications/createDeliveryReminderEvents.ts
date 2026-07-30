@@ -166,7 +166,11 @@ export async function createDeliveryReminderEvents(
   }
 
   const deliveryGroups = await client.orderDeliveryGroup.findMany({
-    where: { deliveryDate: targetDeliveryDate, isActive: true },
+    where: {
+      deliveryDate: targetDeliveryDate,
+      isActive: true,
+      deliveryGroupLines: { some: { isActive: true } },
+    },
     orderBy: [{ orderNumber: "asc" }, { id: "asc" }],
     select: {
       id: true,

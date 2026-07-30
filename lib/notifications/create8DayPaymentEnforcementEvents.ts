@@ -45,6 +45,10 @@ import {
   render8DayPaymentEnforcementInternalFailure,
   render8DayPaymentEnforcementInternalSuccess,
 } from "@/lib/notifications/deliveryPaymentEnforcement8Day";
+import {
+  evaluateAndRecordDeliveryTenDayConfirmation,
+  type DeliveryTenDayConfirmationEvaluationResult,
+} from "@/lib/notifications/deliveryTenDayConfirmation";
 import { getPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
 import {
   enqueueDeliveryPrepaymentHold,
@@ -138,6 +142,11 @@ export type DeliveryPaymentEnforcement8DayEventReport = {
   detailsLinkUrl: string | null;
   subject: string | null;
   renderedMessagePreview: string;
+  tenDayConfirmationStatus?: string | null;
+  tenDayConfirmationReason?: string | null;
+  tenDayConfirmationJobId?: string | null;
+  tenDayConfirmationMismatchReason?: string | null;
+  tenDayConfirmationLocalConfirmed?: boolean;
 };
 
 export type Create8DayPaymentEnforcementEventsSummary = {
@@ -451,6 +460,20 @@ function validateRenderedMessage(params: {
   }
 }
 
+function tenDayConfirmationReport(
+  result: DeliveryTenDayConfirmationEvaluationResult | null
+) {
+  return result
+    ? {
+        tenDayConfirmationStatus: result.acumaticaWritebackStatus,
+        tenDayConfirmationReason: result.reason,
+        tenDayConfirmationJobId: result.acumaticaWritebackJobId,
+        tenDayConfirmationMismatchReason: result.mismatchReason,
+        tenDayConfirmationLocalConfirmed: result.localConfirmed,
+      }
+    : {};
+}
+
 export async function find8DayPaymentEnforcementTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryPaymentEnforcement8DayClient = prisma
@@ -459,6 +482,7 @@ export async function find8DayPaymentEnforcementTargetGroups(
     where: {
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
+      deliveryGroupLines: { some: { isActive: true } },
     },
     orderBy: [{ orderNumber: "asc" }, { id: "asc" }],
     select: {
@@ -480,6 +504,7 @@ export async function find8DayPaymentEnforcementTargetGroups(
           internalLifecycleStatus: true,
           buyerGroup: true,
           confirmVia: true,
+          acumaticaOneWeekConfirmed: true,
           salespersonNumber: true,
           customerId: true,
           customerDescription: true,
@@ -1099,6 +1124,7 @@ function baseReport(params: {
   deliveryGroup: DeliveryPaymentEnforcement8DayTargetGroup;
   acumaticaConfirmVia: string | null;
   payment?: DeliveryGroupPaymentEvaluation | null;
+  tenDayConfirmation?: DeliveryTenDayConfirmationEvaluationResult | null;
   paymentDeadlineDate?: string | null;
   renderedMessagePreview: string;
 }): DeliveryPaymentEnforcement8DayEventReport {
@@ -1135,6 +1161,7 @@ function baseReport(params: {
     detailsLinkUrl: null,
     subject: null,
     renderedMessagePreview: params.renderedMessagePreview,
+    ...tenDayConfirmationReport(params.tenDayConfirmation ?? null),
   };
 }
 
@@ -1265,12 +1292,23 @@ export async function create8DayPaymentEnforcementEvents(
     });
 
     if (paymentSkipReason) {
+      const tenDayConfirmation =
+        paymentSkipReason === DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.noBalanceDue
+          ? await evaluateAndRecordDeliveryTenDayConfirmation({
+              deliveryGroup,
+              payment,
+              sourceInterval: NotificationIntervalType.DAY_8,
+              dryRun,
+              prismaClient: client,
+            })
+          : null;
       addSkippedReason(summary, paymentSkipReason);
       summary.eventReports.push(
         baseReport({
           deliveryGroup,
           acumaticaConfirmVia,
           payment,
+          tenDayConfirmation,
           renderedMessagePreview: paymentSkipReason,
         })
       );

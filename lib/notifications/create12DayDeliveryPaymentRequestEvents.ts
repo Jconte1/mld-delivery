@@ -1,5 +1,6 @@
 import {
   getDeliveryGroupPaymentEvaluation,
+  isMeaningfulDeliveryPaymentAmount,
   isEligibleDeliveryPaymentTerm,
   normalizeDeliveryPaymentTerms,
   type DeliveryGroupPaymentEvaluation,
@@ -67,7 +68,7 @@ type DeliveryPaymentRequest12DayClient = Pick<
   typeof prisma,
   "orderDeliveryGroup" | "notificationEvent" | "deliveryDetailsLink"
 > &
-  Partial<Pick<typeof prisma, "salespersonContact">>;
+  Partial<Pick<typeof prisma, "deliveryGroupPaymentChargeAllocation" | "salespersonContact">>;
 
 type DeliveryPaymentRequest12DayTargetGroup = Awaited<
   ReturnType<typeof find12DayDeliveryPaymentRequestTargetGroups>
@@ -225,9 +226,7 @@ function safeJobAddress(address: {
 }
 
 function amountIsPositive(value: string | null | undefined) {
-  if (!value) return false;
-  const parsed = Number(value.replace(/,/g, ""));
-  return Number.isFinite(parsed) && parsed > 0;
+  return isMeaningfulDeliveryPaymentAmount(value);
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -647,7 +646,13 @@ export async function create12DayDeliveryPaymentRequestEvents(
       continue;
     }
 
-    const payment = await loadPayment(deliveryGroup.id);
+    const payment = options.getPaymentEvaluation
+      ? await loadPayment(deliveryGroup.id)
+      : await getDeliveryGroupPaymentEvaluation(deliveryGroup.id, client, {
+          sourceInterval: NotificationIntervalType.DAY_12,
+          allocateFreightDeliveryCharges: true,
+          dryRun,
+        });
     const paymentSkipReason = get12DayPaymentSkipReason({
       hasOrderTotal: Boolean(order.total),
       paymentTerms: order.total?.paymentTerms ?? null,

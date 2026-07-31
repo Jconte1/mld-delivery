@@ -137,7 +137,7 @@ function main() {
   );
   assertIncludes(
     source,
-    "getDeliveryGroupPaymentEvaluation(deliveryGroup.id)",
+    "getDeliveryGroupPaymentEvaluation(",
     "30-day creator evaluates payment state",
     failures
   );

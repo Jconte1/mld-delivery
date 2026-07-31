@@ -98,6 +98,12 @@ enum InternalNotificationPurpose {
   PAYMENT_ENFORCEMENT_HOLD_FAILED
 }
 
+enum SharePointStockSyncRunStatus {
+  RUNNING @map("running")
+  SUCCESS @map("success")
+  FAILED  @map("failed")
+}
+
 model Contact {
   id             String    @id @default(cuid())
   contactId      String    @unique @db.VarChar(64)
@@ -164,6 +170,7 @@ model Order {
   deliveryConfirmations            DeliveryConfirmation[]
   deliveryOrderHoldActions         DeliveryOrderHoldAction[]
   deliveryGroupTenDayConfirmations DeliveryGroupTenDayConfirmation[]
+  deliveryGroupPaymentChargeAllocations DeliveryGroupPaymentChargeAllocation[]
   internalNotificationEvents       InternalNotificationEvent[]
 
   @@unique([orderType, orderNumber])
@@ -195,6 +202,49 @@ model SalespersonContact {
 
   @@index([isActive])
   @@map("salesperson_contacts")
+}
+
+model SharePointStockSyncRun {
+  id                     String                       @id @default(cuid())
+  status                 SharePointStockSyncRunStatus
+  startedAt              DateTime                     @default(now())
+  completedAt            DateTime?
+  workbookSiteId         String?                      @db.VarChar(256)
+  workbookDriveId        String?                      @db.VarChar(256)
+  workbookFileId         String?                      @db.VarChar(256)
+  workbookName           String?                      @db.VarChar(512)
+  workbookETag           String?                      @db.VarChar(512)
+  workbookLastModifiedAt DateTime?
+  rowsRead               Int                          @default(0)
+  itemsCreated           Int                          @default(0)
+  itemsUpdated           Int                          @default(0)
+  itemsDeactivated       Int                          @default(0)
+  itemsSkipped           Int                          @default(0)
+  errorsJson             Json?
+  createdAt              DateTime                     @default(now())
+  updatedAt              DateTime                     @updatedAt
+
+  @@index([status, completedAt])
+  @@map("sharepoint_stock_sync_runs")
+}
+
+model ExternalStockItem {
+  id                    String   @id @default(cuid())
+  inventoryId           String   @db.VarChar(128)
+  normalizedInventoryId String   @db.VarChar(128)
+  source                String   @default("sharepoint_stock_list") @db.VarChar(64)
+  sourceRowNumber       Int?
+  sourceWorkbookId      String?  @db.VarChar(256)
+  lastSeenAt            DateTime
+  lastSyncedAt          DateTime
+  isActive              Boolean  @default(true)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  @@unique([source, normalizedInventoryId])
+  @@index([normalizedInventoryId])
+  @@index([source, isActive])
+  @@map("external_stock_items")
 }
 
 model OrderTotal {
@@ -248,6 +298,7 @@ model OrderLine {
   order              Order                    @relation(fields: [orderId], references: [id], onDelete: Cascade)
   allocations        OrderLineAllocation[]
   deliveryGroupLines OrderDeliveryGroupLine[]
+  deliveryGroupPaymentChargeAllocation DeliveryGroupPaymentChargeAllocation?
 
   @@unique([orderId, lineNbr])
   @@index([orderNumber])
@@ -353,6 +404,7 @@ model OrderDeliveryGroup {
   deliveryConfirmations      DeliveryConfirmation[]
   deliveryOrderHoldActions   DeliveryOrderHoldAction[]
   tenDayConfirmation         DeliveryGroupTenDayConfirmation?
+  paymentChargeAllocations   DeliveryGroupPaymentChargeAllocation[]
   internalNotificationEvents InternalNotificationEvent[]
 
   @@unique([orderId, deliveryDate])
@@ -425,6 +477,36 @@ model OrderDeliveryGroupLine {
   @@index([orderType, orderNumber, lineNbr])
   @@index([isActive, deliveryDate])
   @@map("order_delivery_group_lines")
+}
+
+model DeliveryGroupPaymentChargeAllocation {
+  id                   String                   @id @default(cuid())
+  orderDeliveryGroupId String
+  orderLineId          String                   @unique
+  orderId              String
+  orderType            String                   @db.VarChar(16)
+  orderNumber          String                   @db.VarChar(64)
+  deliveryDate         DateTime                 @db.Date
+  lineNbr              Int
+  inventoryId          String?                  @db.VarChar(128)
+  lineDescription      String?                  @db.VarChar(512)
+  chargeType           String                   @db.VarChar(64)
+  amountIncluded       Decimal                  @db.Decimal(18, 2)
+  sourceInterval       NotificationIntervalType
+  includedAt           DateTime                 @default(now())
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  orderDeliveryGroup OrderDeliveryGroup @relation(fields: [orderDeliveryGroupId], references: [id], onDelete: Cascade)
+  orderLine          OrderLine          @relation(fields: [orderLineId], references: [id], onDelete: Cascade)
+  order              Order              @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([orderDeliveryGroupId])
+  @@index([orderId])
+  @@index([orderType, orderNumber])
+  @@index([sourceInterval])
+  @@index([includedAt])
+  @@map("delivery_group_payment_charge_allocations")
 }
 
 model ErpChangeEvent {

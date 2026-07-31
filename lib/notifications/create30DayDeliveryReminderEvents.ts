@@ -50,7 +50,7 @@ type DeliveryReminder30DayClient = Pick<
   typeof prisma,
   "orderDeliveryGroup" | "notificationEvent" | "deliveryDetailsLink"
 > &
-  Partial<Pick<typeof prisma, "salespersonContact">>;
+  Partial<Pick<typeof prisma, "deliveryGroupPaymentChargeAllocation" | "salespersonContact">>;
 
 export type DeliveryReminder30DayEventReport = {
   orderType: string;
@@ -658,7 +658,17 @@ export async function createConfirmedDeliveryReminderEvents(
       ? salespersonContactsByNumber.get(order.salespersonNumber) ?? null
       : null;
     const readiness = await getDeliveryGroupReadiness(deliveryGroup.id);
-    const payment = await getDeliveryGroupPaymentEvaluation(deliveryGroup.id);
+    const payment = await getDeliveryGroupPaymentEvaluation(
+      deliveryGroup.id,
+      client,
+      options.intervalType === NotificationIntervalType.DAY_14
+        ? {
+            sourceInterval: NotificationIntervalType.DAY_14,
+            allocateFreightDeliveryCharges: true,
+            dryRun,
+          }
+        : undefined
+    );
     const showPaymentReminder = paymentReminderApplies(payment);
     const tenDayConfirmation =
       options.intervalType === NotificationIntervalType.DAY_14

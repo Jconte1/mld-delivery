@@ -1,3 +1,4 @@
+import { isMeaningfulDeliveryPaymentAmount } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { formatCurrencyAmount } from "@/lib/notifications/helpers";
 
 export type DeliveryPaymentSummaryInput = {
@@ -9,7 +10,10 @@ export type DeliveryPaymentSummaryInput = {
 };
 
 export function deliveryHasBalanceDue(payment: DeliveryPaymentSummaryInput) {
-  return payment.paymentStatus === "balance_due" && Boolean(payment.amountDueNowRounded);
+  return (
+    payment.paymentStatus === "balance_due" &&
+    isMeaningfulDeliveryPaymentAmount(payment.amountDueNowRounded)
+  );
 }
 
 export function DeliveryPaymentSummary({
@@ -18,6 +22,10 @@ export function DeliveryPaymentSummary({
   payment: DeliveryPaymentSummaryInput;
 }) {
   const showAmountDue = deliveryHasBalanceDue(payment);
+  const showUnpaidBalance = isMeaningfulDeliveryPaymentAmount(payment.unpaidBalance);
+  const showCurrentDeliveryValue = isMeaningfulDeliveryPaymentAmount(
+    payment.currentDeliveryGroupValue
+  );
 
   return (
     <aside className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
@@ -39,7 +47,7 @@ export function DeliveryPaymentSummary({
             </dd>
           </div>
         ) : null}
-        {payment.unpaidBalance ? (
+        {showUnpaidBalance ? (
           <div>
             <dt className="font-medium text-zinc-500">Unpaid balance</dt>
             <dd className="mt-1 text-zinc-900">
@@ -47,7 +55,7 @@ export function DeliveryPaymentSummary({
             </dd>
           </div>
         ) : null}
-        {payment.currentDeliveryGroupValue ? (
+        {showCurrentDeliveryValue ? (
           <div>
             <dt className="font-medium text-zinc-500">Current delivery value</dt>
             <dd className="mt-1 text-zinc-900">

@@ -1,4 +1,8 @@
 import type { Prisma } from "@/lib/generated/prisma/client";
+import {
+  getFreshExternalStockMatchesForInventoryIds,
+} from "@/lib/sharepoint-stock/externalStockReadiness";
+import { normalizeStockInventoryId } from "@/lib/sharepoint-stock/stockInventoryNormalization";
 
 export type AllocationStatus =
   | "ignored"
@@ -73,6 +77,8 @@ export type OrderLineReadinessSummary = {
   allocationStatus: AllocationStatus;
   etaStatus: EtaStatus;
   readinessStatus: ReadinessStatus;
+  readinessStatusBeforeExternalStock?: ReadinessStatus | null;
+  externalStockReadinessMatched?: boolean;
   displayStatus: string;
   allocationCount: number;
   allocationRowsCompact: string[];
@@ -102,6 +108,10 @@ export type DeliveryGroupReadinessResult = {
 export type PersistedDeliveryGroupReadinessResult = DeliveryGroupReadinessResult & {
   persistedLineCount: number;
   readinessCalculatedAt: string;
+};
+
+export type DeliveryGroupReadinessOptions = {
+  applyExternalStockReadiness?: boolean;
 };
 
 type ReadinessPrismaClient = Pick<
@@ -256,6 +266,8 @@ export function classifyOrderLineReadiness(
     allocationStatus,
     etaStatus,
     readinessStatus,
+    readinessStatusBeforeExternalStock: null,
+    externalStockReadinessMatched: false,
     displayStatus: READINESS_STATUS_LABELS[readinessStatus],
     allocationCount: line.allocations.length,
     allocationRowsCompact: line.allocations.map(
@@ -276,13 +288,19 @@ export function summarizeDeliveryGroupReadiness(params: {
   orderNumber: string;
   deliveryDate: Date | string;
   lines: OrderLineReadinessInput[];
+  externalStockReadyInventoryIds?: Set<string>;
 }): DeliveryGroupReadinessResult {
   const deliveryDate = dateKey(params.deliveryDate);
   if (!deliveryDate) {
     throw new Error(`Invalid delivery date: ${String(params.deliveryDate)}`);
   }
 
-  const lines = params.lines.map((line) => classifyOrderLineReadiness(line, deliveryDate));
+  const lines = params.lines.map((line) =>
+    applyExternalStockReadiness(
+      classifyOrderLineReadiness(line, deliveryDate),
+      params.externalStockReadyInventoryIds
+    )
+  );
   const totals = emptyReadinessTotals();
   for (const line of lines) {
     totals[line.readinessStatus] += 1;
@@ -314,9 +332,50 @@ export function summarizeDeliveryGroupReadiness(params: {
   };
 }
 
+function isDeliverableStockReadinessLine(line: {
+  itemType: string | null;
+  inventoryId: string | null;
+}) {
+  return line.itemType?.trim().toUpperCase() === "F" && Boolean(normalizeStockInventoryId(line.inventoryId));
+}
+
+function externalStockReadinessMatches(
+  line: { itemType: string | null; inventoryId: string | null },
+  externalStockReadyInventoryIds: Set<string> | undefined
+) {
+  if (!externalStockReadyInventoryIds || !isDeliverableStockReadinessLine(line)) return false;
+  const normalizedInventoryId = normalizeStockInventoryId(line.inventoryId);
+  return Boolean(
+    normalizedInventoryId && externalStockReadyInventoryIds.has(normalizedInventoryId)
+  );
+}
+
+function applyExternalStockReadiness(
+  line: OrderLineReadinessSummary,
+  externalStockReadyInventoryIds: Set<string> | undefined
+): OrderLineReadinessSummary {
+  const matched = externalStockReadinessMatches(line, externalStockReadyInventoryIds);
+  if (!matched || line.readinessStatus === "complete") {
+    return {
+      ...line,
+      readinessStatusBeforeExternalStock: null,
+      externalStockReadinessMatched: matched,
+    };
+  }
+
+  return {
+    ...line,
+    readinessStatusBeforeExternalStock: line.readinessStatus,
+    readinessStatus: "ready",
+    displayStatus: READINESS_STATUS_LABELS.ready,
+    externalStockReadinessMatched: true,
+  };
+}
+
 export async function getDeliveryGroupReadiness(
   orderDeliveryGroupId: string,
-  client?: ReadinessPrismaClient
+  client?: ReadinessPrismaClient,
+  options: DeliveryGroupReadinessOptions = {}
 ): Promise<DeliveryGroupReadinessResult> {
   const db = await getReadinessPrisma(client);
   const deliveryGroup = await db.orderDeliveryGroup.findUnique({
@@ -364,15 +423,26 @@ export async function getDeliveryGroupReadiness(
     throw new Error(`Delivery group not found: ${orderDeliveryGroupId}`);
   }
 
+  const lines = deliveryGroup.deliveryGroupLines
+    .map((membership) => membership.orderLine)
+    .filter((line): line is NonNullable<typeof line> => Boolean(line));
+  const externalStockReadyInventoryIds =
+    options.applyExternalStockReadiness === false
+      ? new Set<string>()
+      : await getFreshExternalStockMatchesForInventoryIds(
+          lines
+            .filter(isDeliverableStockReadinessLine)
+            .map((line) => line.inventoryId)
+        );
+
   return summarizeDeliveryGroupReadiness({
     orderDeliveryGroupId: deliveryGroup.id,
     orderId: deliveryGroup.orderId,
     orderType: deliveryGroup.orderType,
     orderNumber: deliveryGroup.orderNumber,
     deliveryDate: deliveryGroup.deliveryDate,
-    lines: deliveryGroup.deliveryGroupLines
-      .map((membership) => membership.orderLine)
-      .filter((line): line is NonNullable<typeof line> => Boolean(line)),
+    lines,
+    externalStockReadyInventoryIds,
   });
 }
 
@@ -408,7 +478,9 @@ export async function persistDeliveryGroupReadiness(
   client?: ReadinessPrismaClient
 ): Promise<PersistedDeliveryGroupReadinessResult> {
   const db = await getReadinessPrisma(client);
-  const readiness = await getDeliveryGroupReadiness(orderDeliveryGroupId, db);
+  const readiness = await getDeliveryGroupReadiness(orderDeliveryGroupId, db, {
+    applyExternalStockReadiness: false,
+  });
   const readinessCalculatedAt = new Date();
 
   for (const line of readiness.lines) {

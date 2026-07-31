@@ -1,5 +1,6 @@
 import {
   getDeliveryGroupPaymentEvaluation,
+  isMeaningfulDeliveryPaymentAmount,
   isEligibleDeliveryPaymentTerm,
   normalizeDeliveryPaymentTerms,
   type DeliveryGroupPaymentEvaluation,
@@ -93,7 +94,7 @@ type DeliveryPaymentEnforcement8DayClient = Pick<
   | "deliveryDetailsLink"
   | "internalNotificationEvent"
 > &
-  Partial<Pick<typeof prisma, "salespersonContact">>;
+  Partial<Pick<typeof prisma, "deliveryGroupPaymentChargeAllocation" | "salespersonContact">>;
 
 type DeliveryPaymentEnforcement8DayTargetGroup = Awaited<
   ReturnType<typeof find8DayPaymentEnforcementTargetGroups>
@@ -319,9 +320,7 @@ function clean(value: string | null | undefined) {
 }
 
 function amountIsGreaterThanMeaningfulThreshold(value: string | null | undefined) {
-  if (!value) return false;
-  const parsed = Number(value.replace(/,/g, ""));
-  return Number.isFinite(parsed) && parsed > 2;
+  return isMeaningfulDeliveryPaymentAmount(value);
 }
 
 function isUniqueConstraintError(error: unknown) {
@@ -1281,7 +1280,13 @@ export async function create8DayPaymentEnforcementEvents(
       continue;
     }
 
-    const payment = await loadPayment(deliveryGroup.id);
+    const payment = options.getPaymentEvaluation
+      ? await loadPayment(deliveryGroup.id)
+      : await getDeliveryGroupPaymentEvaluation(deliveryGroup.id, client, {
+          sourceInterval: NotificationIntervalType.DAY_8,
+          allocateFreightDeliveryCharges: true,
+          dryRun,
+        });
     const paymentSkipReason = get8DayPaymentEnforcementSkipReason({
       hasOrderTotal: Boolean(order.total),
       paymentTerms: order.total?.paymentTerms ?? null,

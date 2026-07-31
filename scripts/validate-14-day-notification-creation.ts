@@ -128,8 +128,14 @@ function main() {
   );
   assertIncludes(
     shared,
-    "getDeliveryGroupPaymentEvaluation(deliveryGroup.id)",
+    "getDeliveryGroupPaymentEvaluation(",
     "14-day evaluates payment inside combined reminder",
+    failures
+  );
+  assertIncludes(
+    shared,
+    "allocateFreightDeliveryCharges: true",
+    "14-day payment evaluation can allocate freight/delivery charges",
     failures
   );
   assertIncludes(

@@ -2,10 +2,7 @@ import { redirect } from "next/navigation";
 
 import { DeliveryConfirmationStatus } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
-import {
-  getDeliveryGroupReadiness,
-  type OrderLineReadinessSummary,
-} from "@/lib/delivery-readiness/orderLineReadiness";
+import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { DELIVERY_MANUAL_REVIEW_REASONS } from "@/lib/notifications/deliveryConfirmationManualReview";
 import { confirmDeliveryFromWebpage } from "@/lib/notifications/confirmDeliveryFromWebpage";
 import {
@@ -18,13 +15,14 @@ import {
 import {
   dateFromKey,
   dateKey,
-  formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatJobAddress,
   formatJobName,
 } from "@/lib/notifications/helpers";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
+import { DeliveryItemsForThisDelivery } from "../../components/DeliveryItemsForThisDelivery";
+import { DeliveryPaymentSummary } from "../../components/DeliveryPaymentSummary";
 import { SalespersonContactBlock } from "../../components/SalespersonContactBlock";
 import { DeliveryConfirmationActions } from "./DeliveryConfirmationActions";
 
@@ -32,19 +30,6 @@ type PageProps = {
   params: Promise<{ token: string }>;
   searchParams?: Promise<{ error?: string; updated?: string }>;
 };
-
-type DeliveryLine = Pick<
-  OrderLineReadinessSummary,
-  | "lineNbr"
-  | "inventoryId"
-  | "lineDescription"
-  | "eta"
-  | "orderQty"
-  | "openQty"
-  | "activeAllocatedQty"
-  | "displayStatus"
-  | "readinessStatus"
->;
 
 async function loadConfirmation(token: string) {
   const confirmation = await prisma.deliveryConfirmation.findUnique({
@@ -76,29 +61,6 @@ async function loadConfirmation(token: string) {
       confirmation.linkExpiresAt && confirmation.linkExpiresAt.getTime() < Date.now()
     ),
   };
-}
-
-function quantity(value: number | string | { toString(): string } | null | undefined) {
-  if (value === null || value === undefined) return "";
-  const numeric = Number(value.toString());
-  if (!Number.isFinite(numeric)) return value.toString();
-  return Number.isInteger(numeric) ? String(numeric) : numeric.toFixed(2);
-}
-
-function statusClass(status: string | null | undefined) {
-  switch (status) {
-    case "ready":
-    case "complete":
-      return "bg-emerald-50 text-emerald-800 ring-emerald-200";
-    case "eta_pending":
-    case "expected_on_time":
-      return "bg-amber-50 text-amber-800 ring-amber-200";
-    case "backordered":
-    case "partially_allocated":
-      return "bg-rose-50 text-rose-800 ring-rose-200";
-    default:
-      return "bg-zinc-100 text-zinc-700 ring-zinc-200";
-  }
 }
 
 function titleCaseStatus(value: string) {
@@ -279,9 +241,7 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
   });
   const jobAddress = formatJobAddress(order.address ?? {}) || "the job site";
   const readiness = await getDeliveryGroupReadiness(group.id);
-  const lines: DeliveryLine[] = readiness.lines;
   const payment = await getDeliveryGroupPaymentEvaluation(group.id);
-  const showAmountDue = payment.paymentStatus === "balance_due" && payment.amountDueNowRounded;
   const statusLabel = titleCaseStatus(confirmation.status);
   const scheduledDateLabel = formatCustomerFriendlyDate(group.deliveryDate);
   const requestedNewDateLabel = confirmation.requestedNewDate
@@ -383,91 +343,14 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
             />
           </section>
 
-          <aside className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
-            <h2 className="text-lg font-semibold">Payment</h2>
-            <dl className="mt-4 space-y-3 text-sm">
-              <div>
-                <dt className="font-medium text-zinc-500">Payment status</dt>
-                <dd className="mt-1 capitalize text-zinc-900">
-                  {payment.paymentStatus.replace(/_/g, " ")}
-                </dd>
-              </div>
-              {showAmountDue ? (
-                <div>
-                  <dt className="font-medium text-zinc-500">Amount due now</dt>
-                  <dd className="mt-1 text-2xl font-semibold">
-                    {formatCurrencyAmount(payment.amountDueNowRounded)}
-                  </dd>
-                </div>
-              ) : null}
-              <div>
-                <dt className="font-medium text-zinc-500">Unpaid balance</dt>
-                <dd className="mt-1 text-zinc-900">
-                  {formatCurrencyAmount(payment.unpaidBalance)}
-                </dd>
-              </div>
-              <div>
-                <dt className="font-medium text-zinc-500">Current delivery value</dt>
-                <dd className="mt-1 text-zinc-900">
-                  {formatCurrencyAmount(payment.currentDeliveryGroupValue)}
-                </dd>
-              </div>
-            </dl>
-            {payment.calculationWarnings.length > 0 ? (
-              <div className="mt-4 rounded-md bg-amber-50 p-3 text-sm text-amber-900 ring-1 ring-amber-200">
-                {payment.calculationWarnings.join(" ")}
-              </div>
-            ) : null}
-          </aside>
+          <DeliveryPaymentSummary payment={payment} />
         </div>
 
-        <section className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-end sm:justify-between">
-            <div>
-              <h2 className="text-lg font-semibold">Items For This Delivery</h2>
-              <p className="mt-1 text-sm text-zinc-600">
-                {readiness.includedLineCount} included lines, {readiness.hasActionableIssues ? "some items need review" : "items look ready or complete"}.
-              </p>
-            </div>
-          </div>
-          <div className="mt-5 overflow-x-auto">
-            <table className="min-w-full divide-y divide-zinc-200 text-sm">
-              <thead>
-                <tr className="text-left text-zinc-500">
-                  <th className="py-3 pr-4 font-medium">Line</th>
-                  <th className="py-3 pr-4 font-medium">Item</th>
-                  <th className="py-3 pr-4 font-medium">Qty</th>
-                  <th className="py-3 pr-4 font-medium">Open</th>
-                  <th className="py-3 pr-4 font-medium">ETA</th>
-                  <th className="py-3 pr-4 font-medium">Status</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-zinc-100">
-                {lines.map((line) => (
-                  <tr key={line.lineNbr} className="align-top">
-                    <td className="py-3 pr-4 text-zinc-500">{line.lineNbr}</td>
-                    <td className="py-3 pr-4">
-                      <div className="font-medium text-zinc-900">{line.inventoryId ?? "Item"}</div>
-                      <div className="mt-1 max-w-xl text-zinc-600">{line.lineDescription}</div>
-                    </td>
-                    <td className="py-3 pr-4">{quantity(line.orderQty)}</td>
-                    <td className="py-3 pr-4">{quantity(line.openQty)}</td>
-                    <td className="py-3 pr-4">{line.eta ? dateKey(line.eta) : "Pending"}</td>
-                    <td className="py-3 pr-4">
-                      <span
-                        className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${statusClass(
-                          line.readinessStatus
-                        )}`}
-                      >
-                        {line.displayStatus ?? "Not calculated"}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        </section>
+        <DeliveryItemsForThisDelivery
+          lines={readiness.lines}
+          includedLineCount={readiness.includedLineCount}
+          hasActionableIssues={readiness.hasActionableIssues}
+        />
       </section>
     </main>
   );

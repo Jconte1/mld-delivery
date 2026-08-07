@@ -1,4 +1,5 @@
 import AcumaticaService from "../auth/acumaticaService";
+import { DELIVERY_CONTACT_OPT_IN_CUSTOM_FIELDS } from "../contactOptInFields";
 
 export const DEFAULT_DELIVERY_ENDPOINT_VERSION = "24.200.001";
 
@@ -230,6 +231,7 @@ export class AcumaticaClient {
     const query = new URLSearchParams({
       $filter: `ContactID eq ${contactIdValue}`,
       $top: "1",
+      $custom: DELIVERY_CONTACT_OPT_IN_CUSTOM_FIELDS,
     });
 
     const response = await this.request<SalesOrderResponse>(

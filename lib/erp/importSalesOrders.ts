@@ -1,4 +1,8 @@
 import {
+  mapAcumaticaContactOptIns,
+  parseAcumaticaBoolean,
+} from "@/lib/acumatica/contactOptInFields";
+import {
   detectContactChanges,
   detectOrderAddressChanges,
   detectOrderChanges,
@@ -275,19 +279,7 @@ function getDecimalValue(field: unknown): string | null {
 }
 
 function getBooleanValue(field: unknown): boolean | null {
-  const value = getValue(field);
-  if (typeof value === "boolean") return value;
-  if (typeof value === "number") {
-    if (value === 1) return true;
-    if (value === 0) return false;
-    return null;
-  }
-  if (typeof value !== "string") return null;
-
-  const normalized = value.trim().toLowerCase();
-  if (["1", "true", "t", "yes", "y", "on"].includes(normalized)) return true;
-  if (["0", "false", "f", "no", "n", "off"].includes(normalized)) return false;
-  return null;
+  return parseAcumaticaBoolean(field);
 }
 
 function getArray(field: unknown): unknown[] {
@@ -441,13 +433,6 @@ function activeStatusFromContact(contact: unknown) {
   const active = getBooleanValue(getField(contact, "Active"));
   if (active === true) return "Active";
   if (active === false) return "Inactive";
-  return null;
-}
-
-function emailOptInFromContact(contact: unknown) {
-  const doNotEmail = getBooleanValue(getField(contact, "DoNotEmail"));
-  if (doNotEmail === true) return false;
-  if (doNotEmail === false) return true;
   return null;
 }
 
@@ -678,11 +663,15 @@ export async function importSalesOrdersForLineRequestedOn(
                 email: true,
                 phone1: true,
                 phone2: true,
+                smsOptIn: true,
                 emailOptIn: true,
+                phoneCallOptIn: true,
               },
             });
 
-            const importedEmailOptIn = contactRecord ? emailOptInFromContact(contactRecord) : null;
+            const importedOptIns = contactRecord
+              ? mapAcumaticaContactOptIns(contactRecord)
+              : null;
             const contactData = {
               status: firstString(
                 activeStatusFromContact(contactRecord),
@@ -710,7 +699,9 @@ export async function importSalesOrdersForLineRequestedOn(
                 getString(getField(contactRecord, "Phone2")),
                 getString(getField(fullOrder, "Phone2"))
               ),
-              emailOptIn: importedEmailOptIn ?? true,
+              smsOptIn: importedOptIns?.smsOptIn ?? false,
+              emailOptIn: importedOptIns?.emailOptIn ?? true,
+              phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? false,
               lastSyncedAt: importAt,
             };
 
@@ -723,7 +714,9 @@ export async function importSalesOrdersForLineRequestedOn(
               email: contactData.email ?? undefined,
               phone1: contactData.phone1 ?? undefined,
               phone2: contactData.phone2 ?? undefined,
-              emailOptIn: importedEmailOptIn ?? undefined,
+              smsOptIn: importedOptIns?.smsOptIn ?? undefined,
+              emailOptIn: importedOptIns?.emailOptIn ?? undefined,
+              phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? undefined,
               lastSyncedAt: importAt,
             };
 
@@ -741,7 +734,10 @@ export async function importSalesOrdersForLineRequestedOn(
                     email: contactData.email ?? existingContact.email,
                     phone1: contactData.phone1 ?? existingContact.phone1,
                     phone2: contactData.phone2 ?? existingContact.phone2,
-                    emailOptIn: importedEmailOptIn ?? existingContact.emailOptIn,
+                    smsOptIn: importedOptIns?.smsOptIn ?? existingContact.smsOptIn,
+                    emailOptIn: importedOptIns?.emailOptIn ?? existingContact.emailOptIn,
+                    phoneCallOptIn:
+                      importedOptIns?.phoneCallOptIn ?? existingContact.phoneCallOptIn,
                   },
                   contactId,
                   entityId: existingContact.id,

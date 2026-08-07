@@ -193,7 +193,13 @@ const CONTACT_FIELDS: ChangeFieldDefinition[] = [
   { fieldName: "email", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED },
   { fieldName: "phone1", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED },
   { fieldName: "phone2", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED },
+  { fieldName: "smsOptIn", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED, valueType: "boolean" },
   { fieldName: "emailOptIn", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED, valueType: "boolean" },
+  {
+    fieldName: "phoneCallOptIn",
+    changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED,
+    valueType: "boolean",
+  },
 ];
 
 function emptyResult(): ErpChangeDetectionResult {

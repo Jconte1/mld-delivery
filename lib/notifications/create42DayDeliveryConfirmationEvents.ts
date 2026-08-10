@@ -30,8 +30,8 @@ import {
   formatJobName,
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
-  selectNotificationChannel,
 } from "@/lib/notifications/helpers";
+import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
   loadActiveNotificationOptOutAddresses,
   mergeNotificationOptOutAddresses,
@@ -546,13 +546,16 @@ export async function create42DayDeliveryConfirmationEvents(
         : null;
     const channel = confirmationSkipReason
       ? null
-      : selectNotificationChannel(
-          order.contact,
-          mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+      : (
+          await selectNotificationChannelWithOptOutRepair({
+            client,
+            contact: order.contact,
+            optOutState: mergeNotificationOptOutAddresses(activeOptOutAddresses, {
             activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
             activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+            }),
           })
-        );
+        ).channel;
     const shouldSkipForNoChannel = channel?.selectedChannel === null;
 
     let event = await client.notificationEvent.findUnique({

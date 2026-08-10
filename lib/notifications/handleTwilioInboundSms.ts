@@ -9,6 +9,10 @@ import {
   type EnqueueDeliveryConfirmationAttributeWritebackOptions,
 } from "@/lib/notifications/deliveryConfirmationAttributeWritebackQueue";
 import {
+  enqueueSmsOptOutContactWritebacks,
+  type ContactOptInWritebackDispatchOptions,
+} from "@/lib/notifications/contactOptInWritebackActions";
+import {
   DELIVERY_MANUAL_REVIEW_REASONS,
   formatManualReviewNote,
 } from "@/lib/notifications/deliveryConfirmationManualReview";
@@ -62,6 +66,9 @@ export type HandleTwilioInboundSmsResult = {
   duplicate: boolean;
   optOutContactsMatched?: number;
   optOutContactsUpdated?: number;
+  optOutWritebacksQueued?: number;
+  optOutWritebacksDeduped?: number;
+  optOutWritebackFailures?: number;
 };
 
 const ACTIVE_SMS_CONFIRMATION_STATUSES = [
@@ -270,6 +277,7 @@ async function upsertSmsOptOut(params: {
     return {
       optOutId: optOut.id,
       normalizedPhone,
+      matchingContactIds,
       contactsMatched: matchingContactIds.length,
       contactsUpdated: updateResult.count,
       optOutCreatedOrUpdated: "updated" as const,
@@ -291,6 +299,7 @@ async function upsertSmsOptOut(params: {
   return {
     optOutId: optOut.id,
     normalizedPhone,
+    matchingContactIds,
     contactsMatched: matchingContactIds.length,
     contactsUpdated: updateResult.count,
     optOutCreatedOrUpdated: "created" as const,
@@ -619,6 +628,9 @@ function result(params: {
   duplicate?: boolean;
   optOutContactsMatched?: number;
   optOutContactsUpdated?: number;
+  optOutWritebacksQueued?: number;
+  optOutWritebacksDeduped?: number;
+  optOutWritebackFailures?: number;
 }): HandleTwilioInboundSmsResult {
   return {
     inboundMessageId: params.inboundMessageId,
@@ -633,6 +645,9 @@ function result(params: {
     duplicate: params.duplicate ?? false,
     optOutContactsMatched: params.optOutContactsMatched,
     optOutContactsUpdated: params.optOutContactsUpdated,
+    optOutWritebacksQueued: params.optOutWritebacksQueued,
+    optOutWritebacksDeduped: params.optOutWritebacksDeduped,
+    optOutWritebackFailures: params.optOutWritebackFailures,
   };
 }
 
@@ -641,6 +656,7 @@ export async function handleTwilioInboundSms(params: {
   prismaClient?: DeliveryTwilioInboundClient;
   now?: Date;
   queueOptions?: EnqueueDeliveryConfirmationAttributeWritebackOptions;
+  contactOptInWriteback?: ContactOptInWritebackDispatchOptions;
 }): Promise<HandleTwilioInboundSmsResult> {
   const client = params.prismaClient ?? prisma;
   const now = params.now ?? new Date();
@@ -697,6 +713,12 @@ export async function handleTwilioInboundSms(params: {
 
     if (parsedIntent === "STOP") {
       const optOutResult = await upsertSmsOptOut({ client, phone: fromPhone, body, now });
+      const writebackResult = await enqueueSmsOptOutContactWritebacks({
+        client,
+        contactIds: optOutResult.matchingContactIds,
+        relatedSmsOptOutId: optOutResult.optOutId,
+        dispatchOptions: params.contactOptInWriteback,
+      });
       await finishInboundMessage({
         client,
         id: inbound.id,
@@ -712,6 +734,9 @@ export async function handleTwilioInboundSms(params: {
         matchStatus: "OPTED_OUT",
         optOutContactsMatched: optOutResult.contactsMatched,
         optOutContactsUpdated: optOutResult.contactsUpdated,
+        optOutWritebacksQueued: writebackResult.queued,
+        optOutWritebacksDeduped: writebackResult.deduped,
+        optOutWritebackFailures: writebackResult.failed,
       });
     }
 

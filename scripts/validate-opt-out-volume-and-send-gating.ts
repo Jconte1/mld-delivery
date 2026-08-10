@@ -1,6 +1,11 @@
 import { handleTwilioInboundSms } from "@/lib/notifications/handleTwilioInboundSms";
 import { normalizePhoneToE164 } from "@/lib/notifications/deliveryConfirmationSmsReplies";
 import { processEmailOptOut } from "@/lib/notifications/emailOptOuts";
+import {
+  buildContactOptInWritebackPayload,
+  type EnqueueContactOptInWritebackParams,
+  type EnqueueContactOptInWritebackResult,
+} from "@/lib/notifications/contactOptInWritebackQueue";
 import { selectNotificationChannel } from "@/lib/notifications/helpers";
 import {
   normalizeEmailForOptOut,
@@ -50,6 +55,22 @@ const RUN_ID = `optout_volume_test_${new Date().toISOString().replace(/\D/g, "")
 const TEST_SOURCE = RUN_ID.slice(0, 64);
 const TEST_REASON = RUN_ID;
 const TEST_TO_PHONE = "+18015550100";
+
+function createFakeContactOptInWritebackEnqueue(runId: string) {
+  const payloads: Array<ReturnType<typeof buildContactOptInWritebackPayload>> = [];
+  const enqueue = async (
+    params: EnqueueContactOptInWritebackParams
+  ): Promise<EnqueueContactOptInWritebackResult> => {
+    const payload = buildContactOptInWritebackPayload(params);
+    payloads.push(payload);
+    return {
+      jobId: `dry-run-contact-opt-in-${runId}-${String(payloads.length).padStart(4, "0")}`,
+      payload,
+    };
+  };
+
+  return { enqueue, payloads };
+}
 
 function booleanCounts(): BooleanCounts {
   return { true: 0, false: 0 };
@@ -318,6 +339,7 @@ async function validateSyntheticMultipleSmsExactMatch() {
     },
   };
 
+  const writeback = createFakeContactOptInWritebackEnqueue("synthetic-sms");
   const result = await handleTwilioInboundSms({
     payload: {
       MessageSid: "SM_SYNTHETIC_MULTIPLE_SMS",
@@ -328,20 +350,25 @@ async function validateSyntheticMultipleSmsExactMatch() {
     },
     prismaClient: client as unknown as Parameters<typeof handleTwilioInboundSms>[0]["prismaClient"],
     now: new Date("2026-08-10T00:00:00.000Z"),
+    contactOptInWriteback: { enqueue: writeback.enqueue },
   });
 
   const flagsFalse = contacts.filter((contact) => contact.smsOptIn === false).length;
   const optOut = smsOptOuts[0];
   const optOutGlobal = optOut?.contactId === null;
+  const queuedContactIds = writeback.payloads.map((payload) => payload.contactId).sort();
   return {
     passed:
       result.matchStatus === "OPTED_OUT" &&
       result.optOutContactsMatched === 2 &&
       result.optOutContactsUpdated === 2 &&
+      result.optOutWritebacksQueued === 2 &&
       flagsFalse === 2 &&
-      optOutGlobal,
+      optOutGlobal &&
+      queuedContactIds.join("|") === "synthetic_sms_1|synthetic_sms_2",
     contactsMatched: result.optOutContactsMatched ?? 0,
     contactsUpdated: result.optOutContactsUpdated ?? 0,
+    writebacksQueued: result.optOutWritebacksQueued ?? 0,
     flagsFalse,
     optOutGlobal,
   };
@@ -395,6 +422,7 @@ async function validateSyntheticMultipleEmailExactMatch() {
     },
   };
 
+  const writeback = createFakeContactOptInWritebackEnqueue("synthetic-email");
   const result = await processEmailOptOut({
     email: " duplicate@example.test ",
     source: TEST_SOURCE,
@@ -402,19 +430,24 @@ async function validateSyntheticMultipleEmailExactMatch() {
     providerMessageId: "synthetic-provider-id",
     receivedAt: new Date("2026-08-10T00:00:00.000Z"),
     prismaClient: client as unknown as Parameters<typeof processEmailOptOut>[0]["prismaClient"],
+    contactOptInWriteback: { enqueue: writeback.enqueue },
   });
 
   const flagsFalse = contacts.filter((contact) => contact.emailOptIn === false).length;
   const optOut = emailOptOuts[0];
   const optOutGlobal = optOut?.contactId === null;
+  const queuedContactIds = writeback.payloads.map((payload) => payload.contactId).sort();
   return {
     passed:
       result.contactsMatched === 2 &&
       result.contactsUpdated === 2 &&
+      result.writebacksQueued === 2 &&
       flagsFalse === 2 &&
-      optOutGlobal,
+      optOutGlobal &&
+      queuedContactIds.join("|") === "synthetic_email_1|synthetic_email_2",
     contactsMatched: result.contactsMatched,
     contactsUpdated: result.contactsUpdated,
+    writebacksQueued: result.writebacksQueued,
     flagsFalse,
     optOutGlobal,
   };
@@ -426,6 +459,9 @@ async function main() {
   const createdSmsOptOutIds = new Set<string>();
   const createdEmailOptOutIds = new Set<string>();
   const createdTwilioInboundMessageIds = new Set<string>();
+  const createdContactOptInWritebackActionIds = new Set<string>();
+  const createdContactOptInWritebackJobIds = new Set<string>();
+  const contactOptInWriteback = createFakeContactOptInWritebackEnqueue(RUN_ID);
   const fallbackCleanupSmsPhones = new Set<string>();
   const notificationCountsBefore = {
     notificationEvents: await prisma.notificationEvent.count(),
@@ -615,6 +651,9 @@ async function main() {
     let smsOptOutRowsAccurate = 0;
     let smsContactFlagUpdatedFalse = 0;
     let smsContactFlagNotUpdatedFalse = 0;
+    let smsWritebackActionsQueued = 0;
+    let smsWritebackActionsDeduped = 0;
+    let smsWritebackActionsFailed = 0;
 
     for (const [index, contact] of smsOptOutCohort.entries()) {
       const messageSid = `SM${Date.now()}${String(index).padStart(3, "0")}`.slice(0, 64);
@@ -629,12 +668,16 @@ async function main() {
           RunId: RUN_ID,
         },
         now: new Date(startedAt.getTime() + index * 1000),
+        contactOptInWriteback: { enqueue: contactOptInWriteback.enqueue },
       });
       createdTwilioInboundMessageIds.add(result.inboundMessageId);
       fallbackCleanupSmsPhones.add(contact.phoneKey);
       fallbackCleanupSmsPhones.add(contact.phoneE164);
       smsStopPayloadsProcessed += 1;
       if (result.matchStatus === "OPTED_OUT") smsStopMatchedOptedOut += 1;
+      smsWritebackActionsQueued += result.optOutWritebacksQueued ?? 0;
+      smsWritebackActionsDeduped += result.optOutWritebacksDeduped ?? 0;
+      smsWritebackActionsFailed += result.optOutWritebackFailures ?? 0;
 
       const optOut = await prisma.smsOptOut.findFirst({
         where: {
@@ -647,6 +690,17 @@ async function main() {
       if (optOut) {
         createdSmsOptOutIds.add(optOut.id);
         createdSmsOptOuts.push(optOut);
+        const writebackActions = await prisma.contactOptInWritebackAction.findMany({
+          where: {
+            relatedSmsOptOutId: optOut.id,
+            targetField: "Contact.AttributeCONTEXT",
+          },
+          select: { id: true, queueJobId: true },
+        });
+        for (const action of writebackActions) {
+          createdContactOptInWritebackActionIds.add(action.id);
+          if (action.queueJobId) createdContactOptInWritebackJobIds.add(action.queueJobId);
+        }
         if (optOut.contactId === contact.contactId && optOut.phone === contact.phoneKey) {
           smsOptOutRowsAccurate += 1;
         }
@@ -666,6 +720,9 @@ async function main() {
     let emailOptOutRowsAccurate = 0;
     let emailContactFlagUpdatedFalse = 0;
     let emailContactFlagNotUpdatedFalse = 0;
+    let emailWritebackActionsQueued = 0;
+    let emailWritebackActionsDeduped = 0;
+    let emailWritebackActionsFailed = 0;
     for (const [index, contact] of emailOptOutCohort.entries()) {
       const result = await processEmailOptOut({
         email: contact.email,
@@ -673,8 +730,12 @@ async function main() {
         reason: TEST_REASON,
         providerMessageId: `email-provider-test-${index}`,
         receivedAt: new Date(startedAt.getTime() + index * 1000),
+        contactOptInWriteback: { enqueue: contactOptInWriteback.enqueue },
       });
       createdEmailOptOutIds.add(result.optOutId);
+      emailWritebackActionsQueued += result.writebacksQueued;
+      emailWritebackActionsDeduped += result.writebacksDeduped;
+      emailWritebackActionsFailed += result.writebackFailures;
 
       const optOut = await prisma.emailOptOut.findUnique({
         where: { id: result.optOutId },
@@ -682,6 +743,17 @@ async function main() {
       });
       if (optOut) {
         createdEmailOptOuts.push(optOut);
+        const writebackActions = await prisma.contactOptInWritebackAction.findMany({
+          where: {
+            relatedEmailOptOutId: optOut.id,
+            targetField: "Contact.AttributeCONEMAIL",
+          },
+          select: { id: true, queueJobId: true },
+        });
+        for (const action of writebackActions) {
+          createdContactOptInWritebackActionIds.add(action.id);
+          if (action.queueJobId) createdContactOptInWritebackJobIds.add(action.queueJobId);
+        }
         if (optOut.contactId === contact.contactId && optOut.email === contact.emailKey) {
           emailOptOutRowsAccurate += 1;
         }
@@ -714,6 +786,7 @@ async function main() {
           RunId: RUN_ID,
         },
         now: new Date(startedAt.getTime() + 90_000),
+        contactOptInWriteback: { enqueue: contactOptInWriteback.enqueue },
       });
       createdTwilioInboundMessageIds.add(result.inboundMessageId);
       fallbackCleanupSmsPhones.add(first.phoneKey);
@@ -723,6 +796,19 @@ async function main() {
         orderBy: { createdAt: "desc" },
       });
       if (optOut) createdSmsOptOutIds.add(optOut.id);
+      if (optOut) {
+        const writebackActions = await prisma.contactOptInWritebackAction.findMany({
+          where: {
+            relatedSmsOptOutId: optOut.id,
+            targetField: "Contact.AttributeCONTEXT",
+          },
+          select: { id: true, queueJobId: true },
+        });
+        for (const action of writebackActions) {
+          createdContactOptInWritebackActionIds.add(action.id);
+          if (action.queueJobId) createdContactOptInWritebackJobIds.add(action.queueJobId);
+        }
+      }
 
       const refreshed = await prisma.contact.findMany({
         where: { contactId: { in: duplicateSmsCohort.map((contact) => contact.contactId) } },
@@ -741,6 +827,7 @@ async function main() {
         reason: TEST_REASON,
         providerMessageId: "email-provider-test-duplicate",
         receivedAt: new Date(startedAt.getTime() + 91_000),
+        contactOptInWriteback: { enqueue: contactOptInWriteback.enqueue },
       });
       createdEmailOptOutIds.add(result.optOutId);
 
@@ -749,6 +836,19 @@ async function main() {
         select: { id: true, contactId: true, email: true },
       });
       if (optOut) createdEmailOptOuts.push(optOut);
+      if (optOut) {
+        const writebackActions = await prisma.contactOptInWritebackAction.findMany({
+          where: {
+            relatedEmailOptOutId: optOut.id,
+            targetField: "Contact.AttributeCONEMAIL",
+          },
+          select: { id: true, queueJobId: true },
+        });
+        for (const action of writebackActions) {
+          createdContactOptInWritebackActionIds.add(action.id);
+          if (action.queueJobId) createdContactOptInWritebackJobIds.add(action.queueJobId);
+        }
+      }
 
       const refreshed = await prisma.contact.findMany({
         where: { contactId: { in: duplicateEmailCohort.map((contact) => contact.contactId) } },
@@ -865,6 +965,15 @@ async function main() {
     if (emailContactFlagNotUpdatedFalse > 0) {
       blockers.push("email_optout_does_not_update_contact_emailOptIn_false");
     }
+    if (smsWritebackActionsQueued !== smsOptOutCohort.length) {
+      blockers.push("sms_stop_writeback_actions_not_queued_for_each_matched_contact");
+    }
+    if (emailWritebackActionsQueued !== emailOptOutCohort.length) {
+      blockers.push("email_optout_writeback_actions_not_queued_for_each_matched_contact");
+    }
+    if (smsWritebackActionsFailed > 0 || emailWritebackActionsFailed > 0) {
+      blockers.push("contact_opt_in_writeback_action_enqueue_failed");
+    }
     if (globalSmsCohort.length > 0 && !globalSmsAddressBlocked) {
       blockers.push("global_contactless_sms_optout_not_enforced");
     }
@@ -934,6 +1043,18 @@ async function main() {
         smsContactUpdateTodo: false,
         emailContactUpdateTodo: false,
       },
+      contactOptInWriteback: {
+        dryRunQueueEnqueueMocked: true,
+        smsWritebackActionsQueued,
+        smsWritebackActionsDeduped,
+        smsWritebackActionsFailed,
+        emailWritebackActionsQueued,
+        emailWritebackActionsDeduped,
+        emailWritebackActionsFailed,
+        dryRunPayloadsCreated: contactOptInWriteback.payloads.length,
+        createdActionRowsTracked: createdContactOptInWritebackActionIds.size,
+        createdDryRunJobIdsTracked: createdContactOptInWritebackJobIds.size,
+      },
       exactNormalizedMultipleMatch: {
         liveSmsScenarioAvailable: duplicateSmsExactMatchAvailable,
         liveSmsContactsUpdatedFalse: duplicateSmsExactMatchUpdated,
@@ -942,10 +1063,12 @@ async function main() {
         syntheticSmsScenarioPassed: syntheticMultipleSmsExactMatch.passed,
         syntheticSmsContactsMatched: syntheticMultipleSmsExactMatch.contactsMatched,
         syntheticSmsContactsUpdated: syntheticMultipleSmsExactMatch.contactsUpdated,
+        syntheticSmsWritebacksQueued: syntheticMultipleSmsExactMatch.writebacksQueued,
         syntheticSmsOptOutGlobal: syntheticMultipleSmsExactMatch.optOutGlobal,
         syntheticEmailScenarioPassed: syntheticMultipleEmailExactMatch.passed,
         syntheticEmailContactsMatched: syntheticMultipleEmailExactMatch.contactsMatched,
         syntheticEmailContactsUpdated: syntheticMultipleEmailExactMatch.contactsUpdated,
+        syntheticEmailWritebacksQueued: syntheticMultipleEmailExactMatch.writebacksQueued,
         syntheticEmailOptOutGlobal: syntheticMultipleEmailExactMatch.optOutGlobal,
       },
       sendGate: {
@@ -971,7 +1094,7 @@ async function main() {
       emailUnsubscribeIngestionImplemented: true,
       emailValidationScope: "Email opt-out ingestion service was used; no public provider route was added.",
       startUnstopBehaviorChanged: false,
-      acumaticaOptOutWritebackImplemented: false,
+      acumaticaOptOutWritebackImplemented: true,
       safety: {
         smsSent: false,
         emailSent: false,
@@ -990,7 +1113,13 @@ async function main() {
     const smsIds = Array.from(createdSmsOptOutIds);
     const emailIds = Array.from(createdEmailOptOutIds);
     const inboundIds = Array.from(createdTwilioInboundMessageIds);
+    const writebackActionIds = Array.from(createdContactOptInWritebackActionIds);
 
+    if (writebackActionIds.length > 0) {
+      await prisma.contactOptInWritebackAction.deleteMany({
+        where: { id: { in: writebackActionIds } },
+      });
+    }
     if (smsIds.length > 0) {
       await prisma.smsOptOut.deleteMany({ where: { id: { in: smsIds } } });
     }
@@ -1010,6 +1139,15 @@ async function main() {
       },
     });
     await prisma.emailOptOut.deleteMany({ where: { source: TEST_SOURCE } });
+    await prisma.contactOptInWritebackAction.deleteMany({
+      where: {
+        OR: [
+          { relatedSmsOptOutId: { in: smsIds } },
+          { relatedEmailOptOutId: { in: emailIds } },
+          { queueJobId: { in: Array.from(createdContactOptInWritebackJobIds) } },
+        ],
+      },
+    });
     await restoreContacts(selectedSnapshots);
 
     const notificationCountsAfter = {
@@ -1034,6 +1172,9 @@ async function main() {
       }),
       testTwilioInboundRowsRemaining: await prisma.twilioInboundMessage.count({
         where: { id: { in: inboundIds } },
+      }),
+      testContactOptInWritebackActionRowsRemaining: await prisma.contactOptInWritebackAction.count({
+        where: { id: { in: writebackActionIds } },
       }),
       persistentUnintendedDbChanges: false,
     };

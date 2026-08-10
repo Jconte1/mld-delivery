@@ -79,6 +79,22 @@ enum DeliveryOrderHoldActionReason {
   PAYMENT_NOT_RECEIVED_BY_DEADLINE
 }
 
+enum ContactOptInWritebackChannel {
+  SMS
+  EMAIL
+  PHONE_CALL
+}
+
+enum ContactOptInWritebackStatus {
+  PENDING
+  QUEUED
+  DRY_RUN
+  WRITTEN
+  ALREADY_FALSE
+  REFUSED
+  FAILED
+}
+
 enum InternalNotificationAudienceType {
   SALESPERSON
   FALLBACK
@@ -843,6 +859,36 @@ model EmailOptOut {
   @@index([isActive])
   @@index([email, isActive])
   @@map("email_opt_outs")
+}
+
+model ContactOptInWritebackAction {
+  id                   String                         @id @default(cuid())
+  dedupeKey            String                         @unique @db.VarChar(256)
+  contactId            String                         @db.VarChar(64)
+  channel              ContactOptInWritebackChannel
+  targetField          String                         @db.VarChar(64)
+  targetValue          Boolean
+  source               String                         @db.VarChar(64)
+  reason               String                         @db.VarChar(128)
+  status               ContactOptInWritebackStatus    @default(PENDING)
+  queueJobId           String?                        @db.VarChar(128)
+  errorMessage         String?                        @db.VarChar(2048)
+  resultSummary        Json?
+  relatedSmsOptOutId   String?                        @db.VarChar(64)
+  relatedEmailOptOutId String?                        @db.VarChar(64)
+  queuedAt             DateTime?
+  completedAt          DateTime?
+  createdAt            DateTime                       @default(now())
+  updatedAt            DateTime                       @updatedAt
+
+  @@index([contactId])
+  @@index([channel])
+  @@index([status])
+  @@index([targetField, targetValue])
+  @@index([queueJobId])
+  @@index([relatedSmsOptOutId])
+  @@index([relatedEmailOptOutId])
+  @@map("contact_opt_in_writeback_actions")
 }
 
 model TwilioInboundMessage {

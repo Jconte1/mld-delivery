@@ -35,6 +35,7 @@ export const DELIVERY_DATE_WEEKEND_SKIP_REASON = "delivery_date_weekend";
 export type NotificationContactInput = {
   smsOptIn?: boolean | null;
   emailOptIn?: boolean | null;
+  phoneCallOptIn?: boolean | null;
   phone1?: string | null;
   phone2?: string | null;
   email?: string | null;

@@ -23,9 +23,9 @@ import {
   formatJobName,
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
-  selectNotificationChannel,
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
+import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
   loadActiveNotificationOptOutAddresses,
   mergeNotificationOptOutAddresses,
@@ -598,13 +598,15 @@ export async function createConfirmedDeliveryReminderEvents(
       continue;
     }
 
-    const channel = selectNotificationChannel(
-      order.contact,
-      mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+    const channelRepair = await selectNotificationChannelWithOptOutRepair({
+      client,
+      contact: order.contact,
+      optOutState: mergeNotificationOptOutAddresses(activeOptOutAddresses, {
         activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
         activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
-      })
-    );
+      }),
+    });
+    const channel = channelRepair.channel;
     const shouldSkipForNoChannel = channel.selectedChannel === null;
     if (shouldSkipForNoChannel) {
       summary.deliveryGroupsSkippedNoChannel += 1;

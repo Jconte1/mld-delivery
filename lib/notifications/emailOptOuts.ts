@@ -1,5 +1,9 @@
 import { prisma } from "@/lib/prisma";
 import { normalizeEmailForOptOut } from "@/lib/notifications/notificationAddressNormalization";
+import {
+  enqueueEmailOptOutContactWritebacks,
+  type ContactOptInWritebackDispatchOptions,
+} from "@/lib/notifications/contactOptInWritebackActions";
 
 type EmailOptOutClient = Pick<typeof prisma, "contact" | "emailOptOut">;
 
@@ -14,6 +18,9 @@ export type ProcessEmailOptOutResult = {
   optOutCreatedOrUpdated: "created" | "updated";
   contactsMatched: number;
   contactsUpdated: number;
+  writebacksQueued: number;
+  writebacksDeduped: number;
+  writebackFailures: number;
   globalOnly: boolean;
   providerMessageIdStored: boolean;
 };
@@ -64,6 +71,7 @@ export async function processEmailOptOut(params: {
   providerMessageId?: string | null;
   receivedAt?: Date;
   prismaClient?: EmailOptOutClient;
+  contactOptInWriteback?: ContactOptInWritebackDispatchOptions;
 }): Promise<ProcessEmailOptOutResult> {
   const client = params.prismaClient ?? prisma;
   const normalizedEmail = normalizeEmailForOptOut(params.email);
@@ -105,12 +113,22 @@ export async function processEmailOptOut(params: {
     contactsUpdated = updateResult.count;
   }
 
+  const writebackResult = await enqueueEmailOptOutContactWritebacks({
+    client,
+    contactIds: matchingContactIds,
+    relatedEmailOptOutId: optOut.id,
+    dispatchOptions: params.contactOptInWriteback,
+  });
+
   return {
     normalizedEmail,
     optOutId: optOut.id,
     optOutCreatedOrUpdated: existing ? "updated" : "created",
     contactsMatched: matchingContactIds.length,
     contactsUpdated,
+    writebacksQueued: writebackResult.queued,
+    writebacksDeduped: writebackResult.deduped,
+    writebackFailures: writebackResult.failed,
     globalOnly: matchingContactIds.length === 0,
     providerMessageIdStored: false,
   };

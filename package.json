@@ -28,6 +28,7 @@
     "validate:salesperson-import": "tsx scripts/validate-salesperson-import.ts",
     "validate:contact-opt-in-mapping": "tsx scripts/validate-contact-opt-in-mapping.ts",
     "validate:opt-out-volume-and-send-gating": "tsx -r dotenv/config scripts/validate-opt-out-volume-and-send-gating.ts",
+    "validate:contact-opt-out-writeback": "tsx scripts/validate-contact-opt-out-writeback.ts",
     "preview:contact-opt-in-mapping": "tsx -r dotenv/config scripts/preview-contact-opt-in-mapping.ts",
     "refresh:contact-opt-ins": "tsx -r dotenv/config scripts/refresh-contact-opt-ins-from-erp.ts",
     "validate:salesperson-rendering": "tsx scripts/validate-salesperson-rendering.ts",

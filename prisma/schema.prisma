@@ -116,7 +116,7 @@ model Contact {
   phone1         String?   @db.VarChar(32)
   phone2         String?   @db.VarChar(32)
   smsOptIn       Boolean   @default(false)
-  emailOptIn     Boolean   @default(true)
+  emailOptIn     Boolean   @default(false)
   phoneCallOptIn Boolean   @default(false)
   createdAt      DateTime  @default(now())
   updatedAt      DateTime  @updatedAt

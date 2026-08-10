@@ -1,3 +1,8 @@
+import {
+  normalizeEmailForOptOut,
+  normalizeSmsPhoneForOptOut,
+} from "@/lib/notifications/notificationAddressNormalization";
+
 export const NOTIFICATION_INTERVAL_TYPES = [
   "DAY_180",
   "DAY_90",
@@ -67,18 +72,6 @@ export function cleanNotificationText(value: string | null | undefined) {
   return trimmed || null;
 }
 
-function normalizePhone(value: string | null | undefined) {
-  const cleaned = cleanNotificationText(value);
-  if (!cleaned) return null;
-
-  const digits = cleaned.replace(/\D/g, "");
-  return digits || cleaned.toLowerCase();
-}
-
-function normalizeEmail(value: string | null | undefined) {
-  return cleanNotificationText(value)?.toLowerCase() ?? null;
-}
-
 export function dateKey(value: Date | string) {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
 
@@ -144,21 +137,21 @@ export function selectNotificationChannel(
   optOutState: NotificationOptOutState = {}
 ): SelectedNotificationChannel {
   const optedOutPhones = new Set(
-    optOutState.activeSmsOptOutPhones?.map(normalizePhone).filter(Boolean)
+    optOutState.activeSmsOptOutPhones?.map(normalizeSmsPhoneForOptOut).filter(Boolean)
   );
   const optedOutEmails = new Set(
-    optOutState.activeEmailOptOutEmails?.map(normalizeEmail).filter(Boolean)
+    optOutState.activeEmailOptOutEmails?.map(normalizeEmailForOptOut).filter(Boolean)
   );
 
   const phone =
     [contact.phone1, contact.phone2]
       .map(cleanNotificationText)
       .find((candidate) => {
-        const normalized = normalizePhone(candidate);
+        const normalized = normalizeSmsPhoneForOptOut(candidate);
         return normalized && !optedOutPhones.has(normalized);
       }) ?? null;
   const email = cleanNotificationText(contact.email);
-  const normalizedEmail = normalizeEmail(email);
+  const normalizedEmail = normalizeEmailForOptOut(email);
 
   if (contact.smsOptIn === true && phone && !optOutState.activeSmsOptOut) {
     return {
@@ -170,7 +163,7 @@ export function selectNotificationChannel(
 
   if (
     email &&
-    contact.emailOptIn !== false &&
+    contact.emailOptIn === true &&
     !optOutState.activeEmailOptOut &&
     (!normalizedEmail || !optedOutEmails.has(normalizedEmail))
   ) {

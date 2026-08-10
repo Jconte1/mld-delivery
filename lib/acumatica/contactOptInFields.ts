@@ -66,12 +66,11 @@ export function getAcumaticaCustomBoolean(record: unknown, path: readonly string
 }
 
 export function mapAcumaticaContactOptIns(contact: unknown) {
-  const doNotEmail = parseAcumaticaBoolean(getAcumaticaNestedField(contact, ["DoNotEmail"]));
   const emailOptIn = getAcumaticaCustomBoolean(contact, CONTACT_EMAIL_OPT_IN_FIELD_PATH);
 
   return {
     smsOptIn: getAcumaticaCustomBoolean(contact, CONTACT_SMS_OPT_IN_FIELD_PATH) === true,
-    emailOptIn: doNotEmail === true ? false : emailOptIn ?? true,
+    emailOptIn: emailOptIn === true,
     phoneCallOptIn:
       getAcumaticaCustomBoolean(contact, CONTACT_PHONE_CALL_OPT_IN_FIELD_PATH) === true,
   };

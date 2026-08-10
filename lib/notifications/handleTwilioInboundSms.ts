@@ -30,6 +30,7 @@ import {
   type DeliverySmsReplyIntent,
 } from "@/lib/notifications/deliveryConfirmationSmsReplies";
 import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
+import { normalizeSmsPhoneForOptOut } from "@/lib/notifications/notificationAddressNormalization";
 import { prisma } from "@/lib/prisma";
 import type { TwilioFormPayload } from "@/lib/notifications/twilioWebhook";
 
@@ -59,6 +60,8 @@ export type HandleTwilioInboundSmsResult = {
   writebackJobId?: string | null;
   writebackError?: string | null;
   duplicate: boolean;
+  optOutContactsMatched?: number;
+  optOutContactsUpdated?: number;
 };
 
 const ACTIVE_SMS_CONFIRMATION_STATUSES = [
@@ -83,12 +86,6 @@ function isUniqueConstraintError(error: unknown) {
 
 function rawPayloadJson(payload: TwilioFormPayload) {
   return payload as Prisma.InputJsonObject;
-}
-
-function phoneLookupValues(phone: string | null) {
-  if (!phone) return [];
-  const digits = phone.replace(/\D/g, "");
-  return Array.from(new Set([phone, digits, digits.startsWith("1") ? digits.slice(1) : digits]));
 }
 
 function isAwaitingNewDate(status: DeliveryConfirmationStatus) {
@@ -186,22 +183,48 @@ async function finishInboundMessage(params: {
   });
 }
 
-async function findMatchingContactId(client: DeliveryTwilioInboundClient, phone: string | null) {
-  const lookupValues = phoneLookupValues(phone);
-  if (lookupValues.length === 0) return null;
+type MatchingSmsContact = {
+  contactId: string;
+  phone1: string | null;
+  phone2: string | null;
+};
 
+async function findMatchingContactIdsByNormalizedPhone(
+  client: DeliveryTwilioInboundClient,
+  normalizedPhone: string
+) {
   const contacts = await client.contact.findMany({
     where: {
-      OR: [{ phone1: { in: lookupValues } }, { phone2: { in: lookupValues } }],
+      OR: [{ phone1: { not: null } }, { phone2: { not: null } }],
     },
     select: { contactId: true, phone1: true, phone2: true },
-    take: 5,
   });
-  const matching = contacts.filter(
-    (contact) => phonesMatch(contact.phone1, phone) || phonesMatch(contact.phone2, phone)
-  );
 
-  return matching.length === 1 ? matching[0].contactId : null;
+  const matchingIds = new Set<string>();
+  for (const contact of contacts as MatchingSmsContact[]) {
+    if (
+      normalizeSmsPhoneForOptOut(contact.phone1) === normalizedPhone ||
+      normalizeSmsPhoneForOptOut(contact.phone2) === normalizedPhone
+    ) {
+      matchingIds.add(contact.contactId);
+    }
+  }
+
+  return Array.from(matchingIds);
+}
+
+async function findActiveSmsOptOutByNormalizedPhone(
+  client: DeliveryTwilioInboundClient,
+  normalizedPhone: string
+) {
+  const activeOptOuts = await client.smsOptOut.findMany({
+    where: { isActive: true },
+    select: { id: true, phone: true },
+  });
+
+  return activeOptOuts.find(
+    (optOut) => normalizeSmsPhoneForOptOut(optOut.phone) === normalizedPhone
+  );
 }
 
 async function upsertSmsOptOut(params: {
@@ -210,37 +233,68 @@ async function upsertSmsOptOut(params: {
   body: string | null;
   now: Date;
 }) {
-  const contactId = await findMatchingContactId(params.client, params.phone);
-  const existing = await params.client.smsOptOut.findFirst({
-    where: { phone: params.phone, isActive: true },
-    select: { id: true },
-  });
-
-  if (existing) {
-    await params.client.smsOptOut.update({
-      where: { id: existing.id },
-      data: {
-        contactId,
-        source: "TWILIO_INBOUND_KEYWORD",
-        reason: params.body,
-        optedOutAt: params.now,
-        optedBackInAt: null,
-        isActive: true,
-      },
-    });
-    return;
+  const normalizedPhone = normalizeSmsPhoneForOptOut(params.phone);
+  if (!normalizedPhone) {
+    throw new Error("SMS opt-out requires a non-empty phone number");
   }
 
-  await params.client.smsOptOut.create({
-    data: {
-      contactId,
-      phone: params.phone,
-      source: "TWILIO_INBOUND_KEYWORD",
-      reason: params.body,
-      optedOutAt: params.now,
-      isActive: true,
-    },
+  const matchingContactIds = await findMatchingContactIdsByNormalizedPhone(
+    params.client,
+    normalizedPhone
+  );
+  const contactId = matchingContactIds.length === 1 ? matchingContactIds[0] : null;
+  const existing = await findActiveSmsOptOutByNormalizedPhone(params.client, normalizedPhone);
+  const data = {
+    contactId,
+    phone: normalizedPhone,
+    source: "TWILIO_INBOUND_KEYWORD",
+    reason: params.body,
+    optedOutAt: params.now,
+    optedBackInAt: null,
+    isActive: true,
+  };
+
+  if (existing) {
+    const optOut = await params.client.smsOptOut.update({
+      where: { id: existing.id },
+      data,
+      select: { id: true },
+    });
+    const updateResult =
+      matchingContactIds.length > 0
+        ? await params.client.contact.updateMany({
+            where: { contactId: { in: matchingContactIds } },
+            data: { smsOptIn: false },
+          })
+        : { count: 0 };
+    return {
+      optOutId: optOut.id,
+      normalizedPhone,
+      contactsMatched: matchingContactIds.length,
+      contactsUpdated: updateResult.count,
+      optOutCreatedOrUpdated: "updated" as const,
+    };
+  }
+
+  const optOut = await params.client.smsOptOut.create({
+    data,
+    select: { id: true },
   });
+  const updateResult =
+    matchingContactIds.length > 0
+      ? await params.client.contact.updateMany({
+          where: { contactId: { in: matchingContactIds } },
+          data: { smsOptIn: false },
+        })
+      : { count: 0 };
+
+  return {
+    optOutId: optOut.id,
+    normalizedPhone,
+    contactsMatched: matchingContactIds.length,
+    contactsUpdated: updateResult.count,
+    optOutCreatedOrUpdated: "created" as const,
+  };
 }
 
 async function optBackInSms(params: {
@@ -249,11 +303,22 @@ async function optBackInSms(params: {
   body: string | null;
   now: Date;
 }) {
-  const lookupValues = phoneLookupValues(params.phone);
+  const normalizedPhone = normalizeSmsPhoneForOptOut(params.phone);
+  if (!normalizedPhone) return;
+
+  const activeOptOuts = await params.client.smsOptOut.findMany({
+    where: { isActive: true },
+    select: { id: true, phone: true },
+  });
+  const matchingIds = activeOptOuts
+    .filter((optOut) => normalizeSmsPhoneForOptOut(optOut.phone) === normalizedPhone)
+    .map((optOut) => optOut.id);
+  if (matchingIds.length === 0) return;
+
   await params.client.smsOptOut.updateMany({
     where: {
+      id: { in: matchingIds },
       isActive: true,
-      phone: { in: lookupValues },
     },
     data: {
       source: "TWILIO_INBOUND_KEYWORD",
@@ -552,6 +617,8 @@ function result(params: {
   writebackJobId?: string | null;
   writebackError?: string | null;
   duplicate?: boolean;
+  optOutContactsMatched?: number;
+  optOutContactsUpdated?: number;
 }): HandleTwilioInboundSmsResult {
   return {
     inboundMessageId: params.inboundMessageId,
@@ -564,6 +631,8 @@ function result(params: {
     writebackJobId: params.writebackJobId,
     writebackError: params.writebackError,
     duplicate: params.duplicate ?? false,
+    optOutContactsMatched: params.optOutContactsMatched,
+    optOutContactsUpdated: params.optOutContactsUpdated,
   };
 }
 
@@ -627,7 +696,7 @@ export async function handleTwilioInboundSms(params: {
     }
 
     if (parsedIntent === "STOP") {
-      await upsertSmsOptOut({ client, phone: fromPhone, body, now });
+      const optOutResult = await upsertSmsOptOut({ client, phone: fromPhone, body, now });
       await finishInboundMessage({
         client,
         id: inbound.id,
@@ -641,6 +710,8 @@ export async function handleTwilioInboundSms(params: {
         messageSid,
         parsedIntent,
         matchStatus: "OPTED_OUT",
+        optOutContactsMatched: optOutResult.contactsMatched,
+        optOutContactsUpdated: optOutResult.contactsUpdated,
       });
     }
 

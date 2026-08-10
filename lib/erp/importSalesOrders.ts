@@ -700,7 +700,7 @@ export async function importSalesOrdersForLineRequestedOn(
                 getString(getField(fullOrder, "Phone2"))
               ),
               smsOptIn: importedOptIns?.smsOptIn ?? false,
-              emailOptIn: importedOptIns?.emailOptIn ?? true,
+              emailOptIn: importedOptIns?.emailOptIn ?? false,
               phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? false,
               lastSyncedAt: importAt,
             };

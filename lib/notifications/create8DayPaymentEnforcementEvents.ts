@@ -41,6 +41,11 @@ import {
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import {
+  type ActiveNotificationOptOutAddresses,
+  loadActiveNotificationOptOutAddresses,
+  mergeNotificationOptOutAddresses,
+} from "@/lib/notifications/notificationOptOutLookup";
+import {
   render8DayPaymentEnforcementCustomerEmail,
   render8DayPaymentEnforcementCustomerSms,
   render8DayPaymentEnforcementInternalFailure,
@@ -842,6 +847,7 @@ async function createOrReuseCustomerNotificationEvent(params: {
   detailsLinkId: string;
   detailsLinkUrl: string;
   salespersonContact: SalespersonContactInput | null;
+  activeOptOutAddresses: ActiveNotificationOptOutAddresses;
   summary: Create8DayPaymentEnforcementEventsSummary;
 }) {
   const order = params.deliveryGroup.order;
@@ -874,10 +880,13 @@ async function createOrReuseCustomerNotificationEvent(params: {
     };
   }
 
-  const channel = selectNotificationChannel(order.contact, {
-    activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-    activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
-  });
+  const channel = selectNotificationChannel(
+    order.contact,
+    mergeNotificationOptOutAddresses(params.activeOptOutAddresses, {
+      activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
+      activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+    })
+  );
 
   if (channel.selectedChannel === null) {
     addSkippedReason(
@@ -1215,6 +1224,7 @@ export async function create8DayPaymentEnforcementEvents(
     client
   );
   summary.targetDeliveryGroups = deliveryGroups.length;
+  const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 
   const salespersonContactsByNumber = deliveryDateSkipReason
     ? new Map()
@@ -1361,6 +1371,7 @@ export async function create8DayPaymentEnforcementEvents(
           detailsLinkId: details.detailsLinkId,
           detailsLinkUrl: details.detailsLinkUrl,
           salespersonContact,
+          activeOptOutAddresses,
           summary,
         });
         report.customerEventId = customer.event.id;
@@ -1593,6 +1604,7 @@ export async function create8DayPaymentEnforcementEvents(
         detailsLinkId: details.detailsLinkId,
         detailsLinkUrl: details.detailsLinkUrl,
         salespersonContact,
+        activeOptOutAddresses,
         summary,
       });
       report.customerEventId = customer.event.id;

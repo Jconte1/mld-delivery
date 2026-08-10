@@ -32,6 +32,10 @@ import {
   getNotificationTargetDate,
   selectNotificationChannel,
 } from "@/lib/notifications/helpers";
+import {
+  loadActiveNotificationOptOutAddresses,
+  mergeNotificationOptOutAddresses,
+} from "@/lib/notifications/notificationOptOutLookup";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
@@ -409,6 +413,7 @@ export async function create42DayDeliveryConfirmationEvents(
     client
   );
   summary.targetDeliveryGroups = deliveryGroups.length;
+  const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 
   for (const deliveryGroup of deliveryGroups) {
     const order = deliveryGroup.order;
@@ -541,10 +546,13 @@ export async function create42DayDeliveryConfirmationEvents(
         : null;
     const channel = confirmationSkipReason
       ? null
-      : selectNotificationChannel(order.contact, {
-          activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-          activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
-        });
+      : selectNotificationChannel(
+          order.contact,
+          mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+            activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
+            activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+          })
+        );
     const shouldSkipForNoChannel = channel?.selectedChannel === null;
 
     let event = await client.notificationEvent.findUnique({

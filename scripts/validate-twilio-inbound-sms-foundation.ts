@@ -216,23 +216,57 @@ class MockDeliveryStore {
 
   readonly client = {
     contact: {
-      findMany: async (args: { where?: { OR?: Array<Record<string, { in: string[] }>> } }) => {
+      findMany: async (args: {
+        where?: { OR?: Array<Record<string, { in?: string[]; not?: null }>> };
+        select?: Record<string, boolean>;
+      }) => {
         const values = new Set<string>();
+        let hasNotNullLookup = false;
         for (const condition of args.where?.OR ?? []) {
           const phone1 = condition.phone1?.in ?? [];
           const phone2 = condition.phone2?.in ?? [];
+          if (condition.phone1?.not === null || condition.phone2?.not === null) {
+            hasNotNullLookup = true;
+          }
           for (const value of [...phone1, ...phone2]) values.add(value);
         }
 
-        return this.contacts.filter(
+        const contacts = this.contacts.filter(
           (contact) =>
-            !values.size ||
+            (!values.size && !hasNotNullLookup) ||
+            (hasNotNullLookup && (contact.phone1 || contact.phone2)) ||
             (contact.phone1 && values.has(contact.phone1)) ||
             (contact.phone2 && values.has(contact.phone2))
         );
+        return contacts.map((contact) =>
+          selectFields(contact as unknown as Record<string, unknown>, args.select)
+        );
+      },
+      updateMany: async (args: {
+        where: { contactId?: { in: string[] } };
+        data: Partial<ContactRecord>;
+      }) => {
+        let count = 0;
+        for (const contact of this.contacts) {
+          if (args.where.contactId?.in && !args.where.contactId.in.includes(contact.contactId)) {
+            continue;
+          }
+          applyData(contact as unknown as Record<string, unknown>, args.data as Record<string, unknown>);
+          count += 1;
+        }
+        return { count };
       },
     },
     smsOptOut: {
+      findMany: async (args: {
+        where?: { isActive?: boolean };
+        select?: Record<string, boolean>;
+      }) => {
+        const rows = this.smsOptOuts.filter(
+          (row) => args.where?.isActive === undefined || row.isActive === args.where.isActive
+        );
+        return rows.map((row) => selectFields(row as unknown as Record<string, unknown>, args.select));
+      },
       findFirst: async (args: { where: { phone?: string; isActive?: boolean } }) =>
         this.smsOptOuts.find(
           (row) =>
@@ -262,12 +296,13 @@ class MockDeliveryStore {
         return record;
       },
       updateMany: async (args: {
-        where: { isActive?: boolean; phone?: { in: string[] } };
+        where: { id?: { in: string[] }; isActive?: boolean; phone?: { in: string[] } };
         data: Partial<SmsOptOutRecord>;
       }) => {
         let count = 0;
         for (const record of this.smsOptOuts) {
           const matches =
+            (!args.where.id?.in || args.where.id.in.includes(record.id)) &&
             (args.where.isActive === undefined || record.isActive === args.where.isActive) &&
             (!args.where.phone?.in || args.where.phone.in.includes(record.phone));
           if (!matches) continue;

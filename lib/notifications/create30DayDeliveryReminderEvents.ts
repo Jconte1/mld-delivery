@@ -27,6 +27,10 @@ import {
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import {
+  loadActiveNotificationOptOutAddresses,
+  mergeNotificationOptOutAddresses,
+} from "@/lib/notifications/notificationOptOutLookup";
+import {
   render30DayDeliveryReminderEmail,
   render30DayDeliveryReminderSms,
 } from "@/lib/notifications/deliveryReminder30Day";
@@ -420,6 +424,7 @@ export async function createConfirmedDeliveryReminderEvents(
 
   const deliveryGroups = await find30DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
   summary.targetDeliveryGroups = deliveryGroups.length;
+  const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 
   const salespersonContactsByNumber = deliveryDateSkipReason
     ? new Map()
@@ -593,10 +598,13 @@ export async function createConfirmedDeliveryReminderEvents(
       continue;
     }
 
-    const channel = selectNotificationChannel(order.contact, {
-      activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-      activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
-    });
+    const channel = selectNotificationChannel(
+      order.contact,
+      mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+        activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
+        activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+      })
+    );
     const shouldSkipForNoChannel = channel.selectedChannel === null;
     if (shouldSkipForNoChannel) {
       summary.deliveryGroupsSkippedNoChannel += 1;

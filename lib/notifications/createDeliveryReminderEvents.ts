@@ -20,6 +20,10 @@ import {
   selectNotificationChannel,
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
+import {
+  loadActiveNotificationOptOutAddresses,
+  mergeNotificationOptOutAddresses,
+} from "@/lib/notifications/notificationOptOutLookup";
 import { renderDeliveryReminderEmailBody } from "@/lib/notifications/deliveryReminderEmail";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
@@ -226,6 +230,7 @@ export async function createDeliveryReminderEvents(
     },
   });
   summary.targetDeliveryGroups = deliveryGroups.length;
+  const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
     deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
     client
@@ -325,10 +330,13 @@ export async function createDeliveryReminderEvents(
 
     summary.eligibleDeliveryGroups += 1;
 
-    const channel = selectNotificationChannel(order.contact, {
-      activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-      activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
-    });
+    const channel = selectNotificationChannel(
+      order.contact,
+      mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+        activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
+        activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+      })
+    );
 
     const contactName = formatContactName(order.contact);
     const jobName = formatJobName({

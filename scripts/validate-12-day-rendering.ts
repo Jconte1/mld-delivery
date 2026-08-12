@@ -43,6 +43,7 @@ const sampleLines: OrderLineReadinessSummary[] = [
 function main() {
   const failures: string[] = [];
   const params = {
+    orderNumber: "SO12",
     contactName: "James",
     buyerGroup: "Appliances",
     jobName: "Smith Residence",
@@ -67,6 +68,12 @@ function main() {
     email.subject ===
       "Balance Reminder: Appliances delivery reminder: Smith Residence - Thursday, July 30, 2026",
     "12-day email subject prefixes existing reminder subject",
+    failures
+  );
+  assertIncludes(
+    email.body,
+    "Order: SO12",
+    "12-day email includes order number",
     failures
   );
   assertIncludes(
@@ -118,6 +125,12 @@ function main() {
     failures
   );
 
+  assertIncludes(
+    sms,
+    "MLD: Order SO12:",
+    "12-day SMS includes order number",
+    failures
+  );
   assertIncludes(
     sms,
     "Balance may be due before delivery. Please review details here: https://mld-delivery.example.test/delivery/details/dd_12_test.",

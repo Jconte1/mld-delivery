@@ -41,6 +41,7 @@ function assertNoForbidden(source: string, label: string, failures: string[]) {
 function main() {
   const failures: string[] = [];
   const params = {
+    orderNumber: "SO2",
     contactName: "James",
     buyerGroup: "Builder",
     jobName: "Jones Project",
@@ -66,6 +67,12 @@ function main() {
     email.subject,
     "Final Delivery Reminder: Builder delivery - Jones Project - Monday, August 10, 2026",
     "2-day subject starts with final delivery reminder and includes delivery date",
+    failures
+  );
+  assertIncludes(
+    email.body,
+    "Order: SO2",
+    "2-day email includes order number",
     failures
   );
   assertIncludes(
@@ -111,7 +118,8 @@ function main() {
     failures
   );
 
-  assertIncludes(sms, "MLD: Final reminder -", "2-day SMS says Final reminder", failures);
+  assertIncludes(sms, "MLD: Order SO2:", "2-day SMS includes order number", failures);
+  assertIncludes(sms, "Final reminder -", "2-day SMS says Final reminder", failures);
   assertIncludes(
     sms,
     "https://mld-delivery.example.test/delivery/details/dd_2_test",

@@ -24,6 +24,66 @@ function statusClass(status: string | null | undefined) {
   }
 }
 
+function normalizedItemDisplayText(value: string | null | undefined) {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+export function shouldSuppressDeliveryItemCustomerEtaAndStatus(
+  line: Pick<OrderLineReadinessSummary, "inventoryId" | "lineDescription">
+) {
+  const inventoryId = normalizedItemDisplayText(line.inventoryId);
+  const description = normalizedItemDisplayText(line.lineDescription);
+  return ["storage", "delivery", "install"].some(
+    (term) => inventoryId.includes(term) || description.includes(term)
+  );
+}
+
+export function deliveryItemEtaDisplay(line: OrderLineReadinessSummary) {
+  if (shouldSuppressDeliveryItemCustomerEtaAndStatus(line)) return "-";
+  if (
+    line.readinessStatus === "ready" ||
+    line.readinessStatus === "complete" ||
+    line.etaStatus === "ready" ||
+    line.etaStatus === "complete"
+  ) {
+    return "-";
+  }
+
+  return line.eta ? dateKey(line.eta) : "Pending";
+}
+
+export function deliveryItemStatusDisplay(line: OrderLineReadinessSummary) {
+  if (shouldSuppressDeliveryItemCustomerEtaAndStatus(line)) return "-";
+  return line.displayStatus ?? "Not calculated";
+}
+
+function DeliveryItemRow({ line }: { line: OrderLineReadinessSummary }) {
+  const statusDisplay = deliveryItemStatusDisplay(line);
+  const status = statusDisplay === "-" ? null : line.readinessStatus;
+
+  return (
+    <tr key={line.lineNbr} className="align-top">
+      <td className="py-3 pr-4 text-zinc-500">{line.lineNbr}</td>
+      <td className="py-3 pr-4">
+        <div className="font-medium text-zinc-900">{line.inventoryId ?? "Item"}</div>
+        <div className="mt-1 max-w-xl text-zinc-600">{line.lineDescription}</div>
+      </td>
+      <td className="py-3 pr-4">{quantity(line.orderQty)}</td>
+      <td className="py-3 pr-4">{quantity(line.openQty)}</td>
+      <td className="py-3 pr-4">{deliveryItemEtaDisplay(line)}</td>
+      <td className="py-3 pr-4">
+        <span
+          className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${statusClass(
+            status
+          )}`}
+        >
+          {statusDisplay}
+        </span>
+      </td>
+    </tr>
+  );
+}
+
 export function DeliveryItemsForThisDelivery({
   lines,
   includedLineCount,
@@ -58,29 +118,7 @@ export function DeliveryItemsForThisDelivery({
           </thead>
           <tbody className="divide-y divide-zinc-100">
             {lines.map((line) => (
-              <tr key={line.lineNbr} className="align-top">
-                <td className="py-3 pr-4 text-zinc-500">{line.lineNbr}</td>
-                <td className="py-3 pr-4">
-                  <div className="font-medium text-zinc-900">
-                    {line.inventoryId ?? "Item"}
-                  </div>
-                  <div className="mt-1 max-w-xl text-zinc-600">
-                    {line.lineDescription}
-                  </div>
-                </td>
-                <td className="py-3 pr-4">{quantity(line.orderQty)}</td>
-                <td className="py-3 pr-4">{quantity(line.openQty)}</td>
-                <td className="py-3 pr-4">{line.eta ? dateKey(line.eta) : "Pending"}</td>
-                <td className="py-3 pr-4">
-                  <span
-                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ring-1 ${statusClass(
-                      line.readinessStatus
-                    )}`}
-                  >
-                    {line.displayStatus ?? "Not calculated"}
-                  </span>
-                </td>
-              </tr>
+              <DeliveryItemRow key={line.lineNbr} line={line} />
             ))}
           </tbody>
         </table>

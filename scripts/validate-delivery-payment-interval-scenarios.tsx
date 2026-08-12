@@ -961,6 +961,7 @@ async function main() {
   );
 
   const fourteenDue = render30DayDeliveryReminderEmail({
+    orderNumber: "SO14",
     contactName: "Customer",
     buyerGroup: "Appliance",
     jobName: "Job",
@@ -971,6 +972,7 @@ async function main() {
     amountDueNowRounded: "100.00",
   });
   const fourteenClear = render30DayDeliveryReminderEmail({
+    orderNumber: "SO14",
     contactName: "Customer",
     buyerGroup: "Appliance",
     jobName: "Job",

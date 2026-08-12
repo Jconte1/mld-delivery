@@ -69,6 +69,7 @@ assertEqual(
 );
 
 const body = render42DayEmailConfirmationBody({
+  orderNumber: "SO42",
   contactName: "James",
   buyerGroup: "Appliance",
   jobName,
@@ -81,6 +82,7 @@ assertIncludes(body, "Appliance delivery", "body buyerGroup");
 assertIncludes(body, jobName, "body jobName");
 assertIncludes(body, "Monday, January 4, 2027", "body deliveryDate");
 assertIncludes(body, `Delivery address: ${jobAddress}`, "body jobAddress");
+assertIncludes(body, "Order: SO42", "body order number");
 assertIncludes(body, link, "body main link");
 assertIncludes(body, get42DayEmailNoReplyNotice(), "body no-reply notice");
 assertNotIncludes(body.toLowerCase(), "full item list", "body no item list");
@@ -92,6 +94,7 @@ assertNotIncludes(body.toLowerCase(), "click here to change", "body no direct ch
 assertNoCustomerFacingPlaceholders(body, "body placeholder safety");
 
 const fallbackBody = render42DayEmailConfirmationBody({
+  orderNumber: "SO42",
   contactName: "James",
   buyerGroup: null,
   jobName: "Kent Construction",
@@ -104,6 +107,7 @@ assertIncludes(fallbackBody, "Delivery address: the job site", "body jobAddress 
 assertNoCustomerFacingPlaceholders(fallbackBody, "fallback body placeholder safety");
 
 const message = render42DayEmailConfirmationMessage({
+  orderNumber: "SO42",
   contactName: "James",
   buyerGroup: "Appliance",
   jobName,
@@ -124,6 +128,7 @@ console.log(
       bodyIncludesJobName: true,
       bodyIncludesDeliveryDate: true,
       bodyIncludesJobAddress: true,
+      bodyIncludesOrderNumber: true,
       bodyIncludesMainLink: true,
       bodyIncludesNoReplyNotice: true,
       bodyExcludesItemEtaPaymentBalanceDetails: true,

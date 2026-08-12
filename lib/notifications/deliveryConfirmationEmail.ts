@@ -96,6 +96,7 @@ export function render42DayEmailConfirmationSubject(params: {
 }
 
 export function render42DayEmailConfirmationBody(params: {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   customerDescription?: string | null;
@@ -122,6 +123,7 @@ export function render42DayEmailConfirmationBody(params: {
     `We are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${deliveryDate}.`,
     "",
     `Delivery address: ${jobAddress}`,
+    `Order: ${params.orderNumber}`,
     "",
     params.paymentReminderApplies
       ? render42DayPaymentReminderText(params.amountDueNowRounded)
@@ -141,6 +143,7 @@ export function render42DayEmailConfirmationBody(params: {
 }
 
 export function render42DayEmailConfirmationHtmlBody(params: {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   customerDescription?: string | null;
@@ -174,6 +177,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
       jobName,
     })} is scheduled for ${escapeHtml(deliveryDate)}.</p>`,
     `<p>Delivery address: <strong>${escapeHtml(jobAddress)}</strong></p>`,
+    `<p>Order: <strong>${escapeHtml(params.orderNumber)}</strong></p>`,
     paymentText && paymentAmount
       ? `<p>Balance owed before delivery: <strong>${escapeHtml(paymentAmount)}</strong></p>`
       : paymentText
@@ -192,6 +196,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
 }
 
 export function render42DayEmailConfirmationMessage(params: {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   customerDescription?: string | null;

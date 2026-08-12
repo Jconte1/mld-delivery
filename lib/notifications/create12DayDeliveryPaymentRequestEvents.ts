@@ -755,6 +755,7 @@ export async function create12DayDeliveryPaymentRequestEvents(
 
     const amountDueNowRounded = payment.amountDueNowRounded as string;
     const smsMessage = render12DayDeliveryPaymentReminderSms({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -767,6 +768,7 @@ export async function create12DayDeliveryPaymentRequestEvents(
       salespersonContact,
     });
     const emailMessage = render12DayDeliveryPaymentReminderEmail({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,

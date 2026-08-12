@@ -944,6 +944,7 @@ async function createOrReuseCustomerNotificationEvent(params: {
   });
   const jobAddress = safeJobAddress(order.address ?? {});
   const smsMessage = render8DayPaymentEnforcementCustomerSms({
+    orderNumber: order.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     jobName,
@@ -954,6 +955,7 @@ async function createOrReuseCustomerNotificationEvent(params: {
     salespersonContact: params.salespersonContact,
   });
   const emailMessage = render8DayPaymentEnforcementCustomerEmail({
+    orderNumber: order.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     jobName,

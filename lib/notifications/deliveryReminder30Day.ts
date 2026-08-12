@@ -11,6 +11,7 @@ import {
 } from "@/lib/notifications/salespersonContactDisplay";
 
 export type Render30DayDeliveryReminderParams = {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -41,10 +42,10 @@ export function render30DayDeliveryReminderSms(params: Render30DayDeliveryRemind
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
   if (params.paymentDue) {
-    return `MLD: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Payment may be needed before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+    return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Payment may be needed before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
   }
 
-  return `MLD: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
 }
 
 export function render30DayDeliveryReminderEmail(params: Render30DayDeliveryReminderParams) {
@@ -63,6 +64,7 @@ export function render30DayDeliveryReminderEmail(params: Render30DayDeliveryRemi
     "",
     `Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.`,
     `Job address: ${params.jobAddress}`,
+    `Order: ${params.orderNumber}`,
     "",
     `Review delivery details here: ${params.detailsLink}`,
   ];
@@ -80,6 +82,7 @@ export function render30DayDeliveryReminderEmail(params: Render30DayDeliveryRemi
     `<p>Hello ${escapeHtml(params.contactName)},</p>`,
     `<p>Your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> is scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
     `<p><strong>Job address:</strong> ${escapeHtml(params.jobAddress)}</p>`,
+    `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p><a href="${escapedLink}" style="display:inline-block;background:#18181b;color:#ffffff;padding:10px 14px;border-radius:6px;text-decoration:none;">View Delivery Details</a></p>`,
   ];
 

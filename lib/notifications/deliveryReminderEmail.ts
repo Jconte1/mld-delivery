@@ -1,4 +1,7 @@
-import { renderDeliveryReminderMessage } from "@/lib/notifications/helpers";
+import {
+  renderDeliveryReminderMessage,
+  renderDeliveryReminderSummarySentence,
+} from "@/lib/notifications/helpers";
 import {
   renderSalespersonEmailFooterText,
   type SalespersonContactInput,
@@ -11,7 +14,11 @@ export function renderDeliveryReminderEmailBody(
     salespersonContact?: SalespersonContactInput | null;
   }
 ) {
-  const body = renderDeliveryReminderMessage(params);
+  const body = [
+    renderDeliveryReminderSummarySentence(params),
+    "",
+    `Order: ${params.orderNumber}`,
+  ].join("\n");
   const salespersonFooter = renderSalespersonEmailFooterText(params.salespersonContact);
 
   return salespersonFooter ? [body, "", salespersonFooter].join("\n") : body;

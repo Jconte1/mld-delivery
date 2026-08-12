@@ -297,6 +297,7 @@ function buildReminderMessages(params: {
     });
     const smsBody = renderDeliveryReminderMessage({
       intervalType: interval.intervalType,
+      orderNumber: params.group.orderNumber,
       contactName: params.contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName: params.jobName,
@@ -305,6 +306,7 @@ function buildReminderMessages(params: {
     });
     const emailBody = renderDeliveryReminderEmailBody({
       intervalType: interval.intervalType,
+      orderNumber: params.group.orderNumber,
       contactName: params.contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName: params.jobName,
@@ -348,6 +350,7 @@ async function build42DayMessages(params: {
   const payment = await getDeliveryGroupPaymentEvaluation(params.group.id);
   const applies = paymentReminderApplies(payment);
   const email = render42DayEmailConfirmationMessage({
+    orderNumber: params.group.orderNumber,
     contactName: params.contactName,
     buyerGroup: params.group.order.buyerGroup,
     customerDescription: params.group.order.customerDescription,
@@ -361,6 +364,7 @@ async function build42DayMessages(params: {
     salespersonContact: params.salespersonContact,
   });
   const sms = render42DaySmsConfirmationMessage({
+    orderNumber: params.group.orderNumber,
     contactName: params.contactName,
     buyerGroup: params.group.order.buyerGroup,
     jobName: params.jobName,

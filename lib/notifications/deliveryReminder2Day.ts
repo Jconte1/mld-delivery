@@ -9,6 +9,7 @@ import {
 } from "@/lib/notifications/salespersonContactDisplay";
 
 export type Render2DayDeliveryReminderParams = {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -64,7 +65,7 @@ export function render2DayDeliveryReminderSms(params: Render2DayDeliveryReminder
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
-  return `MLD: Final reminder - your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}: Final reminder - your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
 }
 
 export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryReminderParams) {
@@ -83,6 +84,7 @@ export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryRemind
     `Hello ${params.contactName},`,
     "",
     `This is your final reminder that your ${deliveryDescription} for ${params.jobName} at ${params.jobAddress} is scheduled for ${deliveryDate}.`,
+    `Order: ${params.orderNumber}`,
     "",
     "Please use the link below to review your delivery details:",
     `View Delivery Details: ${params.detailsLink}`,
@@ -98,6 +100,7 @@ export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryRemind
   const htmlParts = [
     `<p>Hello ${escapeHtml(params.contactName)},</p>`,
     `<p>This is your final reminder that your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> at ${escapeHtml(params.jobAddress)} is scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
+    `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p>Please use the link below to review your delivery details:</p>`,
     `<p><a href="${escapedLink}" style="display:inline-block;background:#18181b;color:#ffffff;padding:10px 14px;border-radius:6px;text-decoration:none;">View Delivery Details</a></p>`,
   ];

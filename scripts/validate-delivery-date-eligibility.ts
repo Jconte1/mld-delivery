@@ -52,6 +52,7 @@ function assertRejected(
 
 function smsFor(address?: { state?: string | null; postalCode?: string | null }) {
   return render42DaySmsConfirmationMessage({
+    orderNumber: "SO42",
     contactName: "James",
     buyerGroup: "Appliance",
     jobName: "Kent Construction",

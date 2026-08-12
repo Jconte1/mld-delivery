@@ -536,6 +536,7 @@ async function renderIntervalEmail(params: {
     const details = await ensureTestDeliveryDetailsLink(params.group);
     if (params.interval.key === "2") {
       const email = render2DayDeliveryReminderEmail({
+        orderNumber: params.group.orderNumber,
         contactName,
         buyerGroup: params.group.order.buyerGroup,
         jobName,
@@ -570,6 +571,7 @@ async function renderIntervalEmail(params: {
       Number(payment.amountDueNowRounded ?? "0") > minimumAmountDue &&
       payment.calculationWarnings.length === 0;
     const emailParams = {
+      orderNumber: params.group.orderNumber,
       contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName,
@@ -631,6 +633,7 @@ async function renderIntervalEmail(params: {
     });
     const body = renderDeliveryReminderEmailBody({
       intervalType: params.interval.intervalType,
+      orderNumber: params.group.orderNumber,
       contactName,
       buyerGroup: params.group.order.buyerGroup,
       jobName,
@@ -662,6 +665,7 @@ async function renderIntervalEmail(params: {
     Number(payment.amountDueNowRounded ?? "0") > 2 &&
     payment.calculationWarnings.length === 0;
   const email = render42DayEmailConfirmationMessage({
+    orderNumber: params.group.orderNumber,
     contactName,
     buyerGroup: params.group.order.buyerGroup,
     customerDescription: params.group.order.customerDescription,

@@ -43,6 +43,7 @@ const sampleLines: OrderLineReadinessSummary[] = [
 function main() {
   const failures: string[] = [];
   const baseParams = {
+    orderNumber: "SO30",
     contactName: "James",
     buyerGroup: "Builder",
     jobName: "Smith Residence",
@@ -76,6 +77,18 @@ function main() {
     paymentDue: true,
   });
 
+  assertIncludes(
+    smsNoPayment,
+    "MLD: Order SO30:",
+    "30-day SMS includes order number",
+    failures
+  );
+  assertIncludes(
+    smsPayment,
+    "MLD: Order SO30:",
+    "30-day payment SMS includes order number",
+    failures
+  );
   assertIncludes(
     smsNoPayment,
     "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_test.",
@@ -141,6 +154,18 @@ function main() {
       );
     }
   }
+  assertIncludes(
+    emailNoPayment.body,
+    "Order: SO30",
+    "30-day email body includes order number",
+    failures
+  );
+  assertIncludes(
+    emailPayment.body,
+    "Order: SO30",
+    "30-day payment email body includes order number",
+    failures
+  );
   assertIncludes(
     emailNoPayment.body,
     "To make a payment, for additional information, or to make changes to this order, please reach out to Sales Person",

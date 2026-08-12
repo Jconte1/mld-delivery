@@ -12,6 +12,7 @@ import {
 } from "@/lib/notifications/salespersonContactDisplay";
 
 export type Render12DayDeliveryPaymentReminderParams = {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -50,7 +51,7 @@ export function render12DayDeliveryPaymentReminderSms(
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
-  return `MLD: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Balance may be due before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Balance may be due before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
 }
 
 export function render12DayDeliveryPaymentReminderEmail(
@@ -74,6 +75,7 @@ export function render12DayDeliveryPaymentReminderEmail(
     "",
     `Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.`,
     `Job address: ${params.jobAddress}`,
+    `Order: ${params.orderNumber}`,
     "",
     `Review delivery details here: ${params.detailsLink}`,
     "",
@@ -92,6 +94,7 @@ export function render12DayDeliveryPaymentReminderEmail(
     `<p>This is your second balance reminder.</p>`,
     `<p>Your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> is scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
     `<p><strong>Job address:</strong> ${escapeHtml(params.jobAddress)}</p>`,
+    `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p><a href="${escapedLink}" style="display:inline-block;background:#18181b;color:#ffffff;padding:10px 14px;border-radius:6px;text-decoration:none;">View Delivery Details</a></p>`,
     `<h2 style="font-size:18px;margin:24px 0 8px;">Payment</h2>`,
     `<p><strong>${escapeHtml(paymentLine)}</strong></p>`,

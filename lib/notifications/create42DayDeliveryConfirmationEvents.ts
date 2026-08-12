@@ -685,6 +685,7 @@ export async function create42DayDeliveryConfirmationEvents(
     const smsMessage =
       event.status === NotificationEventStatus.SCHEDULED
         ? render42DaySmsConfirmationMessage({
+            orderNumber: order.orderNumber,
             contactName,
             buyerGroup: order.buyerGroup,
             jobName,
@@ -696,6 +697,7 @@ export async function create42DayDeliveryConfirmationEvents(
     const emailMessage =
       event.status === NotificationEventStatus.SCHEDULED
         ? render42DayEmailConfirmationMessage({
+            orderNumber: order.orderNumber,
             contactName,
             buyerGroup: order.buyerGroup,
             customerDescription: order.customerDescription,

@@ -92,6 +92,48 @@ function dateFromKey(value: string) {
   return new Date(`${value}T00:00:00.000Z`);
 }
 
+function dateKey(value: Date) {
+  return value.toISOString().slice(0, 10);
+}
+
+function isDeliverableFixtureItemType(value: string | null | undefined) {
+  return value?.trim().toUpperCase() === "F";
+}
+
+function isZeroQuantity(value: string | null | undefined) {
+  return Number(value ?? "0") === 0;
+}
+
+function readinessFieldsForFixtureLine(line: ScenarioLine) {
+  if (!isDeliverableFixtureItemType(line.itemType ?? "F")) {
+    return {
+      activeAllocatedQty: "0",
+      allocationStatus: "ignored",
+      etaStatus: "ignored",
+      readinessStatus: "ignored",
+      displayStatus: "Ignored",
+    };
+  }
+
+  if (isZeroQuantity(line.openQty)) {
+    return {
+      activeAllocatedQty: "0",
+      allocationStatus: "complete",
+      etaStatus: "complete",
+      readinessStatus: "complete",
+      displayStatus: "Complete",
+    };
+  }
+
+  return {
+    activeAllocatedQty: "0",
+    allocationStatus: "allocated",
+    etaStatus: "ready",
+    readinessStatus: "ready",
+    displayStatus: "Ready",
+  };
+}
+
 function fiveItemLines(params: {
   deliveryDate: string;
   futureDate?: string;
@@ -415,7 +457,7 @@ const scenarios: ScenarioDefinition[] = [
   },
   {
     name: "12_open_qty_zero_complete_line",
-    description: "Complete line contributes to completed value, not current open value.",
+    description: "Complete line contributes to completed value, not payable current open value.",
     paymentTerms: "PP",
     orderTotal: "1000",
     unpaidBalance: "500",
@@ -442,16 +484,16 @@ const scenarios: ScenarioDefinition[] = [
       },
     ],
     expected: {
-      amountDueNowRounded: "390.00",
+      amountDueNowRounded: null,
       paymentApplicabilityStatus: "applicable",
-      paymentStatus: "balance_due",
+      paymentStatus: "no_balance_due",
       currentDeliveryGroupMerchandiseValue: "0.00",
       completedValueBeforeCurrentDelivery: "800.00",
     },
   },
   {
-    name: "13_charged_non_stock_line",
-    description: "Charged itemType N line is included in payment calculation.",
+    name: "13_ordinary_non_stock_line",
+    description: "Ordinary itemType N line is excluded from current stock payable basis.",
     paymentTerms: "PP",
     orderTotal: "1000",
     unpaidBalance: "500",
@@ -462,10 +504,10 @@ const scenarios: ScenarioDefinition[] = [
       currentItemTypes: ["N", "F", "F", "F", "F"],
     }),
     expected: {
-      amountDueNowRounded: "170.00",
+      amountDueNowRounded: "60.00",
       paymentApplicabilityStatus: "applicable",
       paymentStatus: "balance_due",
-      currentDeliveryGroupMerchandiseValue: "400.00",
+      currentDeliveryGroupMerchandiseValue: "200.00",
     },
   },
   {
@@ -683,9 +725,60 @@ async function createScenarioFixtures(
       discountedUnitPrice: line.discountedUnitPrice,
       orderQty: line.orderQty,
       openQty: line.openQty,
+      ...readinessFieldsForFixtureLine(line),
+      readinessCalculatedAt: new Date(),
       lastSyncedAt: new Date(),
     })),
   });
+
+  const [createdLines, deliveryGroups] = await Promise.all([
+    tx.orderLine.findMany({
+      where: { orderId: order.id },
+      select: {
+        id: true,
+        lineNbr: true,
+        inventoryId: true,
+        itemType: true,
+        requestedOn: true,
+      },
+    }),
+    tx.orderDeliveryGroup.findMany({
+      where: { orderId: order.id },
+      select: { id: true, deliveryDate: true },
+    }),
+  ]);
+  const deliveryGroupByDate = new Map(
+    deliveryGroups.map((deliveryGroup) => [dateKey(deliveryGroup.deliveryDate), deliveryGroup])
+  );
+  const now = new Date();
+  const membershipRows = createdLines
+    .filter((line) => isDeliverableFixtureItemType(line.itemType))
+    .map((line) => {
+      if (!line.requestedOn) return null;
+      const deliveryGroup = deliveryGroupByDate.get(dateKey(line.requestedOn));
+      if (!deliveryGroup) return null;
+
+      return {
+        orderDeliveryGroupId: deliveryGroup.id,
+        orderLineId: line.id,
+        orderId: order.id,
+        orderType: ORDER_TYPE,
+        orderNumber,
+        lineNbr: line.lineNbr,
+        inventoryId: line.inventoryId,
+        deliveryDate: deliveryGroup.deliveryDate,
+        isActive: true,
+        firstSeenAt: now,
+        lastSeenAt: now,
+      };
+    })
+    .filter((row): row is NonNullable<typeof row> => row !== null);
+
+  if (membershipRows.length > 0) {
+    await tx.orderDeliveryGroupLine.createMany({
+      data: membershipRows,
+    });
+  }
 
   if (scenario.taxDetails && scenario.taxDetails.length > 0) {
     await tx.orderTaxDetail.createMany({

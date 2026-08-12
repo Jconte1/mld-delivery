@@ -357,6 +357,7 @@ export async function createDeliveryReminderEvents(
     });
     const smsBody = renderDeliveryReminderMessage({
       intervalType: options.intervalType,
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -365,6 +366,7 @@ export async function createDeliveryReminderEvents(
     });
     const emailBody = renderDeliveryReminderEmailBody({
       intervalType: options.intervalType,
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,

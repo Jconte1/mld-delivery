@@ -715,6 +715,7 @@ export async function create2DayDeliveryReminderEvents(
     }
 
     const smsMessage = render2DayDeliveryReminderSms({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -724,6 +725,7 @@ export async function create2DayDeliveryReminderEvents(
       salespersonContact,
     });
     const emailMessage = render2DayDeliveryReminderEmail({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,

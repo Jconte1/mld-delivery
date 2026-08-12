@@ -99,6 +99,7 @@ export function getSmsChangeRequestedNextStepMessage() {
 }
 
 export function render42DaySmsConfirmationMessage(params: {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -113,7 +114,7 @@ export function render42DaySmsConfirmationMessage(params: {
   const routeNote = getRequestedDeliveryDateRouteNote(params.deliveryAddress, "sms");
   const routeNoteSentence = routeNote ? ` ${routeNote}` : "";
 
-  return `Hello ${contactName}, we are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}. Reply Y to confirm or N to request a different delivery date.${routeNoteSentence} For ETAs and delivery details: ${link} Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}: Hello ${contactName}, we are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}. Reply Y to confirm or N to request a different delivery date.${routeNoteSentence} For ETAs and delivery details: ${link} Reply STOP to opt out.`;
 }
 
 export function buildDeliveryConfirmationScopeKey(params: {

@@ -712,6 +712,7 @@ export async function createConfirmedDeliveryReminderEvents(
     }
 
     const smsMessage = render30DayDeliveryReminderSms({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -724,6 +725,7 @@ export async function createConfirmedDeliveryReminderEvents(
       salespersonContact,
     });
     const emailMessage = render30DayDeliveryReminderEmail({
+      orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,

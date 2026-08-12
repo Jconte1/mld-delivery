@@ -297,6 +297,20 @@ export function formatContactName(params: {
 
 export function renderDeliveryReminderMessage(params: {
   intervalType: NotificationIntervalType;
+  orderNumber: string;
+  contactName: string;
+  buyerGroup?: string | null;
+  jobName: string;
+  jobAddress: string;
+  deliveryDate: Date | string;
+}) {
+  const summarySentence = renderDeliveryReminderSummarySentence(params);
+
+  return `MLD: Order ${params.orderNumber}: ${summarySentence}`;
+}
+
+export function renderDeliveryReminderSummarySentence(params: {
+  intervalType: NotificationIntervalType;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -311,6 +325,7 @@ export function renderDeliveryReminderMessage(params: {
 }
 
 export function buildDeliveryReminderMessage(params: {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;

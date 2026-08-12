@@ -20,6 +20,7 @@ function assertNotIncludes(source: string, text: string, message: string, failur
 function main() {
   const failures: string[] = [];
   const customerParams = {
+    orderNumber: "SO8",
     contactName: "James",
     buyerGroup: "Appliances",
     jobName: "Smith Residence",
@@ -69,6 +70,12 @@ function main() {
   );
   assertIncludes(
     customerEmail.body,
+    "Order: SO8",
+    "customer email includes order number",
+    failures
+  );
+  assertIncludes(
+    customerEmail.body,
     "Your delivery is currently on hold because payment was not received by the required deadline.",
     "customer email includes on-hold payment deadline language",
     failures
@@ -89,6 +96,12 @@ function main() {
     customerEmail.body,
     "To make a payment, for additional information, or to make changes to this order, please reach out to Sales Person",
     "customer email includes salesperson payment/contact footer",
+    failures
+  );
+  assertIncludes(
+    customerSms,
+    "MLD: Order SO8:",
+    "customer SMS includes order number",
     failures
   );
   assertIncludes(

@@ -9,6 +9,7 @@ import {
 } from "@/lib/notifications/salespersonContactDisplay";
 
 export type Render8DayDeliveryPaymentEnforcementCustomerParams = {
+  orderNumber: string;
   contactName: string;
   buyerGroup?: string | null;
   jobName: string;
@@ -61,7 +62,7 @@ export function render8DayPaymentEnforcementCustomerSms(
 ) {
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
 
-  return `MLD: Your ${deliveryDescription} for ${params.jobName} is currently on hold because payment was not received by the required deadline. Review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is currently on hold because payment was not received by the required deadline. Review details here: ${params.detailsLink}. Reply STOP to opt out.`;
 }
 
 export function render8DayPaymentEnforcementCustomerEmail(
@@ -78,6 +79,7 @@ export function render8DayPaymentEnforcementCustomerEmail(
     `Hello ${params.contactName},`,
     "",
     `Your ${deliveryDescription} for ${params.jobName} at ${params.jobAddress} was scheduled for ${deliveryDate}.`,
+    `Order: ${params.orderNumber}`,
     "",
     "Your delivery is currently on hold because payment was not received by the required deadline.",
     "",
@@ -97,6 +99,7 @@ export function render8DayPaymentEnforcementCustomerEmail(
   const htmlParts = [
     `<p>Hello ${escapeHtml(params.contactName)},</p>`,
     `<p>Your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> at ${escapeHtml(params.jobAddress)} was scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
+    `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p>Your delivery is currently on hold because payment was not received by the required deadline.</p>`,
     `<p><strong>Balance owed prior to scheduling Delivery: ${escapeHtml(amountDue)}</strong></p>`,
     `<p>Please use the link below to review your delivery details:</p>`,

@@ -84,6 +84,7 @@ async function main() {
   assert(renderSalespersonEmailFooterText(null) === null, "missing contact should not render");
 
   const reminderBase = {
+    orderNumber: "SO-SALES",
     contactName: "Customer",
     buyerGroup: "Appliance",
     jobName: "Smith Residence",
@@ -101,10 +102,12 @@ async function main() {
       intervalType,
       salespersonContact: contact,
     });
+    assertIncludes(emailBody, "Order: SO-SALES", `${intervalType} email should include order number`);
     assertIncludes(emailBody, footer, `${intervalType} email should include salesperson footer`);
     assertNotIncludes(emailBody, oldFooterPrefix, `${intervalType} email should not use old footer copy`);
 
     const smsBody = renderDeliveryReminderMessage({ ...reminderBase, intervalType });
+    assertIncludes(smsBody, "MLD: Order SO-SALES:", `${intervalType} SMS should include order number`);
     assertNotIncludes(smsBody, "John Smith", `${intervalType} SMS should not include salesperson name`);
     assertNotIncludes(smsBody, "john.smith@mld.com", `${intervalType} SMS should not include email`);
     assertNotIncludes(smsBody, "801-555-1234", `${intervalType} SMS should not include phone`);
@@ -115,6 +118,7 @@ async function main() {
     link: "https://delivery.example.test/confirm/token",
     salespersonContact: contact,
   });
+  assertIncludes(confirmationBody, "Order: SO-SALES", "42-day email should include order number");
   assertIncludes(confirmationBody, footer, "42-day email should include salesperson footer");
   assertNotIncludes(confirmationBody, oldFooterPrefix, "42-day email should not use old footer copy");
   assertNotIncludes(

@@ -51,6 +51,7 @@ for (const input of ["1/4/2027", "2027-01-04", "next Friday"]) {
 
 const link = "https://delivery.example.test/confirm/abc123";
 const message = render42DaySmsConfirmationMessage({
+  orderNumber: "SO42",
   contactName: "James",
   buyerGroup: "Appliance",
   jobName: "Kent Construction / QUINNILD RESIDENCE",
@@ -59,6 +60,7 @@ const message = render42DaySmsConfirmationMessage({
 });
 
 assertIncludes(message, "Hello James", "message contact name");
+assertIncludes(message, "MLD: Order SO42:", "message order number");
 assertIncludes(message, "Appliance delivery", "message buyerGroup");
 assertIncludes(message, "Kent Construction / QUINNILD RESIDENCE", "message jobName");
 assertIncludes(message, "Monday, January 4, 2027", "message deliveryDate");
@@ -66,6 +68,7 @@ assertIncludes(message, link, "message link");
 assertNotIncludes(message, "6726 East Whispering Way", "message excludes jobAddress");
 
 const fallbackMessage = render42DaySmsConfirmationMessage({
+  orderNumber: "SO42",
   contactName: "James",
   buyerGroup: null,
   jobName: "Kent Construction",

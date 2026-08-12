@@ -243,6 +243,7 @@ async function renderSelected42Messages(event: SelectedEvent) {
     Number(payment.amountDueNowRounded ?? "0") > 2 &&
     payment.calculationWarnings.length === 0;
   const email = render42DayEmailConfirmationMessage({
+    orderNumber: group.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     customerDescription: order.customerDescription,
@@ -256,6 +257,7 @@ async function renderSelected42Messages(event: SelectedEvent) {
     salespersonContact,
   });
   const smsBody = render42DaySmsConfirmationMessage({
+    orderNumber: group.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     jobName,

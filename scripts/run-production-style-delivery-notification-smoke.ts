@@ -274,6 +274,7 @@ async function renderSelectedMessages(
     });
     const smsBody = renderDeliveryReminderMessage({
       intervalType: config.intervalType,
+      orderNumber: group.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -282,6 +283,7 @@ async function renderSelectedMessages(
     });
     const emailBody = renderDeliveryReminderEmailBody({
       intervalType: config.intervalType,
+      orderNumber: group.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
       jobName,
@@ -312,6 +314,7 @@ async function renderSelectedMessages(
     Number(payment.amountDueNowRounded ?? "0") > 2 &&
     payment.calculationWarnings.length === 0;
   const email = render42DayEmailConfirmationMessage({
+    orderNumber: group.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     customerDescription: order.customerDescription,
@@ -325,6 +328,7 @@ async function renderSelectedMessages(
     salespersonContact,
   });
   const smsBody = render42DaySmsConfirmationMessage({
+    orderNumber: group.orderNumber,
     contactName,
     buyerGroup: order.buyerGroup,
     jobName,

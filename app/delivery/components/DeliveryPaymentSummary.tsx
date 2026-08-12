@@ -2,6 +2,7 @@ import { isMeaningfulDeliveryPaymentAmount } from "@/lib/delivery-payment/delive
 import { formatCurrencyAmount } from "@/lib/notifications/helpers";
 
 export type DeliveryPaymentSummaryInput = {
+  paymentApplicabilityStatus?: string | null;
   paymentStatus: string;
   amountDueNowRounded?: string | null;
   unpaidBalance?: string | null;
@@ -11,9 +12,14 @@ export type DeliveryPaymentSummaryInput = {
 
 export function deliveryHasBalanceDue(payment: DeliveryPaymentSummaryInput) {
   return (
+    payment.paymentApplicabilityStatus !== "not_applicable_terms" &&
     payment.paymentStatus === "balance_due" &&
     isMeaningfulDeliveryPaymentAmount(payment.amountDueNowRounded)
   );
+}
+
+export function deliveryPaymentCanShowCustomerBalance(payment: DeliveryPaymentSummaryInput) {
+  return payment.paymentApplicabilityStatus !== "not_applicable_terms";
 }
 
 export function DeliveryPaymentSummary({
@@ -21,8 +27,10 @@ export function DeliveryPaymentSummary({
 }: {
   payment: DeliveryPaymentSummaryInput;
 }) {
+  const canShowCustomerBalance = deliveryPaymentCanShowCustomerBalance(payment);
   const showAmountDue = deliveryHasBalanceDue(payment);
-  const showUnpaidBalance = isMeaningfulDeliveryPaymentAmount(payment.unpaidBalance);
+  const showUnpaidBalance =
+    canShowCustomerBalance && isMeaningfulDeliveryPaymentAmount(payment.unpaidBalance);
   const showCurrentDeliveryValue = isMeaningfulDeliveryPaymentAmount(
     payment.currentDeliveryGroupValue
   );

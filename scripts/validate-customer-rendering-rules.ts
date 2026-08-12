@@ -407,19 +407,38 @@ function validateItemDisplay(failures: string[]) {
 
   for (const special of [
     line({ lineNbr: 5, inventoryId: "STORAGE-FEE", displayStatus: "Ready", readinessStatus: "ready" }),
-    line({ lineNbr: 6, lineDescription: "temporary storage", displayStatus: "Ready", readinessStatus: "ready" }),
-    line({ lineNbr: 7, inventoryId: "Delivery-Charge", displayStatus: "Ready", readinessStatus: "ready" }),
-    line({ lineNbr: 8, lineDescription: "white glove delivery", displayStatus: "Ready", readinessStatus: "ready" }),
-    line({ lineNbr: 9, inventoryId: "INSTALL", displayStatus: "Ready", readinessStatus: "ready" }),
-    line({ lineNbr: 10, lineDescription: "final installation labor", displayStatus: "Ready", readinessStatus: "ready" }),
+    line({ lineNbr: 6, inventoryId: "Delivery-Charge", displayStatus: "Ready", readinessStatus: "ready" }),
+    line({ lineNbr: 7, inventoryId: "INSTALL", displayStatus: "Ready", readinessStatus: "ready" }),
   ]) {
     assert(
       shouldSuppressDeliveryItemCustomerEtaAndStatus(special),
-      `special item line ${special.lineNbr} is detected case-insensitively`,
+      `special inventory ID line ${special.lineNbr} is detected case-insensitively`,
       failures
     );
-    assert(deliveryItemEtaDisplay(special) === "-", `special item line ${special.lineNbr} ETA renders dash`, failures);
-    assert(deliveryItemStatusDisplay(special) === "-", `special item line ${special.lineNbr} status renders dash`, failures);
+    assert(deliveryItemEtaDisplay(special) === "-", `special inventory ID line ${special.lineNbr} ETA renders dash`, failures);
+    assert(deliveryItemStatusDisplay(special) === "-", `special inventory ID line ${special.lineNbr} status renders dash`, failures);
+  }
+
+  for (const descriptionOnly of [
+    line({ lineNbr: 8, inventoryId: "ABC123", lineDescription: "temporary storage" }),
+    line({ lineNbr: 9, inventoryId: "ABC123", lineDescription: "white glove delivery" }),
+    line({ lineNbr: 10, inventoryId: "ABC123", lineDescription: "final installation labor" }),
+  ]) {
+    assert(
+      !shouldSuppressDeliveryItemCustomerEtaAndStatus(descriptionOnly),
+      `description-only line ${descriptionOnly.lineNbr} does not trigger special display suppression`,
+      failures
+    );
+    assert(
+      deliveryItemEtaDisplay(descriptionOnly) === "2026-08-08",
+      `description-only line ${descriptionOnly.lineNbr} keeps normal ETA display`,
+      failures
+    );
+    assert(
+      deliveryItemStatusDisplay(descriptionOnly) === "Expected on time",
+      `description-only line ${descriptionOnly.lineNbr} keeps normal status display`,
+      failures
+    );
   }
 }
 
@@ -489,7 +508,8 @@ function main() {
         nonPrepayBalanceDisplayHidden: true,
         prepayPositiveDueStillShown: true,
         readyCompleteEtaDash: true,
-        specialItemWebDisplaySuppressed: ["storage", "delivery", "install"],
+        specialItemWebDisplaySuppressedByInventoryId: ["storage", "delivery", "install"],
+        descriptionOnlySpecialWordsDoNotSuppressItemDisplay: true,
         paymentLogicUnchangedForInstallStorage: true,
         noProviderSends: true,
         noAcumaticaWrites: true,

@@ -29,13 +29,10 @@ function normalizedItemDisplayText(value: string | null | undefined) {
 }
 
 export function shouldSuppressDeliveryItemCustomerEtaAndStatus(
-  line: Pick<OrderLineReadinessSummary, "inventoryId" | "lineDescription">
+  line: Pick<OrderLineReadinessSummary, "inventoryId">
 ) {
   const inventoryId = normalizedItemDisplayText(line.inventoryId);
-  const description = normalizedItemDisplayText(line.lineDescription);
-  return ["storage", "delivery", "install"].some(
-    (term) => inventoryId.includes(term) || description.includes(term)
-  );
+  return ["storage", "delivery", "install"].some((term) => inventoryId.includes(term));
 }
 
 export function deliveryItemEtaDisplay(line: OrderLineReadinessSummary) {

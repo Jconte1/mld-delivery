@@ -1,4 +1,3 @@
-import { prisma } from "@/lib/prisma";
 import type { SalespersonContactInput } from "@/lib/notifications/salespersonContactDisplay";
 
 type SalespersonContactLookupClient = {
@@ -21,9 +20,14 @@ function cleanSalespersonNumber(value: string | null | undefined) {
   return trimmed || null;
 }
 
+async function defaultSalespersonContactLookupClient() {
+  const { prisma } = await import("@/lib/prisma");
+  return prisma as unknown as SalespersonContactLookupClient;
+}
+
 export async function getActiveSalespersonContactMap(
   salespersonNumbers: Array<string | null | undefined>,
-  client: SalespersonContactLookupClient = prisma
+  client?: SalespersonContactLookupClient
 ) {
   const numbers = Array.from(
     new Set(
@@ -33,11 +37,13 @@ export async function getActiveSalespersonContactMap(
     )
   );
 
-  if (numbers.length === 0 || !client.salespersonContact) {
+  const lookupClient = client ?? (await defaultSalespersonContactLookupClient());
+
+  if (numbers.length === 0 || !lookupClient.salespersonContact) {
     return new Map<string, SalespersonContactInput>();
   }
 
-  const contacts = await client.salespersonContact.findMany({
+  const contacts = await lookupClient.salespersonContact.findMany({
     where: {
       salespersonNumber: { in: numbers },
       isActive: true,
@@ -56,7 +62,7 @@ export async function getActiveSalespersonContactMap(
 
 export async function getActiveSalespersonContact(
   salespersonNumber: string | null | undefined,
-  client: SalespersonContactLookupClient = prisma
+  client?: SalespersonContactLookupClient
 ) {
   const map = await getActiveSalespersonContactMap([salespersonNumber], client);
   const cleaned = cleanSalespersonNumber(salespersonNumber);

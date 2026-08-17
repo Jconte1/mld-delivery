@@ -216,6 +216,74 @@ export function render42DayEmailConfirmationMessage(params: {
   };
 }
 
+export function render42DayEmailConfirmationReminderSubject(params: { orderNumber: string }) {
+  return `Reminder: Please Confirm Your Delivery for Order ${params.orderNumber}`;
+}
+
+export function render42DayEmailConfirmationReminderBody(params: {
+  orderNumber: string;
+  contactName: string;
+  deliveryDate: Date | string;
+  link: string;
+}) {
+  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const link = cleanNotificationText(params.link) ?? "";
+  const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+
+  return [
+    `Hello ${contactName},`,
+    "",
+    `Order: ${params.orderNumber}`,
+    `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`,
+    "",
+    "Please confirm your delivery or request a different date using the link below:",
+    link,
+    "",
+    NO_REPLY_NOTICE,
+    "",
+    "Thank you.",
+  ].join("\n");
+}
+
+export function render42DayEmailConfirmationReminderHtmlBody(params: {
+  orderNumber: string;
+  contactName: string;
+  deliveryDate: Date | string;
+  link: string;
+}) {
+  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const link = cleanNotificationText(params.link) ?? "";
+  const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+  const paragraph = (value: string) => `<p>${escapeHtml(value)}</p>`;
+
+  return [
+    paragraph(`Hello ${contactName},`),
+    `<p>Order: <strong>${escapeHtml(params.orderNumber)}</strong></p>`,
+    paragraph(
+      `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`
+    ),
+    paragraph("Please confirm your delivery or request a different date using the link below:"),
+    `<p><a href="${escapeHtml(
+      link
+    )}" style="display:inline-block;background-color:#1f2937;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:600;">Confirm/ Change Delivery</a></p>`,
+    paragraph(NO_REPLY_NOTICE),
+    paragraph("Thank you."),
+  ].join("\n");
+}
+
+export function render42DayEmailConfirmationReminderMessage(params: {
+  orderNumber: string;
+  contactName: string;
+  deliveryDate: Date | string;
+  link: string;
+}) {
+  return {
+    subject: render42DayEmailConfirmationReminderSubject(params),
+    body: render42DayEmailConfirmationReminderBody(params),
+    htmlBody: render42DayEmailConfirmationReminderHtmlBody(params),
+  };
+}
+
 export function get42DayEmailNoReplyNotice() {
   return NO_REPLY_NOTICE;
 }

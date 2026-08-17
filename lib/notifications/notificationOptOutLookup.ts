@@ -1,5 +1,3 @@
-import { prisma } from "@/lib/prisma";
-
 export type ActiveNotificationOptOutAddresses = {
   activeSmsOptOutPhones: string[];
   activeEmailOptOutEmails: string[];
@@ -39,19 +37,26 @@ function hasOptOutLookupClient(value: unknown): value is NotificationOptOutLooku
   );
 }
 
+async function defaultNotificationOptOutLookupClient() {
+  const { prisma } = await import("@/lib/prisma");
+  return prisma;
+}
+
 export async function loadActiveNotificationOptOutAddresses(
-  client: unknown = prisma
+  client?: unknown
 ): Promise<ActiveNotificationOptOutAddresses> {
-  if (!hasOptOutLookupClient(client)) {
+  const lookupClient = client ?? (await defaultNotificationOptOutLookupClient());
+
+  if (!hasOptOutLookupClient(lookupClient)) {
     return EMPTY_ACTIVE_NOTIFICATION_OPT_OUT_ADDRESSES;
   }
 
   const [smsOptOuts, emailOptOuts] = await Promise.all([
-    client.smsOptOut.findMany({
+    lookupClient.smsOptOut.findMany({
       where: { isActive: true },
       select: { phone: true },
     }),
-    client.emailOptOut.findMany({
+    lookupClient.emailOptOut.findMany({
       where: { isActive: true },
       select: { email: true },
     }),

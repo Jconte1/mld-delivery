@@ -79,6 +79,53 @@ const ACTIVE_SMS_CONFIRMATION_STATUSES = [
   DeliveryConfirmationStatus.INCOMPLETE,
 ] as const;
 
+const deliveryConfirmationSmsCandidateInclude = {
+  contact: {
+    select: {
+      contactId: true,
+      displayName: true,
+      companyName: true,
+      firstName: true,
+      lastName: true,
+      email: true,
+      phone1: true,
+      phone2: true,
+    },
+  },
+  notificationEvent: {
+    select: {
+      id: true,
+      createdAt: true,
+      scheduledAt: true,
+      triggeredAt: true,
+      sentAt: true,
+    },
+  },
+  orderDeliveryGroup: {
+    select: {
+      id: true,
+      isActive: true,
+      deliveryDate: true,
+      order: {
+        select: {
+          confirmVia: true,
+        },
+      },
+    },
+  },
+  order: {
+    select: {
+      confirmVia: true,
+      address: {
+        select: {
+          state: true,
+          postalCode: true,
+        },
+      },
+    },
+  },
+} as const;
+
 function payloadValue(payload: TwilioFormPayload, keys: string[]) {
   for (const key of keys) {
     const value = payload[key]?.trim();
@@ -100,6 +147,12 @@ function isAwaitingNewDate(status: DeliveryConfirmationStatus) {
     status === DeliveryConfirmationStatus.AWAITING_NEW_DATE ||
     status === DeliveryConfirmationStatus.CHANGE_REQUESTED
   );
+}
+
+function normalizeAcumaticaConfirmVia(value: unknown) {
+  if (value === null || value === undefined) return null;
+  const trimmed = String(value).trim();
+  return trimmed || null;
 }
 
 async function findExistingProcessedInboundMessage(
@@ -360,39 +413,7 @@ async function findActiveDeliveryConfirmationCandidates(params: {
       },
     },
     orderBy: [{ updatedAt: "desc" }, { createdAt: "desc" }],
-    include: {
-      contact: {
-        select: {
-          contactId: true,
-          displayName: true,
-          companyName: true,
-          firstName: true,
-          lastName: true,
-          email: true,
-          phone1: true,
-          phone2: true,
-        },
-      },
-      notificationEvent: {
-        select: {
-          id: true,
-          createdAt: true,
-          scheduledAt: true,
-          triggeredAt: true,
-          sentAt: true,
-        },
-      },
-      order: {
-        select: {
-          address: {
-            select: {
-              state: true,
-              postalCode: true,
-            },
-          },
-        },
-      },
-    },
+    include: deliveryConfirmationSmsCandidateInclude,
   });
 
   return candidates.filter(
@@ -400,6 +421,94 @@ async function findActiveDeliveryConfirmationCandidates(params: {
       phonesMatch(candidate.contact.phone1, params.fromPhone) ||
       phonesMatch(candidate.contact.phone2, params.fromPhone)
   );
+}
+
+type SmsCurrentStateRefreshResult =
+  | { ok: true; candidate: InboundCandidate }
+  | { ok: false; responseMessage: string; error: string | null };
+
+type SmsCurrentStateRefresher = (params: {
+  client: DeliveryTwilioInboundClient;
+  candidate: InboundCandidate;
+}) => Promise<SmsCurrentStateRefreshResult>;
+
+function getSmsStaleConfirmationMessage() {
+  return "MLD: This previous delivery confirmation request is no longer valid. Please contact your salesperson or use the latest confirmation link. Reply STOP to opt out.";
+}
+
+function getSmsAlreadyConfirmedInErpMessage() {
+  return "MLD: This delivery is already confirmed. Please contact your salesperson if you need to make a change. Reply STOP to opt out.";
+}
+
+function getSmsRefreshFailedMessage() {
+  return "MLD: We could not verify the latest delivery details. Please contact your salesperson before confirming or requesting a new date. Reply STOP to opt out.";
+}
+
+function isSmsCandidateStale(candidate: InboundCandidate, now: Date) {
+  if (candidate.status === DeliveryConfirmationStatus.EXPIRED) return true;
+  if (candidate.linkExpiredAt) return true;
+  if (candidate.linkExpiresAt && candidate.linkExpiresAt.getTime() < now.getTime()) return true;
+  if (!candidate.orderDeliveryGroup) return false;
+  if (!candidate.orderDeliveryGroup.isActive) return true;
+  return dateKey(candidate.orderDeliveryGroup.deliveryDate) !== dateKey(candidate.deliveryDate);
+}
+
+function isSmsCandidateAlreadyConfirmedInErp(candidate: InboundCandidate) {
+  return Boolean(
+    normalizeAcumaticaConfirmVia(candidate.order?.confirmVia) ||
+      normalizeAcumaticaConfirmVia(candidate.orderDeliveryGroup?.order?.confirmVia)
+  );
+}
+
+async function defaultSmsCurrentStateRefresher(params: {
+  client: DeliveryTwilioInboundClient;
+  candidate: InboundCandidate;
+}): Promise<SmsCurrentStateRefreshResult> {
+  try {
+    const { importSalesOrdersForLineRequestedOn } = await import("@/lib/erp/importSalesOrders");
+    await importSalesOrdersForLineRequestedOn(params.candidate.deliveryDate, {
+      orderLookups: [
+        {
+          orderNumber: params.candidate.orderNumber,
+          orderType: params.candidate.orderType,
+        },
+      ],
+      includeUnqualifiedOrderLookups: true,
+    });
+
+    const refreshed = await params.client.deliveryConfirmation.findUnique({
+      where: { id: params.candidate.id },
+      include: deliveryConfirmationSmsCandidateInclude,
+    });
+    if (!refreshed) {
+      return {
+        ok: false,
+        responseMessage: getSmsRefreshFailedMessage(),
+        error: "DeliveryConfirmation was not found after current-state refresh",
+      };
+    }
+
+    return { ok: true, candidate: refreshed as InboundCandidate };
+  } catch (error) {
+    return {
+      ok: false,
+      responseMessage: getSmsRefreshFailedMessage(),
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
+async function noopSmsCurrentStateRefresher(params: {
+  client: DeliveryTwilioInboundClient;
+  candidate: InboundCandidate;
+}): Promise<SmsCurrentStateRefreshResult> {
+  return { ok: true, candidate: params.candidate };
+}
+
+function smsCurrentStateBlockMessage(candidate: InboundCandidate, now: Date) {
+  if (isSmsCandidateStale(candidate, now)) return getSmsStaleConfirmationMessage();
+  if (isSmsCandidateAlreadyConfirmedInErp(candidate)) return getSmsAlreadyConfirmedInErpMessage();
+  return null;
 }
 
 async function markAmbiguousCandidates(params: {
@@ -657,9 +766,13 @@ export async function handleTwilioInboundSms(params: {
   now?: Date;
   queueOptions?: EnqueueDeliveryConfirmationAttributeWritebackOptions;
   contactOptInWriteback?: ContactOptInWritebackDispatchOptions;
+  currentStateRefresher?: SmsCurrentStateRefresher;
 }): Promise<HandleTwilioInboundSmsResult> {
   const client = params.prismaClient ?? prisma;
   const now = params.now ?? new Date();
+  const currentStateRefresher =
+    params.currentStateRefresher ??
+    (params.prismaClient ? noopSmsCurrentStateRefresher : defaultSmsCurrentStateRefresher);
   const messageSid = payloadValue(params.payload, ["MessageSid", "SmsMessageSid", "SmsSid"]);
   const fromPhone = normalizePhoneToE164(payloadValue(params.payload, ["From"]));
   const toPhone = normalizePhoneToE164(payloadValue(params.payload, ["To"]));
@@ -820,10 +933,59 @@ export async function handleTwilioInboundSms(params: {
       });
     }
 
-    const candidate = candidates[0];
+    let candidate = candidates[0];
     let responseMessage: string | null = null;
     let writebackJobId: string | null | undefined;
     let writebackError: string | null | undefined;
+
+    const refreshResult = await currentStateRefresher({ client, candidate });
+    if (!refreshResult.ok) {
+      await finishInboundMessage({
+        client,
+        id: inbound.id,
+        parsedIntent,
+        matchStatus: "MATCHED",
+        deliveryConfirmationId: candidate.id,
+        notificationEventId: candidate.notificationEventId,
+        responseMessage: refreshResult.responseMessage,
+        error: refreshResult.error,
+        now,
+      });
+      return result({
+        inboundMessageId: inbound.id,
+        messageSid,
+        parsedIntent,
+        matchStatus: "MATCHED",
+        deliveryConfirmationId: candidate.id,
+        notificationEventId: candidate.notificationEventId,
+        responseMessage: refreshResult.responseMessage,
+        writebackError: refreshResult.error,
+      });
+    }
+
+    candidate = refreshResult.candidate;
+    const blockMessage = smsCurrentStateBlockMessage(candidate, now);
+    if (blockMessage) {
+      await finishInboundMessage({
+        client,
+        id: inbound.id,
+        parsedIntent,
+        matchStatus: "MATCHED",
+        deliveryConfirmationId: candidate.id,
+        notificationEventId: candidate.notificationEventId,
+        responseMessage: blockMessage,
+        now,
+      });
+      return result({
+        inboundMessageId: inbound.id,
+        messageSid,
+        parsedIntent,
+        matchStatus: "MATCHED",
+        deliveryConfirmationId: candidate.id,
+        notificationEventId: candidate.notificationEventId,
+        responseMessage: blockMessage,
+      });
+    }
 
     if (parsedIntent === "CONFIRM") {
       const confirmationResult = await applyConfirmation({

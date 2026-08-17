@@ -23,6 +23,7 @@ enum NotificationIntervalType {
 enum NotificationActionType {
   DELIVERY_REMINDER
   DELIVERY_CONFIRMATION_REQUEST
+  DELIVERY_CONFIRMATION_REMINDER
   PAYMENT_REQUEST
   PAYMENT_ENFORCEMENT
   BACKORDER_REPORT
@@ -112,6 +113,7 @@ enum InternalNotificationStatus {
 enum InternalNotificationPurpose {
   PAYMENT_ENFORCEMENT_HOLD_SUCCEEDED
   PAYMENT_ENFORCEMENT_HOLD_FAILED
+  DELIVERY_CONFIRMATION_NO_RESPONSE
 }
 
 enum SharePointStockSyncRunStatus {
@@ -735,6 +737,7 @@ model InternalNotificationEvent {
   @@index([status])
   @@index([recipientEmail])
   @@index([sentAt])
+  @@unique([orderDeliveryGroupId, deliveryDate, purpose])
   @@map("internal_notification_events")
 }
 

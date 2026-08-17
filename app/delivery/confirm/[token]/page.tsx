@@ -4,7 +4,10 @@ import { DeliveryConfirmationStatus } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { DELIVERY_MANUAL_REVIEW_REASONS } from "@/lib/notifications/deliveryConfirmationManualReview";
-import { confirmDeliveryFromWebpage } from "@/lib/notifications/confirmDeliveryFromWebpage";
+import {
+  confirmDeliveryFromWebpage,
+  guardDeliveryConfirmationWebAction,
+} from "@/lib/notifications/confirmDeliveryFromWebpage";
 import {
   getRequestedDeliveryDateWebInstruction,
   getRequestedDeliveryDateWebMessageForCode,
@@ -58,7 +61,8 @@ async function loadConfirmation(token: string) {
     ...confirmation,
     salespersonContact,
     isExpired: Boolean(
-      confirmation.linkExpiresAt && confirmation.linkExpiresAt.getTime() < Date.now()
+      confirmation.linkExpiredAt ||
+        (confirmation.linkExpiresAt && confirmation.linkExpiresAt.getTime() < Date.now())
     ),
   };
 }
@@ -89,6 +93,19 @@ function requestDateErrorMessage(value: string | undefined) {
   return getRequestedDeliveryDateWebMessageForCode(value);
 }
 
+function actionStateMessage(value: string | undefined) {
+  if (value === "already_confirmed_in_acumatica") {
+    return "This delivery has already been confirmed. Please contact Mountain Land Design if you need to make a change.";
+  }
+  if (value === "stale" || value === "expired") {
+    return "This confirmation link is no longer valid. Please use the latest confirmation link or contact Mountain Land Design for help.";
+  }
+  if (value === "refresh_failed") {
+    return "We could not verify the latest delivery details. Please contact Mountain Land Design before confirming or requesting a new date.";
+  }
+  return null;
+}
+
 function redirectToConfirmation(token: string, params: Record<string, string>): never {
   const query = new URLSearchParams(params).toString();
   redirect(`/delivery/confirm/${encodeURIComponent(token)}${query ? `?${query}` : ""}`);
@@ -112,8 +129,22 @@ async function confirmDelivery(formData: FormData) {
   if (!token) redirect("/delivery/confirm/invalid");
 
   const result = await confirmDeliveryFromWebpage({ linkToken: token });
+  if (result.outcome === "not_found") redirect("/delivery/confirm/invalid");
+
   if (result.outcome === "already_final") {
     redirectToConfirmation(token, { updated: "already_final" });
+  }
+
+  if (result.outcome === "already_confirmed_in_acumatica") {
+    redirectToConfirmation(token, { updated: "already_confirmed_in_acumatica" });
+  }
+
+  if (
+    result.outcome === "expired" ||
+    result.outcome === "stale" ||
+    result.outcome === "refresh_failed"
+  ) {
+    redirectToConfirmation(token, { updated: result.outcome });
   }
 
   if (result.outcome === "confirmed") {
@@ -145,56 +176,41 @@ async function requestDifferentDate(formData: FormData) {
   const requestedNewDateRaw = String(formData.get("requestedNewDate") ?? "").trim();
   if (!token) redirect("/delivery/confirm/invalid");
 
-  const confirmation = await prisma.deliveryConfirmation.findUnique({
-    where: { linkToken: token },
-    select: {
-      id: true,
-      status: true,
-      deliveryDate: true,
-      order: {
-        select: {
-          address: {
-            select: {
-              state: true,
-              postalCode: true,
-            },
-          },
-        },
-      },
+  const guard = await guardDeliveryConfirmationWebAction({
+    linkToken: token,
+  });
+  if (guard.outcome === "not_found") redirect("/delivery/confirm/invalid");
+  if (guard.outcome !== "eligible") {
+    redirectToConfirmation(token, { updated: guard.outcome });
+  }
+
+  const confirmation = guard.confirmation;
+  const parsed = parseDateInputValue(requestedNewDateRaw);
+  const validation = validateRequestedDeliveryDateEligibility({
+    requestedDate: parsed.valid ? parsed.date : null,
+    currentDeliveryDate: confirmation.deliveryDate,
+    address: confirmation.orderDeliveryGroup.order.address,
+  });
+  if (!validation.allowed) {
+    redirectToConfirmation(token, { error: validation.reason });
+  }
+
+  const now = new Date();
+  await prisma.deliveryConfirmation.update({
+    where: { id: confirmation.id },
+    data: {
+      status: DeliveryConfirmationStatus.NEW_DATE_REQUESTED,
+      changeRequestedAt: now,
+      requestedNewDate: validation.date,
+      requestedNewDateRaw,
+      requestedNewDateAt: now,
+      manualReviewRequired: true,
+      manualReviewReason: DELIVERY_MANUAL_REVIEW_REASONS.NEW_DATE_REQUESTED,
+      manualReviewMarkedAt: now,
+      manualReviewNotes:
+        "Customer requested a different delivery date through the webpage confirmation link.",
     },
   });
-  if (confirmation) {
-    if (isFinalConfirmationStatus(confirmation.status)) {
-      redirectToConfirmation(token, { updated: "already_final" });
-    }
-
-    const parsed = parseDateInputValue(requestedNewDateRaw);
-    const validation = validateRequestedDeliveryDateEligibility({
-      requestedDate: parsed.valid ? parsed.date : null,
-      currentDeliveryDate: confirmation.deliveryDate,
-      address: confirmation.order.address,
-    });
-    if (!validation.allowed) {
-      redirectToConfirmation(token, { error: validation.reason });
-    }
-
-    const now = new Date();
-    await prisma.deliveryConfirmation.update({
-      where: { id: confirmation.id },
-      data: {
-        status: DeliveryConfirmationStatus.NEW_DATE_REQUESTED,
-        changeRequestedAt: now,
-        requestedNewDate: validation.date,
-        requestedNewDateRaw,
-        requestedNewDateAt: now,
-        manualReviewRequired: true,
-        manualReviewReason: DELIVERY_MANUAL_REVIEW_REASONS.NEW_DATE_REQUESTED,
-        manualReviewMarkedAt: now,
-        manualReviewNotes:
-          "Customer requested a different delivery date through the webpage confirmation link.",
-      },
-    });
-  }
 
   redirect(`/delivery/confirm/${encodeURIComponent(token)}?updated=change_requested`);
 }
@@ -252,6 +268,7 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
   const deliveryAddress: DeliveryDateEligibilityAddress | null = order.address;
   const requestedDateInstruction = getRequestedDeliveryDateWebInstruction(deliveryAddress);
   const errorMessage = requestDateErrorMessage(search.error);
+  const actionMessage = actionStateMessage(search.updated);
   const headerDateLine =
     confirmation.status === DeliveryConfirmationStatus.CONFIRMED
       ? `${order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery"} confirmed for ${scheduledDateLabel}`
@@ -282,7 +299,7 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
 
           {search.updated ? (
             <div className="mt-5 rounded-md bg-emerald-50 px-4 py-3 text-sm font-medium text-emerald-900 ring-1 ring-emerald-200">
-              Your response was saved.
+              {actionMessage ?? "Your response was saved."}
             </div>
           ) : null}
         </div>

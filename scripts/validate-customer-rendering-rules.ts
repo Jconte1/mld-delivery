@@ -13,8 +13,10 @@ import {
   shouldSuppressDeliveryItemCustomerEtaAndStatus,
 } from "../app/delivery/components/DeliveryItemsForThisDelivery";
 import { DeliveryPaymentSummary } from "../app/delivery/components/DeliveryPaymentSummary";
+import { GET as shortConfirmationLinkGet } from "../app/c/[token]/route";
 import { render42DayEmailConfirmationMessage } from "../lib/notifications/deliveryConfirmationEmail";
 import { render42DaySmsConfirmationMessage } from "../lib/notifications/deliveryConfirmationSms";
+import { buildDeliveryConfirmationLink } from "../lib/notifications/deliveryConfirmationLinks";
 import {
   render10DayDeliveryPaymentReminderEmail,
   render10DayDeliveryPaymentReminderSms,
@@ -52,6 +54,47 @@ function assertIncludes(source: string, expected: string, message: string, failu
 
 function assertNotIncludes(source: string, unexpected: string, message: string, failures: string[]) {
   assert(!source.includes(unexpected), message, failures);
+}
+
+type SmsSegmentEstimate = {
+  length: number;
+  encoding: "gsm7" | "ucs2";
+  segments: number;
+};
+
+const GSM_7_BASIC =
+  "@£$¥èéùìòÇ\nØø\rÅåΔ_ΦΓΛΩΠΨΣΘΞ ÆæßÉ !\"#¤%&'()*+,-./0123456789:;<=>?¡ABCDEFGHIJKLMNOPQRSTUVWXYZÄÖÑÜ`¿abcdefghijklmnopqrstuvwxyzäöñüà";
+const GSM_7_EXTENDED = "^{}\\[~]|€";
+
+function smsSegmentEstimate(message: string): SmsSegmentEstimate {
+  let length = 0;
+  let gsm7 = true;
+
+  for (const character of message) {
+    if (GSM_7_BASIC.includes(character)) {
+      length += 1;
+    } else if (GSM_7_EXTENDED.includes(character)) {
+      length += 2;
+    } else {
+      gsm7 = false;
+      break;
+    }
+  }
+
+  if (!gsm7) {
+    const unicodeLength = Array.from(message).length;
+    return {
+      length: unicodeLength,
+      encoding: "ucs2",
+      segments: unicodeLength <= 70 ? 1 : Math.ceil(unicodeLength / 67),
+    };
+  }
+
+  return {
+    length,
+    encoding: "gsm7",
+    segments: length <= 160 ? 1 : Math.ceil(length / 153),
+  };
 }
 
 function line(
@@ -110,7 +153,7 @@ function validateCustomerMessages(failures: string[]) {
     deliveryDate: "2026-08-10",
   };
   const detailsLink = "https://delivery.example.test/details/token";
-  const confirmLink = "https://delivery.example.test/confirm/token";
+  const confirmLink = "https://delivery.example.test/delivery/confirm/token";
 
   const proactiveMessages = [
     {
@@ -242,12 +285,21 @@ function validateCustomerMessages(failures: string[]) {
       `${message.label}-day customer email includes order number`,
       failures
     );
-    assertIncludes(
-      message.sms,
-      "MLD: Order SO-CUST:",
-      `${message.label}-day customer SMS includes order number`,
-      failures
-    );
+    if (message.label === "42") {
+      assertIncludes(
+        message.sms,
+        "MLD: Order# SO-CUST:",
+        "42-day customer SMS includes Order# and order number",
+        failures
+      );
+    } else {
+      assertIncludes(
+        message.sms,
+        "MLD: Order SO-CUST:",
+        `${message.label}-day customer SMS includes order number`,
+        failures
+      );
+    }
   }
 
   for (const message of proactiveMessages.filter((candidate) => candidate.label !== "180" && candidate.label !== "90" && candidate.label !== "60")) {
@@ -279,6 +331,59 @@ function validateCustomerMessages(failures: string[]) {
     mccallSms,
     "McCall deliveries are available on Mondays only.",
     "42-day McCall SMS route note remains",
+    failures
+  );
+
+  const standard42Sms = proactiveMessages.find((message) => message.label === "42")?.sms ?? "";
+  assertIncludes(
+    standard42Sms,
+    "For Delivery Details: https://delivery.example.test/c/token",
+    "42-day SMS uses short confirmation link",
+    failures
+  );
+  assertNotIncludes(
+    standard42Sms,
+    "/delivery/confirm/token",
+    "42-day SMS does not use full confirmation link",
+    failures
+  );
+  assertIncludes(
+    standard42Sms,
+    "Reply Y to confirm or N to request a different delivery date.",
+    "42-day SMS keeps corrected confirmation/date-change copy",
+    failures
+  );
+  assertNotIncludes(standard42Sms, "differnt", "42-day SMS does not contain misspelled different", failures);
+  assertIncludes(standard42Sms, "Reply STOP to opt out.", "42-day SMS keeps STOP language", failures);
+
+  return {
+    standard: smsSegmentEstimate(standard42Sms),
+    wyoming: smsSegmentEstimate(wyomingSms),
+    mccall: smsSegmentEstimate(mccallSms),
+  };
+}
+
+async function validateShortConfirmationLinkRoute(failures: string[]) {
+  const response = await shortConfirmationLinkGet(
+    new Request("https://delivery.example.test/c/test-token"),
+    { params: Promise.resolve({ token: "test-token" }) }
+  );
+  assert(
+    response.status === 307 || response.status === 308,
+    "short confirmation route returns a redirect",
+    failures
+  );
+  assert(
+    response.headers.get("location") === "https://delivery.example.test/delivery/confirm/test-token",
+    "short confirmation route redirects to full confirmation page with same token",
+    failures
+  );
+
+  const fullLink = buildDeliveryConfirmationLink("test-token");
+  assertIncludes(
+    fullLink,
+    "/delivery/confirm/test-token",
+    "full confirmation link helper still builds the existing confirmation page URL",
     failures
   );
 }
@@ -483,10 +588,11 @@ function validatePaymentLogicSeparation(failures: string[]) {
   );
 }
 
-function main() {
+async function main() {
   const failures: string[] = [];
 
-  validateCustomerMessages(failures);
+  const smsSegments = validateCustomerMessages(failures);
+  await validateShortConfirmationLinkRoute(failures);
   validatePaymentSummary(failures);
   validateItemDisplay(failures);
   validatePaymentLogicSeparation(failures);
@@ -503,6 +609,10 @@ function main() {
         validation: "customer rendering rules passed",
         customerEmailsIncludeOrderNumber: true,
         proactiveSmsIncludesOrderNumber: true,
+        shortConfirmationRedirectWorks: true,
+        fullConfirmationPageLinkStillBuilds: true,
+        fortyTwoDaySmsUsesShortConfirmationLink: true,
+        fortyTwoDaySmsSegments: smsSegments,
         stopLanguagePreserved: true,
         wyomingMccallRouteNotesPreserved: true,
         nonPrepayBalanceDisplayHidden: true,
@@ -520,4 +630,7 @@ function main() {
   );
 }
 
-main();
+main().catch((error) => {
+  console.error(error);
+  process.exit(1);
+});

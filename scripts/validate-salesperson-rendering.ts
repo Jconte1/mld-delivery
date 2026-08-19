@@ -115,7 +115,7 @@ async function main() {
 
   const confirmationBody = render42DayEmailConfirmationBody({
     ...reminderBase,
-    link: "https://delivery.example.test/confirm/token",
+    link: "https://delivery.example.test/delivery/confirm/token",
     salespersonContact: contact,
   });
   assertIncludes(confirmationBody, "Order: SO-SALES", "42-day email should include order number");
@@ -124,7 +124,7 @@ async function main() {
   assertNotIncludes(
     render42DayEmailConfirmationBody({
       ...reminderBase,
-      link: "https://delivery.example.test/confirm/token",
+      link: "https://delivery.example.test/delivery/confirm/token",
       salespersonContact: { ...contact, isActive: false },
     }),
     footer,
@@ -133,7 +133,7 @@ async function main() {
   assertIncludes(
     render42DayEmailConfirmationHtmlBody({
       ...reminderBase,
-      link: "https://delivery.example.test/confirm/token",
+      link: "https://delivery.example.test/delivery/confirm/token",
       salespersonContact: contact,
     }),
     "john.smith@mld.com",
@@ -142,7 +142,7 @@ async function main() {
 
   const confirmationSms = render42DaySmsConfirmationMessage({
     ...reminderBase,
-    link: "https://delivery.example.test/confirm/token",
+    link: "https://delivery.example.test/delivery/confirm/token",
   });
   for (const sms of [
     confirmationSms,

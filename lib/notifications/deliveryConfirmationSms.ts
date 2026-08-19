@@ -6,8 +6,8 @@ import {
   cleanNotificationText,
   dateKey,
   formatCustomerFriendlyDate,
-  formatDeliveryDescription,
 } from "@/lib/notifications/helpers";
+import { shortenDeliveryConfirmationLink } from "@/lib/notifications/deliveryConfirmationLinks";
 
 const CONFIRMED_RESPONSES = new Set(["Y", "YES", "CONFIRM", "CONFIRMED"]);
 const CHANGE_REQUESTED_RESPONSES = new Set(["N", "NO", "CHANGE", "RESCHEDULE"]);
@@ -108,13 +108,13 @@ export function render42DaySmsConfirmationMessage(params: {
   deliveryAddress?: DeliveryDateEligibilityAddress | null;
 }) {
   const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const firstName = contactName.split(/\s+/)[0] || contactName;
   const jobName = cleanNotificationText(params.jobName) ?? "your delivery";
-  const link = cleanNotificationText(params.link) ?? "";
-  const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
+  const link = shortenDeliveryConfirmationLink(cleanNotificationText(params.link) ?? "");
   const routeNote = getRequestedDeliveryDateRouteNote(params.deliveryAddress, "sms");
-  const routeNoteSentence = routeNote ? ` ${routeNote}` : "";
+  const routeNoteParagraph = routeNote ? `\n\n${routeNote}` : "";
 
-  return `MLD: Order ${params.orderNumber}: Hello ${contactName}, we are 6 weeks out! Your ${deliveryDescription} for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}. Reply Y to confirm or N to request a different delivery date.${routeNoteSentence} For ETAs and delivery details: ${link} Reply STOP to opt out.`;
+  return `MLD: Order# ${params.orderNumber}:\n\nHello ${firstName}, we are 6 weeks out! Your delivery for ${jobName} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}.${routeNoteParagraph}\n\nReply Y to confirm or N to request a different delivery date.\n\nFor Delivery Details: ${link}\n\nReply STOP to opt out.`;
 }
 
 export function render42DaySmsConfirmationReminderMessage(params: {

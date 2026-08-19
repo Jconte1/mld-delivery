@@ -19,7 +19,7 @@ const checks: Check[] = [];
 const projectRoot = process.cwd();
 const now = new Date("2026-07-21T12:00:00.000Z");
 const currentDeliveryDate = "2026-09-03";
-const link = "https://delivery.example.test/confirm/abc123";
+const link = "https://delivery.example.test/delivery/confirm/abc123";
 
 function readProjectFile(relativePath: string) {
   return fs.readFileSync(path.join(projectRoot, relativePath), "utf8");
@@ -231,8 +231,10 @@ const mccall83638Sms = smsFor({ state: "ID", postalCode: "83638" });
 const mccall83635Sms = smsFor({ state: "ID", postalCode: "83635" });
 const idahoStandardSms = smsFor({ state: "ID", postalCode: "83702" });
 addCheck(
-  "22. Standard 42-day SMS does not include Wyoming/McCall route note",
-  !/Wyoming deliveries|McCall deliveries/.test(standardSms),
+  "22. Standard 42-day SMS does not include Wyoming/McCall route note and uses short link",
+  !/Wyoming deliveries|McCall deliveries/.test(standardSms) &&
+    standardSms.includes("https://delivery.example.test/c/abc123") &&
+    !standardSms.includes("/delivery/confirm/abc123"),
   { standardSms }
 );
 addCheck(

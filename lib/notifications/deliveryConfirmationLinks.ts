@@ -53,3 +53,26 @@ export function getDeliveryAppBaseUrl() {
 export function buildDeliveryConfirmationLink(token: string) {
   return `${getDeliveryAppBaseUrl()}/delivery/confirm/${encodeURIComponent(token)}`;
 }
+
+export function buildShortDeliveryConfirmationLink(token: string) {
+  return `${getDeliveryAppBaseUrl()}/c/${encodeURIComponent(token)}`;
+}
+
+export function shortenDeliveryConfirmationLink(link: string) {
+  const trimmed = link.trim();
+  if (!trimmed) return "";
+
+  try {
+    const url = new URL(trimmed);
+    const prefix = "/delivery/confirm/";
+    if (!url.pathname.startsWith(prefix)) return trimmed;
+
+    const token = url.pathname.slice(prefix.length);
+    if (!token) return trimmed;
+
+    url.pathname = `/c/${token}`;
+    return url.toString();
+  } catch {
+    return trimmed;
+  }
+}

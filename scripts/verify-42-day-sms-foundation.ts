@@ -49,7 +49,7 @@ for (const input of ["1/4/2027", "2027-01-04", "next Friday"]) {
   assertEqual(parseRequestedDeliveryDate(input).valid, false, `date ${JSON.stringify(input)}`);
 }
 
-const link = "https://delivery.example.test/confirm/abc123";
+const link = "https://delivery.example.test/delivery/confirm/abc123";
 const message = render42DaySmsConfirmationMessage({
   orderNumber: "SO42",
   contactName: "James",
@@ -60,11 +60,17 @@ const message = render42DaySmsConfirmationMessage({
 });
 
 assertIncludes(message, "Hello James", "message contact name");
-assertIncludes(message, "MLD: Order SO42:", "message order number");
-assertIncludes(message, "Appliance delivery", "message buyerGroup");
+assertIncludes(message, "MLD: Order# SO42:", "message order number");
+assertIncludes(message, "we are 6 weeks out", "message six-week copy");
 assertIncludes(message, "Kent Construction / QUINNILD RESIDENCE", "message jobName");
 assertIncludes(message, "Monday, January 4, 2027", "message deliveryDate");
-assertIncludes(message, link, "message link");
+assertIncludes(
+  message,
+  "Reply Y to confirm or N to request a different delivery date.",
+  "message response copy"
+);
+assertIncludes(message, "For Delivery Details: https://delivery.example.test/c/abc123", "message short link");
+assertNotIncludes(message, link, "message excludes full confirmation link");
 assertNotIncludes(message, "6726 East Whispering Way", "message excludes jobAddress");
 
 const fallbackMessage = render42DaySmsConfirmationMessage({

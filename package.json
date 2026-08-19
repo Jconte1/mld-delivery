@@ -9,6 +9,7 @@
     "lint": "eslint",
     "prisma:generate": "prisma generate",
     "manual-demo:test-interval-emails-with-salesperson": "tsx -r dotenv/config scripts/manual-demo/test-interval-emails-with-salesperson.ts",
+    "test:delivery-intervals:production-style": "tsx -r dotenv/config scripts/run-production-style-delivery-full-interval-test.ts",
     "create:30-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-30-day-delivery-reminder-events.ts",
     "create:14-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-14-day-delivery-reminder-events.ts",
     "create:12-day-delivery-payment-request-events": "tsx -r dotenv/config scripts/create-12-day-delivery-payment-request-events.ts",

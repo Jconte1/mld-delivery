@@ -31,6 +31,14 @@ import {
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
 } from "@/lib/notifications/helpers";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  isFreshImportFailedOrder,
+  prepareFreshDeliveryIntervalImport,
+  type FreshImportFailedOrder,
+  type DeliveryIntervalFreshImportLoader,
+  type DeliveryIntervalFreshImportResult,
+} from "@/lib/notifications/freshDeliveryIntervalImport";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
   loadActiveNotificationOptOutAddresses,
@@ -56,8 +64,8 @@ export type DeliveryConfirmation42DayEventReport = {
   orderNumber: string;
   deliveryGroupId: string;
   deliveryDate: string;
-  eventId: string;
-  dedupeKey: string;
+  eventId: string | null;
+  dedupeKey: string | null;
   intervalType: string;
   actionType: string;
   status: string;
@@ -94,11 +102,16 @@ export type DeliveryConfirmation42DayEventReport = {
 export type Create42DayDeliveryConfirmationEventsSummary = {
   runDate: string;
   targetDeliveryDate: string;
+  dryRun: boolean;
+  freshImport: DeliveryIntervalFreshImportResult;
   targetDeliveryGroups: number;
   eligibleDeliveryGroups: number;
   deliveryGroupsSkippedWeekendDeliveryDate: number;
   deliveryGroupsSkippedIneligible: number;
+  deliveryGroupsSkippedFailedImport: number;
   eventsCreated: number;
+  wouldCreateEvents: number;
+  wouldUpdateEvents: number;
   eventsDeduped: number;
   eventsSkipped: number;
   scheduledEvents: number;
@@ -107,15 +120,22 @@ export type Create42DayDeliveryConfirmationEventsSummary = {
     EMAIL: number;
   };
   skippedReasons: Record<string, number>;
+  failedImportExclusions: FreshImportFailedOrder[];
   confirmationsCreatedOrReused: number;
   confirmationsCreated: number;
   confirmationsReused: number;
+  wouldCreateConfirmations: number;
+  wouldReuseConfirmations: number;
   eventReports: DeliveryConfirmation42DayEventReport[];
 };
 
 export type Create42DayDeliveryConfirmationEventsOptions = {
   runDate?: Date | string;
   now?: Date;
+  dryRun?: boolean;
+  freshImport?: boolean;
+  requireQueueBackedImport?: boolean;
+  importSalesOrders?: DeliveryIntervalFreshImportLoader;
   prismaClient?: DeliveryConfirmation42DayClient;
 };
 
@@ -154,15 +174,33 @@ export function isAlreadyConfirmedInAcumatica(confirmVia: unknown) {
 function emptySummary(params: {
   runDate: string;
   targetDeliveryDate: string;
+  dryRun: boolean;
 }): Create42DayDeliveryConfirmationEventsSummary {
   return {
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
+    dryRun: params.dryRun,
+    freshImport: {
+      required: false,
+      performed: false,
+      targetDate: params.targetDeliveryDate,
+      requestedOn: "",
+      skippedReason: null,
+      importResult: null,
+      failedOrders: [],
+      failedOrderLookup: { keys: [], orderNumbers: [] },
+      globalFailed: false,
+      perOrderFailed: false,
+      errorMessage: null,
+    },
     targetDeliveryGroups: 0,
     eligibleDeliveryGroups: 0,
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
     deliveryGroupsSkippedIneligible: 0,
+    deliveryGroupsSkippedFailedImport: 0,
     eventsCreated: 0,
+    wouldCreateEvents: 0,
+    wouldUpdateEvents: 0,
     eventsDeduped: 0,
     eventsSkipped: 0,
     scheduledEvents: 0,
@@ -171,9 +209,12 @@ function emptySummary(params: {
       EMAIL: 0,
     },
     skippedReasons: {},
+    failedImportExclusions: [],
     confirmationsCreatedOrReused: 0,
     confirmationsCreated: 0,
     confirmationsReused: 0,
+    wouldCreateConfirmations: 0,
+    wouldReuseConfirmations: 0,
     eventReports: [],
   };
 }
@@ -319,6 +360,42 @@ const notificationEventSelect = {
   reasonSkipped: true,
 } as const;
 
+type NotificationEventSelection = {
+  id: string;
+  dedupeKey: string;
+  intervalType: NotificationIntervalType;
+  actionType: NotificationActionType;
+  status: NotificationEventStatus;
+  selectedChannel: "SMS" | "EMAIL" | null;
+  recipientEmail: string | null;
+  recipientPhone: string | null;
+  reasonSkipped: string | null;
+};
+
+function dryRunNotificationEvent(params: {
+  id?: string;
+  dedupeKey: string;
+  intervalType: NotificationIntervalType;
+  actionType: NotificationActionType;
+  status: NotificationEventStatus;
+  selectedChannel: "SMS" | "EMAIL" | null;
+  recipientEmail: string | null;
+  recipientPhone: string | null;
+  reasonSkipped: string | null;
+}): NotificationEventSelection {
+  return {
+    id: params.id ?? `dry-run:${params.dedupeKey}`,
+    dedupeKey: params.dedupeKey,
+    intervalType: params.intervalType,
+    actionType: params.actionType,
+    status: params.status,
+    selectedChannel: params.selectedChannel,
+    recipientEmail: params.recipientEmail,
+    recipientPhone: params.recipientPhone,
+    reasonSkipped: params.reasonSkipped,
+  };
+}
+
 export async function find42DayDeliveryConfirmationTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryConfirmation42DayClient = prisma
@@ -403,10 +480,27 @@ export async function create42DayDeliveryConfirmationEvents(
   const client = options.prismaClient ?? prisma;
   const runDate = dateKey(options.runDate ?? new Date());
   const now = options.now ?? new Date();
+  const dryRun = options.dryRun ?? true;
   const targetDeliveryDate = dateKey(
     getNotificationTargetDate(runDate, DELIVERY_CONFIRMATION_42_DAY_INTERVAL_DAYS)
   );
-  const summary = emptySummary({ runDate, targetDeliveryDate });
+  const summary = emptySummary({ runDate, targetDeliveryDate, dryRun });
+  const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
+    targetDeliveryDate
+  );
+  summary.freshImport = await prepareFreshDeliveryIntervalImport({
+    targetDeliveryDate,
+    dryRun,
+    deliveryDateSkipReason,
+    freshImport: options.freshImport,
+    requireQueueBackedImport: options.requireQueueBackedImport,
+    importSalesOrders: options.importSalesOrders,
+  });
+  summary.failedImportExclusions = summary.freshImport.failedOrders;
+  if (summary.freshImport.globalFailed) {
+    addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+    return summary;
+  }
   const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
     deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
@@ -422,6 +516,62 @@ export async function create42DayDeliveryConfirmationEvents(
       continue;
     }
 
+    if (
+      isFreshImportFailedOrder({
+        failedOrderLookup: summary.freshImport.failedOrderLookup,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+      const paymentReport = emptyPaymentReport();
+      const acumaticaConfirmVia = normalizeAcumaticaConfirmVia(order.confirmVia);
+
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: null,
+        dedupeKey: null,
+        intervalType: NotificationIntervalType.DAY_42,
+        actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+        status: "IMPORT_FAILED_EXCLUDED",
+        selectedChannel: null,
+        recipientEmail: null,
+        recipientPhone: null,
+        reasonSkipped: FRESH_IMPORT_FAILED_SKIP_REASON,
+        alreadyConfirmedForDeliveryDate: false,
+        alreadyConfirmedInAcumatica: isAlreadyConfirmedInAcumatica(acumaticaConfirmVia),
+        acumaticaConfirmVia,
+        subject: null,
+        renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+        linkTokenPresent: false,
+        linkScopeKey: null,
+        confirmationState: null,
+        paymentTerms: paymentReport.paymentTerms,
+        unpaidBalance: paymentReport.unpaidBalance,
+        orderTotal: paymentReport.orderTotal,
+        paidToDate: paymentReport.paidToDate,
+        paymentApplicabilityStatus: paymentReport.paymentApplicabilityStatus,
+        paymentStatus: paymentReport.paymentStatus,
+        amountDueNow: paymentReport.amountDueNow,
+        amountDueNowRounded: paymentReport.amountDueNowRounded,
+        currentDeliveryGroupValue: paymentReport.currentDeliveryGroupValue,
+        currentDeliveryGroupMerchandiseValue: paymentReport.currentDeliveryGroupMerchandiseValue,
+        currentDeliveryGroupTaxAmount: paymentReport.currentDeliveryGroupTaxAmount,
+        remainingUndeliveredValueAfterCurrentDelivery:
+          paymentReport.remainingUndeliveredValueAfterCurrentDelivery,
+        requiredDownOnRemaining: paymentReport.requiredDownOnRemaining,
+        paymentReminderApplies: false,
+        emailPaymentReminderIncluded: false,
+        paymentCalculationWarnings: paymentReport.paymentCalculationWarnings,
+      });
+      continue;
+    }
+
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -429,54 +579,80 @@ export async function create42DayDeliveryConfirmationEvents(
       intervalType: NotificationIntervalType.DAY_42,
       actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
     });
-    const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
-      deliveryGroup.deliveryDate
-    );
     if (deliveryDateSkipReason) {
       summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
-      let event = await client.notificationEvent.findUnique({
+      let event: NotificationEventSelection | null = await client.notificationEvent.findUnique({
         where: { dedupeKey },
         select: notificationEventSelect,
       });
 
       if (event) {
         summary.eventsDeduped += 1;
-        event = await client.notificationEvent.update({
-          where: { id: event.id },
-          data: {
+        summary.wouldUpdateEvents += 1;
+        if (dryRun) {
+          event = dryRunNotificationEvent({
+            id: event.id,
+            dedupeKey: event.dedupeKey,
+            intervalType: event.intervalType,
+            actionType: event.actionType,
             selectedChannel: null,
-            channelReason: deliveryDateSkipReason,
             recipientEmail: null,
             recipientPhone: null,
             status: NotificationEventStatus.SKIPPED,
             reasonSkipped: deliveryDateSkipReason,
-            scheduledAt: null,
-          },
-          select: notificationEventSelect,
-        });
+          });
+        } else {
+          event = await client.notificationEvent.update({
+            where: { id: event.id },
+            data: {
+              selectedChannel: null,
+              channelReason: deliveryDateSkipReason,
+              recipientEmail: null,
+              recipientPhone: null,
+              status: NotificationEventStatus.SKIPPED,
+              reasonSkipped: deliveryDateSkipReason,
+              scheduledAt: null,
+            },
+            select: notificationEventSelect,
+          });
+        }
       } else {
-        event = await client.notificationEvent.create({
-          data: {
-            orderId: order.id,
-            deliveryGroupId: deliveryGroup.id,
-            contactId: order.contact.contactId,
-            orderType: order.orderType,
-            orderNumber: order.orderNumber,
-            deliveryDate: deliveryGroup.deliveryDate,
+        if (dryRun) {
+          summary.wouldCreateEvents += 1;
+          event = dryRunNotificationEvent({
+            dedupeKey,
             intervalType: NotificationIntervalType.DAY_42,
             actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
-            dedupeKey,
             selectedChannel: null,
-            channelReason: deliveryDateSkipReason,
             recipientEmail: null,
             recipientPhone: null,
             status: NotificationEventStatus.SKIPPED,
             reasonSkipped: deliveryDateSkipReason,
-            scheduledAt: null,
-          },
-          select: notificationEventSelect,
-        });
-        summary.eventsCreated += 1;
+          });
+        } else {
+          event = await client.notificationEvent.create({
+            data: {
+              orderId: order.id,
+              deliveryGroupId: deliveryGroup.id,
+              contactId: order.contact.contactId,
+              orderType: order.orderType,
+              orderNumber: order.orderNumber,
+              deliveryDate: deliveryGroup.deliveryDate,
+              intervalType: NotificationIntervalType.DAY_42,
+              actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+              dedupeKey,
+              selectedChannel: null,
+              channelReason: deliveryDateSkipReason,
+              recipientEmail: null,
+              recipientPhone: null,
+              status: NotificationEventStatus.SKIPPED,
+              reasonSkipped: deliveryDateSkipReason,
+              scheduledAt: null,
+            },
+            select: notificationEventSelect,
+          });
+          summary.eventsCreated += 1;
+        }
       }
 
       summary.eventsSkipped += 1;
@@ -558,7 +734,7 @@ export async function create42DayDeliveryConfirmationEvents(
         ).channel;
     const shouldSkipForNoChannel = channel?.selectedChannel === null;
 
-    let event = await client.notificationEvent.findUnique({
+    let event: NotificationEventSelection | null = await client.notificationEvent.findUnique({
       where: { dedupeKey },
       select: notificationEventSelect,
     });
@@ -566,52 +742,84 @@ export async function create42DayDeliveryConfirmationEvents(
     if (event) {
       summary.eventsDeduped += 1;
       if (confirmationSkipReason) {
-        event = await client.notificationEvent.update({
-          where: { id: event.id },
-          data: {
+        summary.wouldUpdateEvents += 1;
+        if (dryRun) {
+          event = dryRunNotificationEvent({
+            id: event.id,
+            dedupeKey: event.dedupeKey,
+            intervalType: event.intervalType,
+            actionType: event.actionType,
             selectedChannel: null,
-            channelReason: confirmationSkipReason,
             recipientEmail: null,
             recipientPhone: null,
             status: NotificationEventStatus.SKIPPED,
             reasonSkipped: confirmationSkipReason,
-            scheduledAt: null,
+          });
+        } else {
+          event = await client.notificationEvent.update({
+            where: { id: event.id },
+            data: {
+              selectedChannel: null,
+              channelReason: confirmationSkipReason,
+              recipientEmail: null,
+              recipientPhone: null,
+              status: NotificationEventStatus.SKIPPED,
+              reasonSkipped: confirmationSkipReason,
+              scheduledAt: null,
+            },
+            select: notificationEventSelect,
+          });
+        }
+      }
+    } else {
+      const plannedStatus =
+        confirmationSkipReason || shouldSkipForNoChannel
+          ? NotificationEventStatus.SKIPPED
+          : NotificationEventStatus.SCHEDULED;
+      const plannedReasonSkipped = confirmationSkipReason
+        ? confirmationSkipReason
+        : shouldSkipForNoChannel
+          ? channel?.channelReason
+          : null;
+
+      if (dryRun) {
+        summary.wouldCreateEvents += 1;
+        event = dryRunNotificationEvent({
+          dedupeKey,
+          intervalType: NotificationIntervalType.DAY_42,
+          actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+          selectedChannel: channel?.selectedChannel ?? null,
+          recipientEmail: channel?.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
+          recipientPhone: channel?.selectedChannel === "SMS" ? channel.recipientPhone : null,
+          status: plannedStatus,
+          reasonSkipped: plannedReasonSkipped,
+        });
+      } else {
+        event = await client.notificationEvent.create({
+          data: {
+            orderId: order.id,
+            deliveryGroupId: deliveryGroup.id,
+            contactId: order.contact.contactId,
+            orderType: order.orderType,
+            orderNumber: order.orderNumber,
+            deliveryDate: deliveryGroup.deliveryDate,
+            intervalType: NotificationIntervalType.DAY_42,
+            actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+            dedupeKey,
+            selectedChannel: channel?.selectedChannel ?? null,
+            channelReason: confirmationSkipReason ?? channel?.channelReason,
+            recipientEmail: channel?.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
+            recipientPhone: channel?.selectedChannel === "SMS" ? channel.recipientPhone : null,
+            status: plannedStatus,
+            reasonSkipped: plannedReasonSkipped,
+            scheduledAt:
+              confirmationSkipReason || shouldSkipForNoChannel ? null : dateFromKey(runDate),
           },
           select: notificationEventSelect,
         });
+        summary.eventsCreated += 1;
       }
-    } else {
-      event = await client.notificationEvent.create({
-        data: {
-          orderId: order.id,
-          deliveryGroupId: deliveryGroup.id,
-          contactId: order.contact.contactId,
-          orderType: order.orderType,
-          orderNumber: order.orderNumber,
-          deliveryDate: deliveryGroup.deliveryDate,
-          intervalType: NotificationIntervalType.DAY_42,
-          actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
-          dedupeKey,
-          selectedChannel: channel?.selectedChannel ?? null,
-          channelReason: confirmationSkipReason ?? channel?.channelReason,
-          recipientEmail: channel?.selectedChannel === "EMAIL" ? channel.recipientEmail : null,
-          recipientPhone: channel?.selectedChannel === "SMS" ? channel.recipientPhone : null,
-          status:
-            confirmationSkipReason || shouldSkipForNoChannel
-              ? NotificationEventStatus.SKIPPED
-              : NotificationEventStatus.SCHEDULED,
-          reasonSkipped: confirmationSkipReason
-            ? confirmationSkipReason
-            : shouldSkipForNoChannel
-              ? channel?.channelReason
-              : null,
-          scheduledAt:
-            confirmationSkipReason || shouldSkipForNoChannel ? null : dateFromKey(runDate),
-        },
-        select: notificationEventSelect,
-      });
 
-      summary.eventsCreated += 1;
       if (event.status === NotificationEventStatus.SKIPPED) {
         summary.eventsSkipped += 1;
       }
@@ -657,27 +865,38 @@ export async function create42DayDeliveryConfirmationEvents(
         deliveryDate: deliveryGroup.deliveryDate,
         deliveryGroupId: deliveryGroup.id,
       });
-      const confirmation = await ensurePendingDeliveryConfirmation(
-        {
-          orderId: order.id,
-          deliveryGroupId: deliveryGroup.id,
-          notificationEventId: event.id,
-          orderType: order.orderType,
-          orderNumber: order.orderNumber,
-          deliveryDate: deliveryGroup.deliveryDate,
-          contactId: order.contact.contactId,
-          linkToken,
-          linkCreatedAt: now,
-          linkExpiresAt: new Date(dateFromKey(runDate).getTime() + 30 * 24 * 60 * 60 * 1000),
-        },
-        client
-      );
-      confirmationState = confirmation.status;
-      summary.confirmationsCreatedOrReused += 1;
       if (existingConfirmation) {
-        summary.confirmationsReused += 1;
+        summary.wouldReuseConfirmations += 1;
+        if (!dryRun) summary.confirmationsReused += 1;
+        confirmationState = "PENDING";
       } else {
-        summary.confirmationsCreated += 1;
+        summary.wouldCreateConfirmations += 1;
+      }
+      if (dryRun) {
+        confirmationState = existingConfirmation ? "PENDING" : "PENDING";
+      } else {
+        const confirmation = await ensurePendingDeliveryConfirmation(
+          {
+            orderId: order.id,
+            deliveryGroupId: deliveryGroup.id,
+            notificationEventId: event.id,
+            orderType: order.orderType,
+            orderNumber: order.orderNumber,
+            deliveryDate: deliveryGroup.deliveryDate,
+            contactId: order.contact.contactId,
+            linkToken,
+            linkCreatedAt: now,
+            linkExpiresAt: new Date(dateFromKey(runDate).getTime() + 30 * 24 * 60 * 60 * 1000),
+          },
+          client
+        );
+        confirmationState = confirmation.status;
+        summary.confirmationsCreatedOrReused += 1;
+        if (existingConfirmation) {
+          summary.confirmationsReused += 1;
+        } else {
+          summary.confirmationsCreated += 1;
+        }
       }
     }
 

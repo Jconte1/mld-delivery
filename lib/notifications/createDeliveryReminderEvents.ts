@@ -19,6 +19,14 @@ import {
   renderDeliveryReminderMessage,
   shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  isFreshImportFailedOrder,
+  prepareFreshDeliveryIntervalImport,
+  type FreshImportFailedOrder,
+  type DeliveryIntervalFreshImportLoader,
+  type DeliveryIntervalFreshImportResult,
+} from "@/lib/notifications/freshDeliveryIntervalImport";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
   loadActiveNotificationOptOutAddresses,
@@ -57,9 +65,12 @@ export type CreateDeliveryReminderEventsSummary = {
   deliveryGroupsSkippedWeekendDeliveryDate: number;
   targetDeliveryGroups: number;
   deliveryGroupsSkippedIneligible: number;
+  deliveryGroupsSkippedFailedImport: number;
   deliveryGroupsSkippedNoChannel: number;
   skippedReasons: Record<string, number>;
   dryRun: boolean;
+  freshImport: DeliveryIntervalFreshImportResult;
+  failedImportExclusions: FreshImportFailedOrder[];
   eventsWouldCreate: number;
   messagePreviews: MessagePreview[];
 };
@@ -70,6 +81,9 @@ export type CreateDeliveryReminderEventsOptions = {
   intervalType: DeliveryReminderIntervalType;
   intervalDays: number;
   useLegacy180Subject?: boolean;
+  freshImport?: boolean;
+  requireQueueBackedImport?: boolean;
+  importSalesOrders?: DeliveryIntervalFreshImportLoader;
   prismaClient?: DeliveryReminderEventsClient;
 };
 
@@ -89,9 +103,24 @@ function emptySummary(params: {
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
     targetDeliveryGroups: 0,
     deliveryGroupsSkippedIneligible: 0,
+    deliveryGroupsSkippedFailedImport: 0,
     deliveryGroupsSkippedNoChannel: 0,
     skippedReasons: {},
     dryRun: params.dryRun,
+    freshImport: {
+      required: false,
+      performed: false,
+      targetDate: params.targetDeliveryDate,
+      requestedOn: "",
+      skippedReason: null,
+      importResult: null,
+      failedOrders: [],
+      failedOrderLookup: { keys: [], orderNumbers: [] },
+      globalFailed: false,
+      perOrderFailed: false,
+      errorMessage: null,
+    },
+    failedImportExclusions: [],
     eventsWouldCreate: 0,
     messagePreviews: [],
   };
@@ -166,6 +195,23 @@ export async function createDeliveryReminderEvents(
 
   if (shouldSkipNotificationRunForWeekend(runDate)) {
     summary.weekendSkipped = true;
+    return summary;
+  }
+
+  const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
+    targetDeliveryDate
+  );
+  summary.freshImport = await prepareFreshDeliveryIntervalImport({
+    targetDeliveryDate,
+    dryRun,
+    deliveryDateSkipReason,
+    freshImport: options.freshImport,
+    requireQueueBackedImport: options.requireQueueBackedImport,
+    importSalesOrders: options.importSalesOrders,
+  });
+  summary.failedImportExclusions = summary.freshImport.failedOrders;
+  if (summary.freshImport.globalFailed) {
+    addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
     return summary;
   }
 
@@ -247,6 +293,19 @@ export async function createDeliveryReminderEvents(
       continue;
     }
 
+    if (
+      isFreshImportFailedOrder({
+        failedOrderLookup: summary.freshImport.failedOrderLookup,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+      continue;
+    }
+
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -254,10 +313,6 @@ export async function createDeliveryReminderEvents(
       intervalType: options.intervalType,
       actionType: NotificationActionType.DELIVERY_REMINDER,
     });
-
-    const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
-      deliveryGroup.deliveryDate
-    );
 
     const existingEvent = await client.notificationEvent.findUnique({
       where: { dedupeKey },

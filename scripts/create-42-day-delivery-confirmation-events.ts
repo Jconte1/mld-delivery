@@ -3,8 +3,14 @@ import { prisma } from "../lib/prisma";
 
 function parseArgs(argv: string[]) {
   let runDate: string | undefined;
+  let dryRun = false;
 
   for (const arg of argv) {
+    if (arg === "--dry-run") {
+      dryRun = true;
+      continue;
+    }
+
     if (arg.startsWith("--run-date=")) {
       runDate = arg.slice("--run-date=".length);
       continue;
@@ -15,7 +21,7 @@ function parseArgs(argv: string[]) {
     }
   }
 
-  return { runDate };
+  return { runDate, dryRun };
 }
 
 async function safetyCounts() {
@@ -43,9 +49,9 @@ async function safetyCounts() {
 }
 
 async function main() {
-  const { runDate } = parseArgs(process.argv.slice(2));
+  const { runDate, dryRun } = parseArgs(process.argv.slice(2));
   const before = await safetyCounts();
-  const summary = await create42DayDeliveryConfirmationEvents({ runDate });
+  const summary = await create42DayDeliveryConfirmationEvents({ runDate, dryRun });
   const after = await safetyCounts();
 
   console.log(

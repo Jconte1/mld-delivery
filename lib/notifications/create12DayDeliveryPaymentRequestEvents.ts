@@ -49,6 +49,11 @@ import {
   evaluateAndRecordDeliveryTenDayConfirmation,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  getFreshImportFailedOrders,
+  isFreshImportFailedOrder,
+} from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
@@ -286,26 +291,8 @@ export function get12DayPaymentSkipReason(params: {
   return null;
 }
 
-function importErrorLooksLikeFailedOrder(error: ImportSalesOrdersResult["errors"][number]) {
-  return /failed|did not return/i.test(error.reason);
-}
-
-function importErrorMatchesOrder(
-  error: ImportSalesOrdersResult["errors"][number],
-  order: { orderType: string; orderNumber: string }
-) {
-  if (!error.orderNumber || error.orderNumber !== order.orderNumber) return false;
-  return !error.orderType || error.orderType === order.orderType;
-}
-
 export function get12DayFailedImportExclusions(importResult: ImportSalesOrdersResult) {
-  return importResult.errors
-    .filter((error) => error.orderNumber && importErrorLooksLikeFailedOrder(error))
-    .map((error) => ({
-      orderType: error.orderType ?? null,
-      orderNumber: error.orderNumber as string,
-      reason: error.reason,
-    }));
+  return getFreshImportFailedOrders(importResult);
 }
 
 export function isOrderExcludedBy12DayFailedImport(params: {
@@ -313,9 +300,7 @@ export function isOrderExcludedBy12DayFailedImport(params: {
   orderType: string;
   orderNumber: string;
 }) {
-  return params.importResult.errors.some(
-    (error) => importErrorLooksLikeFailedOrder(error) && importErrorMatchesOrder(error, params)
-  );
+  return isFreshImportFailedOrder(params);
 }
 
 function validateRenderedMessage(params: {
@@ -532,6 +517,8 @@ export async function create12DayDeliveryPaymentRequestEvents(
       })
     ) {
       summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
       summary.eventReports.push({
         orderType: order.orderType,
         orderNumber: order.orderNumber,
@@ -541,7 +528,7 @@ export async function create12DayDeliveryPaymentRequestEvents(
         dedupeKey: null,
         status: "IMPORT_FAILED_EXCLUDED",
         selectedChannel: null,
-        reasonSkipped: null,
+        reasonSkipped: FRESH_IMPORT_FAILED_SKIP_REASON,
         acumaticaConfirmVia: normalize12DayConfirmVia(order.confirmVia),
         paymentTerms: normalizeDeliveryPaymentTerms(order.total?.paymentTerms ?? null),
         paymentStatus: null,

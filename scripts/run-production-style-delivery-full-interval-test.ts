@@ -31,6 +31,7 @@ import {
 import {
   buildDeliveryConfirmationLink,
   buildShortDeliveryConfirmationLink,
+  newDeliveryConfirmationLinkToken,
 } from "../lib/notifications/deliveryConfirmationLinks";
 import { render42DayEmailConfirmationMessage } from "../lib/notifications/deliveryConfirmationEmail";
 import {
@@ -87,6 +88,7 @@ import {
   evaluateAndRecordDeliveryTenDayConfirmation,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "../lib/notifications/deliveryTenDayConfirmation";
+import { ensurePendingDeliveryConfirmation } from "../lib/notifications/deliveryConfirmationState";
 import {
   render10DayDeliveryPaymentReminderEmail,
   render10DayDeliveryPaymentReminderSms,
@@ -99,6 +101,13 @@ import {
   render8DayPaymentEnforcementCustomerEmail,
   render8DayPaymentEnforcementCustomerSms,
 } from "../lib/notifications/deliveryPaymentEnforcement8Day";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  createFreshImportFailedOrderLookup,
+  getFreshImportFailedOrders,
+  isFreshImportFailedOrder,
+  type FreshImportFailedOrderLookup,
+} from "../lib/notifications/freshDeliveryIntervalImport";
 import { getPaymentDeadlineDate } from "../lib/notifications/paymentDeadlineBusinessDays";
 import { getActiveSalespersonContactMap } from "../lib/notifications/salespersonContactCache";
 import {
@@ -110,10 +119,15 @@ import {
   normalizeEmailForOptOut,
   normalizeSmsPhoneForOptOut,
 } from "../lib/notifications/notificationAddressNormalization";
+import {
+  ensureDeliveryDetailsLink,
+  markDeliveryDetailsLinkCreatedFromEvent,
+} from "../lib/notifications/deliveryDetailsLinks";
 import { prisma } from "../lib/prisma";
 
 type IntervalKey = "180" | "90" | "60" | "42" | "30" | "14" | "12" | "10" | "8" | "2";
 type ChannelKey = "EMAIL" | "SMS";
+type MaxPerIntervalChannel = number | "all";
 type Row = Record<string, unknown>;
 
 type CliOptions = {
@@ -121,11 +135,15 @@ type CliOptions = {
   preview: boolean;
   applyRuntimeEvents: boolean;
   sendTestRecipients: boolean;
-  maxPerIntervalChannel: number;
+  maxPerIntervalChannel: MaxPerIntervalChannel;
+  maxPerIntervalChannelProvided: boolean;
   output: string;
   runDate: string;
+  runDateProvided: boolean;
   interval: IntervalKey | null;
+  intervalProvided: boolean;
   confirmResetPhrase: string | null;
+  confirmApplyPhrase: string | null;
 };
 
 type IntervalConfig = {
@@ -171,6 +189,7 @@ type ImportRunResult = {
 const REQUESTED_ON_TIME = "09:19:00.000Z";
 const PREVIEW_DETAILS_LINK_PREFIX = "preview-dd";
 const PREVIEW_CONFIRMATION_LINK_PREFIX = "preview-dc42";
+const APPLY_CONFIRM_PHRASE = "CREATE LIMITED CONTROLLED TEST EVENTS ONLY";
 
 const INTERVALS: IntervalConfig[] = [
   {
@@ -353,10 +372,14 @@ function parseArgs(args: string[]): CliOptions {
     applyRuntimeEvents: false,
     sendTestRecipients: false,
     maxPerIntervalChannel: 3,
+    maxPerIntervalChannelProvided: false,
     output: null,
     runDate: todayInMountainTime(),
+    runDateProvided: false,
     interval: null,
+    intervalProvided: false,
     confirmResetPhrase: null,
+    confirmApplyPhrase: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -377,6 +400,9 @@ function parseArgs(args: string[]): CliOptions {
       options.preview = false;
       continue;
     }
+    if (arg === "--all-intervals") {
+      throw new Error("--all-intervals is not supported; omit --interval for preview-only all-interval runs.");
+    }
     if (arg === "--reset" || arg === "--destructive-reset") {
       throw new Error("Destructive reset is not implemented in Phase 1.");
     }
@@ -388,11 +414,19 @@ function parseArgs(args: string[]): CliOptions {
     }
     if (arg.startsWith("--max-per-interval-channel")) {
       const read = readFlagValue(args, index);
-      const value = Number(read.value);
+      const rawValue = read.value.trim();
+      if (rawValue.toLowerCase() === "all") {
+        options.maxPerIntervalChannel = "all";
+        options.maxPerIntervalChannelProvided = true;
+        index = read.nextIndex;
+        continue;
+      }
+      const value = Number(rawValue);
       if (!Number.isInteger(value) || value <= 0) {
-        throw new Error("--max-per-interval-channel must be a positive integer.");
+        throw new Error("--max-per-interval-channel must be a positive integer or all.");
       }
       options.maxPerIntervalChannel = value;
+      options.maxPerIntervalChannelProvided = true;
       index = read.nextIndex;
       continue;
     }
@@ -405,18 +439,26 @@ function parseArgs(args: string[]): CliOptions {
     if (arg.startsWith("--run-date")) {
       const read = readFlagValue(args, index);
       options.runDate = dateKey(read.value);
+      options.runDateProvided = true;
       index = read.nextIndex;
       continue;
     }
     if (arg.startsWith("--interval")) {
       const read = readFlagValue(args, index);
       options.interval = parseInterval(read.value);
+      options.intervalProvided = true;
       index = read.nextIndex;
       continue;
     }
     if (arg.startsWith("--confirm-reset-phrase")) {
       const read = readFlagValue(args, index);
       options.confirmResetPhrase = read.value;
+      index = read.nextIndex;
+      continue;
+    }
+    if (arg.startsWith("--confirm-apply")) {
+      const read = readFlagValue(args, index);
+      options.confirmApplyPhrase = read.value;
       index = read.nextIndex;
       continue;
     }
@@ -433,7 +475,7 @@ function parseArgs(args: string[]): CliOptions {
     throw new Error(`Invalid --run-date: ${options.runDate}`);
   }
   if (!options.preview && !options.applyRuntimeEvents) {
-    throw new Error("--no-preview requires --apply-runtime-events, which is not implemented in Phase 1.");
+    throw new Error("--no-preview requires --apply-runtime-events.");
   }
 
   return {
@@ -477,28 +519,27 @@ function preflight(options: CliOptions) {
     }
   }
 
-  if (options.applyRuntimeEvents) {
-    failures.push("--apply-runtime-events is intentionally refused in Phase 1; preview/export only.");
+  if (options.sendTestRecipients) {
+    failures.push(
+      "--send-test-recipients is not supported by this harness; use dispatch:delivery-notifications after review."
+    );
   }
 
-  if (options.sendTestRecipients) {
-    if (!flagIsTrue("DEMO_NOTIFICATION_SEND_ENABLED")) {
-      failures.push("DEMO_NOTIFICATION_SEND_ENABLED must be true for controlled test-recipient sends.");
+  if (options.applyRuntimeEvents) {
+    if (!options.intervalProvided || !options.interval) {
+      failures.push("--apply-runtime-events requires explicit --interval <I>.");
     }
-    for (const name of [
-      "TWILIO_ACCOUNT_SID",
-      "TWILIO_AUTH_TOKEN",
-      "MS_GRAPH_TENANT_ID",
-      "MS_GRAPH_CLIENT_ID",
-      "MS_GRAPH_CLIENT_SECRET",
-      "MS_GRAPH_FROM_EMAIL",
-    ]) {
-      requireEnv(name, failures);
+    if (!options.runDateProvided) {
+      failures.push("--apply-runtime-events requires explicit --run-date <YYYY-MM-DD>.");
     }
-    if (!envPresent("TWILIO_MESSAGING_SERVICE_SID") && !envPresent("TWILIO_FROM_NUMBER")) {
-      failures.push("TWILIO_MESSAGING_SERVICE_SID or TWILIO_FROM_NUMBER is required for SMS sends.");
+    if (!options.maxPerIntervalChannelProvided || options.maxPerIntervalChannel !== 1) {
+      failures.push("--apply-runtime-events requires explicit --max-per-interval-channel 1.");
     }
-    failures.push("--send-test-recipients is intentionally refused in Phase 1; no providers are called.");
+    if (options.confirmApplyPhrase !== APPLY_CONFIRM_PHRASE) {
+      failures.push(
+        `--apply-runtime-events requires --confirm-apply "${APPLY_CONFIRM_PHRASE}".`
+      );
+    }
   }
 
   const rows = [
@@ -509,7 +550,8 @@ function preflight(options: CliOptions) {
     envSafetyRow("DELIVERY_APP_BASE_URL", "present, non-localhost", "required", "customer-facing links"),
     envSafetyRow("NOTIFICATIONS_TEST_EMAIL", "present", "required", "future email test recipient"),
     envSafetyRow("NOTIFICATIONS_TEST_PHONE", "present", "required", "future SMS test recipient"),
-    envSafetyRow("DEMO_NOTIFICATION_SEND_ENABLED", "true only with future send flag", "optional", "provider send gate"),
+    envSafetyRow("DELIVERY_CONTROLLED_RECIPIENT_MODE", "not used by harness", "advisory", "dispatcher-only controlled recipient gate"),
+    envSafetyRow("DELIVERY_REAL_CUSTOMER_SEND_ENABLED", "not used by harness", "advisory", "dispatcher-only real customer gate"),
     envSafetyRow("TWILIO_ACCOUNT_SID", "present only with future send flag", "optional", "Twilio SMS"),
     envSafetyRow("TWILIO_AUTH_TOKEN", "present only with future send flag", "optional", "Twilio SMS"),
     envSafetyRow("TWILIO_MESSAGING_SERVICE_SID", "present or TWILIO_FROM_NUMBER with future send flag", "optional", "Twilio SMS source"),
@@ -740,20 +782,21 @@ async function readExistingEvent(config: IntervalConfig, group: DeliveryGroupRec
   });
 }
 
-function failedImportOrderKeys(importResult: ImportSalesOrdersResult | null) {
-  const keys = new Set<string>();
-  for (const error of importResult?.errors ?? []) {
-    if (!error.orderNumber || !/failed|did not return/i.test(error.reason)) continue;
-    keys.add(`${error.orderType ?? ""}:${error.orderNumber}`);
-  }
-  return keys;
+function failedImportOrderLookup(
+  importResult: ImportSalesOrdersResult | null
+): FreshImportFailedOrderLookup {
+  return createFreshImportFailedOrderLookup(getFreshImportFailedOrders(importResult));
 }
 
-function orderFailedFreshImport(group: DeliveryGroupRecord, failedKeys: Set<string>) {
-  return (
-    failedKeys.has(`${group.orderType}:${group.orderNumber}`) ||
-    failedKeys.has(`:${group.orderNumber}`)
-  );
+function orderFailedFreshImport(
+  group: DeliveryGroupRecord,
+  failedOrderLookup: FreshImportFailedOrderLookup
+) {
+  return isFreshImportFailedOrder({
+    failedOrderLookup,
+    orderType: group.orderType,
+    orderNumber: group.orderNumber,
+  });
 }
 
 function weekdayName(value: Date | string) {
@@ -801,11 +844,17 @@ function contactChannelPreview(
     { ...contact, smsOptIn: false, emailOptIn: true },
     optOutState.merged
   );
+  const controlledRecipient = selectNotificationChannel(
+    { ...contact, smsOptIn: true, emailOptIn: true },
+    optOutState.merged
+  );
 
   return {
     production,
     wouldHaveSelectedSmsIfOptedIn: smsIfOptedIn.selectedChannel === "SMS",
     wouldHaveSelectedEmailIfOptedIn: emailIfOptedIn.selectedChannel === "EMAIL",
+    controlledSelectedChannel: controlledRecipient.selectedChannel,
+    controlledChannelReason: controlledRecipient.channelReason,
   };
 }
 
@@ -1031,7 +1080,7 @@ async function evaluateGroup(params: {
   let writebackDryRun = false;
 
   if (params.failedFreshImport) {
-    businessSkipReason = "fresh_import_failed";
+    businessSkipReason = FRESH_IMPORT_FAILED_SKIP_REASON;
   } else if (ineligible) {
     businessSkipReason = "ineligible_order_or_delivery_group_status";
   } else if (deliveryDateSkipReason) {
@@ -1207,6 +1256,8 @@ async function evaluateGroup(params: {
     contactChannelEligible: channelPreview.production.selectedChannel !== null,
     selectedProductionChannel: channelPreview.production.selectedChannel,
     productionChannelReason: channelPreview.production.channelReason,
+    controlledSelectedChannel: channelPreview.controlledSelectedChannel,
+    controlledChannelReason: channelPreview.controlledChannelReason,
     wouldHaveSelectedSmsIfOptedIn: channelPreview.wouldHaveSelectedSmsIfOptedIn,
     wouldHaveSelectedEmailIfOptedIn: channelPreview.wouldHaveSelectedEmailIfOptedIn,
     activeSmsOptOut: optOutState.activeSmsOptOut,
@@ -1750,17 +1801,27 @@ function emptyCandidateRows(): CandidateRows {
 }
 
 function selectExamplesForInterval(rows: CandidateRows, options: CliOptions) {
-  for (const channel of ["EMAIL", "SMS"] as const) {
+  const selectedDedupeKeys = new Set<string>();
+  for (const channel of ["SMS", "EMAIL"] as const) {
     const candidates = rows.intervalResultRows
       .map((row, index) => ({ row, index, tags: String(row.scenarioTags ?? "").split(", ").filter(Boolean) }))
       .filter(({ row }) =>
         channel === "EMAIL"
-          ? row.wouldHaveSelectedEmailIfOptedIn === true && !row.activeEmailOptOut && Boolean(row.emailBody)
-          : row.wouldHaveSelectedSmsIfOptedIn === true && !row.activeSmsOptOut && Boolean(row.smsBody)
+          ? row.wouldHaveSelectedEmailIfOptedIn === true &&
+            !row.activeEmailOptOut &&
+            row.controlledSelectedChannel === "EMAIL" &&
+            Boolean(row.emailBody) &&
+            !selectedDedupeKeys.has(String(row.dedupeKey ?? ""))
+          : row.wouldHaveSelectedSmsIfOptedIn === true &&
+            !row.activeSmsOptOut &&
+            row.controlledSelectedChannel === "SMS" &&
+            Boolean(row.smsBody) &&
+            !selectedDedupeKeys.has(String(row.dedupeKey ?? ""))
       );
     const selectedIndexes = pickDiverseCandidates(candidates, options.maxPerIntervalChannel);
     for (const index of selectedIndexes) {
       const row = rows.intervalResultRows[index];
+      selectedDedupeKeys.add(String(row.dedupeKey ?? ""));
       const selectedColumn = channel === "EMAIL" ? "selectedPreviewEmailExample" : "selectedPreviewSmsExample";
       row[selectedColumn] = true;
       row.testOverrideUsed = true;
@@ -1775,6 +1836,9 @@ function selectExamplesForInterval(rows: CandidateRows, options: CliOptions) {
         deliveryDate: row.deliveryDate,
         selectedProductionChannel: row.selectedProductionChannel,
         productionChannelReason: row.productionChannelReason,
+        controlledSelectedChannel: row.controlledSelectedChannel,
+        controlledChannelReason: row.controlledChannelReason,
+        dedupeKey: row.dedupeKey,
         realOptInStateSms: row.wouldHaveSelectedSmsIfOptedIn,
         realOptInStateEmail: row.wouldHaveSelectedEmailIfOptedIn,
         actualTestEmailRecipient:
@@ -1816,8 +1880,12 @@ function selectExamplesForInterval(rows: CandidateRows, options: CliOptions) {
 
 function pickDiverseCandidates(
   candidates: Array<{ index: number; tags: string[] }>,
-  max: number
+  max: MaxPerIntervalChannel
 ) {
+  if (max === "all") {
+    return candidates.map((candidate) => candidate.index);
+  }
+
   const selected: number[] = [];
   const coveredTags = new Set<string>();
   const remaining = [...candidates];
@@ -1833,6 +1901,462 @@ function pickDiverseCandidates(
     next.tags.forEach((tag) => coveredTags.add(tag));
   }
   return selected;
+}
+
+function channelLower(channel: ChannelKey) {
+  return channel.toLowerCase() as "email" | "sms";
+}
+
+function boolValue(value: unknown) {
+  return value === true || value === "true";
+}
+
+function textValue(value: unknown) {
+  const trimmed = String(value ?? "").trim();
+  return trimmed || null;
+}
+
+function intervalRequiresDetailsLink(config: IntervalConfig) {
+  return (
+    config.intervalType === NotificationIntervalType.DAY_30 ||
+    config.intervalType === NotificationIntervalType.DAY_14 ||
+    config.intervalType === NotificationIntervalType.DAY_12 ||
+    config.intervalType === NotificationIntervalType.DAY_10 ||
+    config.intervalType === NotificationIntervalType.DAY_8 ||
+    config.intervalType === NotificationIntervalType.DAY_2
+  );
+}
+
+function applyCandidateRows(rows: CandidateRows, config: IntervalConfig) {
+  const selected: Array<{ row: Row; channel: ChannelKey; dedupeKey: string }> = [];
+  const intervalRows = rows.intervalResultRows.filter((row) => row.interval === config.key);
+
+  for (const row of intervalRows) {
+    const dedupeKey = textValue(row.dedupeKey);
+    if (!dedupeKey) continue;
+    if (row.selectedPreviewSmsExample === true) {
+      selected.push({ row, channel: "SMS", dedupeKey });
+    }
+    if (row.selectedPreviewEmailExample === true) {
+      selected.push({ row, channel: "EMAIL", dedupeKey });
+    }
+  }
+
+  for (const channel of ["SMS", "EMAIL"] as const) {
+    const count = selected.filter((candidate) => candidate.channel === channel).length;
+    if (count > 1) {
+      throw new Error(`Apply safety refused: selected ${count} ${channel} candidates; max is 1.`);
+    }
+  }
+
+  const uniqueDedupeKeys = new Set(selected.map((candidate) => candidate.dedupeKey));
+  if (uniqueDedupeKeys.size !== selected.length) {
+    throw new Error("Apply safety refused: selected candidates contain duplicate dedupe keys.");
+  }
+  if (selected.length > 2) {
+    throw new Error(`Apply safety refused: selected ${selected.length} candidates; max is 2.`);
+  }
+
+  return selected;
+}
+
+function missingChannelApplyRows(params: {
+  rows: CandidateRows;
+  config: IntervalConfig;
+  selected: Array<{ channel: ChannelKey }>;
+  options: CliOptions;
+}) {
+  const result: Row[] = [];
+  const intervalRows = params.rows.intervalResultRows.filter(
+    (row) => row.interval === params.config.key
+  );
+
+  for (const channel of ["SMS", "EMAIL"] as const) {
+    if (params.selected.some((candidate) => candidate.channel === channel)) continue;
+    const bodyColumn = channel === "SMS" ? "smsBody" : "emailBody";
+    const optOutColumn = channel === "SMS" ? "activeSmsOptOut" : "activeEmailOptOut";
+    const wouldSelectColumn =
+      channel === "SMS" ? "wouldHaveSelectedSmsIfOptedIn" : "wouldHaveSelectedEmailIfOptedIn";
+    result.push({
+      testRunId: params.options.testRunId,
+      interval: params.config.key,
+      channel,
+      applyStatus: "not_created",
+      reason: `no_selected_${channelLower(channel)}_candidate`,
+      targetRows: intervalRows.length,
+      businessQualifiedRows: intervalRows.filter((row) => row.businessQualified === true).length,
+      freshImportFailedRows: intervalRows.filter((row) => row.freshImportSuccess === false).length,
+      channelWouldSelectIfOptedInRows: intervalRows.filter(
+        (row) => row[wouldSelectColumn] === true
+      ).length,
+      controlledDispatchChannelRows: intervalRows.filter(
+        (row) => row.controlledSelectedChannel === channel
+      ).length,
+      activeOptOutRows: intervalRows.filter((row) => boolValue(row[optOutColumn])).length,
+      renderBodyRows: intervalRows.filter((row) => Boolean(row[bodyColumn])).length,
+    });
+  }
+
+  if (params.selected.length === 0) {
+    result.push({
+      testRunId: params.options.testRunId,
+      interval: params.config.key,
+      applyStatus: "not_created",
+      reason: "no_candidates_selected_for_interval",
+      targetRows: intervalRows.length,
+    });
+  }
+
+  return result;
+}
+
+async function loadDeliveryGroupForApply(params: {
+  deliveryGroupId: string;
+  targetDeliveryDate: string;
+}) {
+  const groups = await loadDeliveryGroupsForTargetDate(params.targetDeliveryDate);
+  return groups.find((group) => group.id === params.deliveryGroupId) ?? null;
+}
+
+function selectApplyRecipient(params: {
+  group: DeliveryGroupRecord;
+  channel: ChannelKey;
+  globalOptOuts: ActiveNotificationOptOutAddresses;
+}) {
+  const optOutState = contactOptOutState(params.group.order.contact, params.globalOptOuts);
+  return selectNotificationChannel(
+    {
+      ...params.group.order.contact,
+      smsOptIn: params.channel === "SMS",
+      emailOptIn: params.channel === "EMAIL",
+    },
+    optOutState.merged
+  );
+}
+
+function dispatchPreviewCommand(params: { testRunId: string; eventId: string; channel: ChannelKey }) {
+  return `npm.cmd run dispatch:delivery-notifications -- --preview --test-run-id ${params.testRunId}_${channelLower(params.channel)}_dispatch_preview --event-id ${params.eventId} --limit 1 --channel ${channelLower(params.channel)}`;
+}
+
+function controlledSendCommand(params: { testRunId: string; eventId: string; channel: ChannelKey }) {
+  return `npm.cmd run dispatch:delivery-notifications -- --send --controlled-recipient-send --test-run-id ${params.testRunId}_${channelLower(params.channel)}_send --event-id ${params.eventId} --limit 1 --channel ${channelLower(params.channel)} --confirm "<exact DELIVERY_CONTROLLED_RECIPIENT_CONFIRM_PHRASE>"`;
+}
+
+async function createSelectedNotificationEvent(params: {
+  config: IntervalConfig;
+  row: Row;
+  channel: ChannelKey;
+  group: DeliveryGroupRecord;
+  selected: ReturnType<typeof selectNotificationChannel>;
+  options: CliOptions;
+}) {
+  const deliveryDate = dateFromKey(params.row.deliveryDate as string);
+  const scheduledAt = dateFromKey(params.options.runDate);
+  const dedupeKey = params.row.dedupeKey as string;
+  const eventData = {
+    orderId: params.group.order.id,
+    deliveryGroupId: params.group.id,
+    contactId: params.group.order.contact.contactId,
+    orderType: params.group.order.orderType,
+    orderNumber: params.group.order.orderNumber,
+    deliveryDate,
+    intervalType: params.config.intervalType,
+    actionType: params.config.actionType,
+    dedupeKey,
+    selectedChannel: params.channel,
+    channelReason: params.selected.channelReason,
+    recipientEmail:
+      params.channel === "EMAIL" ? params.selected.recipientEmail ?? null : null,
+    recipientPhone:
+      params.channel === "SMS" ? params.selected.recipientPhone ?? null : null,
+    status: NotificationEventStatus.SCHEDULED,
+    reasonSkipped: null,
+    scheduledAt,
+  };
+
+  return prisma.$transaction(async (tx) => {
+    let detailsLinkId: string | null = null;
+    let detailsLinkCreated = false;
+    if (intervalRequiresDetailsLink(params.config)) {
+      const detailsLink = await ensureDeliveryDetailsLink(
+        {
+          orderId: params.group.order.id,
+          orderDeliveryGroupId: params.group.id,
+          deliveryDate,
+        },
+        tx
+      );
+      detailsLinkId = detailsLink.link.id;
+      detailsLinkCreated = detailsLink.created;
+    }
+
+    const event = await tx.notificationEvent.create({
+      data: {
+        ...eventData,
+        detailsLinkId,
+      },
+      select: { id: true, dedupeKey: true, status: true, selectedChannel: true },
+    });
+
+    if (detailsLinkId) {
+      await markDeliveryDetailsLinkCreatedFromEvent(
+        { detailsLinkId, notificationEventId: event.id },
+        tx
+      );
+    }
+
+    let confirmationId: string | null = null;
+    let confirmationCreated = false;
+    if (params.config.intervalType === NotificationIntervalType.DAY_42) {
+      const existingConfirmation = await tx.deliveryConfirmation.findUnique({
+        where: {
+          deliveryGroupId_deliveryDate: {
+            deliveryGroupId: params.group.id,
+            deliveryDate,
+          },
+        },
+        select: { id: true, linkToken: true },
+      });
+      const linkToken = existingConfirmation?.linkToken ?? newDeliveryConfirmationLinkToken();
+      const confirmation = await ensurePendingDeliveryConfirmation(
+        {
+          orderId: params.group.order.id,
+          deliveryGroupId: params.group.id,
+          notificationEventId: event.id,
+          orderType: params.group.order.orderType,
+          orderNumber: params.group.order.orderNumber,
+          deliveryDate,
+          contactId: params.group.order.contact.contactId,
+          linkToken,
+          linkCreatedAt: scheduledAt,
+          linkExpiresAt: new Date(scheduledAt.getTime() + 30 * 24 * 60 * 60 * 1000),
+        },
+        tx
+      );
+      confirmationId = confirmation.id;
+      confirmationCreated = !existingConfirmation;
+    }
+
+    return {
+      event,
+      detailsLinkId,
+      detailsLinkCreated,
+      confirmationId,
+      confirmationCreated,
+    };
+  });
+}
+
+async function applySelectedRuntimeEvents(params: {
+  rows: CandidateRows;
+  imports: ImportRunResult[];
+  options: CliOptions;
+  globalOptOuts: ActiveNotificationOptOutAddresses;
+}) {
+  if (!params.options.interval) return [];
+  const config = INTERVALS.find((interval) => interval.key === params.options.interval);
+  if (!config) throw new Error(`Apply safety refused: unsupported interval ${params.options.interval}.`);
+  const importRun = params.imports.find((item) => item.interval.key === config.key);
+  if (!importRun) throw new Error(`Apply safety refused: missing import run for interval ${config.key}.`);
+  if (importRun.error) {
+    return [
+      {
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        applyStatus: "not_created",
+        reason: "interval_import_failed",
+        failureReason: importRun.error,
+      },
+    ];
+  }
+
+  const selected = applyCandidateRows(params.rows, config);
+  const resultRows: Row[] = [
+    ...missingChannelApplyRows({
+      rows: params.rows,
+      config,
+      selected,
+      options: params.options,
+    }),
+  ];
+
+  for (const candidate of selected) {
+    const deliveryGroupId = textValue(candidate.row.orderDeliveryGroupId);
+    if (!deliveryGroupId) {
+      resultRows.push({
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        channel: candidate.channel,
+        applyStatus: "not_created",
+        reason: "selected_candidate_missing_delivery_group_id",
+      });
+      continue;
+    }
+
+    if (
+      candidate.row.freshImportSuccess !== true ||
+      candidate.row.businessQualified !== true ||
+      textValue(candidate.row.skipReason) ||
+      candidate.row.controlledSelectedChannel !== candidate.channel
+    ) {
+      resultRows.push({
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        channel: candidate.channel,
+        orderType: candidate.row.orderType,
+        orderNumber: candidate.row.orderNumber,
+        deliveryGroupId,
+        dedupeKey: candidate.dedupeKey,
+        applyStatus: "not_created",
+        reason: "selected_candidate_not_apply_safe",
+        freshImportSuccess: candidate.row.freshImportSuccess,
+        businessQualified: candidate.row.businessQualified,
+        skipReason: candidate.row.skipReason,
+        controlledSelectedChannel: candidate.row.controlledSelectedChannel,
+      });
+      continue;
+    }
+
+    const group = await loadDeliveryGroupForApply({
+      deliveryGroupId,
+      targetDeliveryDate: importRun.targetDeliveryDate,
+    });
+    if (!group) {
+      resultRows.push({
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        channel: candidate.channel,
+        orderType: candidate.row.orderType,
+        orderNumber: candidate.row.orderNumber,
+        deliveryGroupId,
+        dedupeKey: candidate.dedupeKey,
+        applyStatus: "not_created",
+        reason: "delivery_group_not_found_after_preview",
+      });
+      continue;
+    }
+
+    const existing = await prisma.notificationEvent.findUnique({
+      where: { dedupeKey: candidate.dedupeKey },
+      select: {
+        id: true,
+        status: true,
+        selectedChannel: true,
+        _count: { select: { attempts: true } },
+      },
+    });
+    if (existing) {
+      const dispatcherEligible =
+        existing.status === NotificationEventStatus.SCHEDULED &&
+        existing._count.attempts === 0 &&
+        (!existing.selectedChannel || existing.selectedChannel === candidate.channel);
+      const applyStatus = dispatcherEligible ? "existing_reused" : "existing_not_reused";
+      const reason = dispatcherEligible
+        ? "existing_scheduled_event_without_attempts"
+        : existing._count.attempts > 0
+          ? "existing_event_has_attempts"
+          : existing.status !== NotificationEventStatus.SCHEDULED
+            ? `existing_event_status_${existing.status}`
+            : "existing_event_channel_mismatch";
+      resultRows.push({
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        channel: candidate.channel,
+        orderType: candidate.row.orderType,
+        orderNumber: candidate.row.orderNumber,
+        deliveryGroupId,
+        dedupeKey: candidate.dedupeKey,
+        notificationEventId: existing.id,
+        applyStatus,
+        reason,
+        existingEventStatus: existing.status,
+        existingEventSelectedChannel: existing.selectedChannel,
+        existingAttemptCount: existing._count.attempts,
+        dispatcherEligible,
+        realCustomerRecipientSuppressedLaterByDispatcher: dispatcherEligible,
+        dispatchPreviewCommand: dispatcherEligible
+          ? dispatchPreviewCommand({
+              testRunId: params.options.testRunId,
+              eventId: existing.id,
+              channel: candidate.channel,
+            })
+          : null,
+        controlledSendCommand: dispatcherEligible
+          ? controlledSendCommand({
+              testRunId: params.options.testRunId,
+              eventId: existing.id,
+              channel: candidate.channel,
+            })
+          : null,
+      });
+      continue;
+    }
+
+    const selectedChannel = selectApplyRecipient({
+      group,
+      channel: candidate.channel,
+      globalOptOuts: params.globalOptOuts,
+    });
+    if (selectedChannel.selectedChannel !== candidate.channel) {
+      resultRows.push({
+        testRunId: params.options.testRunId,
+        interval: config.key,
+        channel: candidate.channel,
+        orderType: candidate.row.orderType,
+        orderNumber: candidate.row.orderNumber,
+        deliveryGroupId,
+        dedupeKey: candidate.dedupeKey,
+        applyStatus: "not_created",
+        reason: selectedChannel.channelReason,
+      });
+      continue;
+    }
+
+    const created = await createSelectedNotificationEvent({
+      config,
+      row: candidate.row,
+      channel: candidate.channel,
+      group,
+      selected: selectedChannel,
+      options: params.options,
+    });
+
+    resultRows.push({
+      testRunId: params.options.testRunId,
+      interval: config.key,
+      channel: candidate.channel,
+      orderType: candidate.row.orderType,
+      orderNumber: candidate.row.orderNumber,
+      deliveryGroupId,
+      deliveryDate: candidate.row.deliveryDate,
+      dedupeKey: created.event.dedupeKey,
+      notificationEventId: created.event.id,
+      applyStatus: "created",
+      reason: "selected_controlled_test_event_created",
+      eventStatus: created.event.status,
+      eventSelectedChannel: created.event.selectedChannel,
+      detailsLinkId: created.detailsLinkId,
+      detailsLinkCreated: created.detailsLinkCreated,
+      deliveryConfirmationId: created.confirmationId,
+      deliveryConfirmationCreated: created.confirmationCreated,
+      holdActionCreated: false,
+      notificationAttemptCreated: false,
+      providerSendCalled: false,
+      realCustomerRecipientSuppressedLaterByDispatcher: true,
+      dispatchPreviewCommand: dispatchPreviewCommand({
+        testRunId: params.options.testRunId,
+        eventId: created.event.id,
+        channel: candidate.channel,
+      }),
+      controlledSendCommand: controlledSendCommand({
+        testRunId: params.options.testRunId,
+        eventId: created.event.id,
+        channel: candidate.channel,
+      }),
+    });
+  }
+
+  return resultRows;
 }
 
 async function importForInterval(config: IntervalConfig, options: CliOptions): Promise<ImportRunResult> {
@@ -1910,14 +2434,14 @@ async function evaluateInterval(
     groups.map((group) => group.order.salespersonNumber),
     prisma
   );
-  const failedKeys = failedImportOrderKeys(importRun.result);
+  const failedOrderLookup = failedImportOrderLookup(importRun.result);
 
   for (const group of groups) {
     const groupRows = await evaluateGroup({
       config: importRun.interval,
       group,
       options,
-      failedFreshImport: orderFailedFreshImport(group, failedKeys),
+      failedFreshImport: orderFailedFreshImport(group, failedOrderLookup),
       globalOptOuts,
       salespersonMap,
     });
@@ -1988,21 +2512,51 @@ function resetCountRows(before: RuntimeCounts, after: RuntimeCounts): Row[] {
   }));
 }
 
-function manifestRows(options: CliOptions, outputPath: string): Row[] {
+function manifestRows(options: CliOptions, outputPath: string, applyRows: Row[]): Row[] {
+  const eventRows = applyRows.filter((row) => textValue(row.notificationEventId));
+  const createdRows = applyRows.filter((row) => row.applyStatus === "created");
+  const reusableRows = applyRows.filter((row) => row.dispatcherEligible === true);
   return [
     {
       testRunId: options.testRunId,
-      mode: "preview_export_only",
-      applyRuntimeEvents: false,
+      mode: options.applyRuntimeEvents ? "limited_apply_events" : "preview_export_only",
+      applyRuntimeEvents: options.applyRuntimeEvents,
       sendTestRecipients: false,
-      createdNotificationEventIds: "[]",
+      interval: options.interval,
+      maxPerIntervalChannel: options.maxPerIntervalChannel,
+      createdNotificationEventIds: JSON.stringify(
+        createdRows.map((row) => row.notificationEventId)
+      ),
+      reusableNotificationEventIds: JSON.stringify(
+        reusableRows.map((row) => row.notificationEventId)
+      ),
       createdNotificationAttemptIds: "[]",
       sentEmailMessageIds: "[]",
       sentSmsMessageSids: "[]",
       createdFiles: JSON.stringify([outputPath]),
+      applyResultCount: applyRows.length,
       cleanupInstructions:
-        "Delete the generated workbook only. No runtime event, attempt, hold, confirmation, writeback, or provider-send rows are created by Phase 1.",
+        options.applyRuntimeEvents
+          ? "Review Apply Results for created/reused NotificationEvent ids. No NotificationAttempt, hold, writeback, provider-send, reset, delete, or truncate rows are created by this harness."
+          : "Delete the generated workbook only. No runtime event, attempt, hold, confirmation, writeback, or provider-send rows are created by preview mode.",
     },
+    ...eventRows.map((row) => ({
+      testRunId: options.testRunId,
+      mode: options.applyRuntimeEvents ? "limited_apply_events" : "preview_export_only",
+      interval: row.interval,
+      channel: row.channel,
+      orderType: row.orderType,
+      orderNumber: row.orderNumber,
+      deliveryGroupId: row.deliveryGroupId,
+      notificationEventId: row.notificationEventId,
+      dedupeKey: row.dedupeKey,
+      applyStatus: row.applyStatus,
+      dispatcherEligible: row.dispatcherEligible,
+      realCustomerRecipientSuppressedLaterByDispatcher:
+        row.realCustomerRecipientSuppressedLaterByDispatcher,
+      dispatchPreviewCommand: row.dispatchPreviewCommand,
+      controlledSendCommand: row.controlledSendCommand,
+    })),
   ];
 }
 
@@ -2059,6 +2613,7 @@ async function writeWorkbook(params: {
   contactRows: Row[];
   skipRows: Row[];
   writebackRows: Row[];
+  applyRows: Row[];
   resetRows: Row[];
   manifestRows: Row[];
 }) {
@@ -2078,6 +2633,7 @@ async function writeWorkbook(params: {
   addSheet(workbook, "Contacts", params.contactRows);
   addSheet(workbook, "Skips", params.skipRows);
   addSheet(workbook, "Writebacks DryRuns", params.writebackRows);
+  addSheet(workbook, "Apply Results", params.applyRows);
   addSheet(workbook, "Reset Counts", params.resetRows);
   addSheet(workbook, "Manifest", params.manifestRows);
   await workbook.xlsx.writeFile(params.outputPath);
@@ -2103,6 +2659,57 @@ function assertNoRuntimeRowsCreated(before: RuntimeCounts, after: RuntimeCounts)
   }
 }
 
+function assertLimitedApplyRuntimeRowsAllowed(
+  before: RuntimeCounts,
+  after: RuntimeCounts,
+  applyRows: Row[]
+) {
+  const createdRows = applyRows.filter((row) => row.applyStatus === "created");
+  const expectedEventsCreated = createdRows.length;
+  const expectedDetailsLinksCreated = createdRows.filter(
+    (row) => row.detailsLinkCreated === true
+  ).length;
+  const expectedConfirmationsCreated = createdRows.filter(
+    (row) => row.deliveryConfirmationCreated === true
+  ).length;
+
+  const actualEventsCreated = after.notificationEvents - before.notificationEvents;
+  const actualDetailsLinksCreated = after.deliveryDetailsLinks - before.deliveryDetailsLinks;
+  const actualConfirmationsCreated = after.deliveryConfirmations - before.deliveryConfirmations;
+  const failures: string[] = [];
+
+  if (actualEventsCreated !== expectedEventsCreated) {
+    failures.push(
+      `notificationEvents ${before.notificationEvents} -> ${after.notificationEvents}; expected delta ${expectedEventsCreated}`
+    );
+  }
+  if (actualDetailsLinksCreated !== expectedDetailsLinksCreated) {
+    failures.push(
+      `deliveryDetailsLinks ${before.deliveryDetailsLinks} -> ${after.deliveryDetailsLinks}; expected delta ${expectedDetailsLinksCreated}`
+    );
+  }
+  if (actualConfirmationsCreated !== expectedConfirmationsCreated) {
+    failures.push(
+      `deliveryConfirmations ${before.deliveryConfirmations} -> ${after.deliveryConfirmations}; expected delta ${expectedConfirmationsCreated}`
+    );
+  }
+
+  for (const key of [
+    "notificationAttempts",
+    "deliveryOrderHoldActions",
+    "internalNotificationEvents",
+    "contactOptInWritebackActions",
+  ] as const) {
+    if (before[key] !== after[key]) {
+      failures.push(`${key} ${before[key]} -> ${after[key]}; expected unchanged`);
+    }
+  }
+
+  if (failures.length > 0) {
+    throw new Error(`Limited apply safety assertion failed: ${failures.join(", ")}`);
+  }
+}
+
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   const preflightResult = preflight(options);
@@ -2122,6 +2729,14 @@ async function main() {
     addRows(allRows, evaluated);
   }
 
+  const applyRows = options.applyRuntimeEvents
+    ? await applySelectedRuntimeEvents({
+        rows: allRows,
+        imports,
+        options,
+        globalOptOuts,
+      })
+    : [];
   const after = await runtimeCounts();
   const outputPath = path.resolve(options.output);
   const importResultRows = importRows(imports);
@@ -2141,14 +2756,19 @@ async function main() {
     contactRows: allRows.contactRows,
     skipRows: allRows.skipRows,
     writebackRows: allRows.writebackRows,
+    applyRows,
     resetRows,
-    manifestRows: manifestRows(options, outputPath),
+    manifestRows: manifestRows(options, outputPath, applyRows),
   });
-  assertNoRuntimeRowsCreated(before, after);
+  if (options.applyRuntimeEvents) {
+    assertLimitedApplyRuntimeRowsAllowed(before, after, applyRows);
+  } else {
+    assertNoRuntimeRowsCreated(before, after);
+  }
 
   const consoleSummary = {
     testRunId: options.testRunId,
-    mode: "preview_export_only",
+    mode: options.applyRuntimeEvents ? "limited_apply_events" : "preview_export_only",
     runDate: options.runDate,
     outputPath,
     preflight: "passed",
@@ -2176,11 +2796,23 @@ async function main() {
       selectedSmsExamples: row.selectedSmsExamples,
       writebacksPlannedDryRun: row.writebacksPlannedDryRun,
     })),
+    apply: {
+      rows: applyRows.length,
+      createdNotificationEvents: applyRows.filter((row) => row.applyStatus === "created").length,
+      reusableNotificationEvents: applyRows.filter((row) => row.dispatcherEligible === true).length,
+      missingChannels: applyRows.filter((row) =>
+        String(row.reason ?? "").startsWith("no_selected_")
+      ),
+      eventIds: applyRows
+        .map((row) => row.notificationEventId)
+        .filter((value): value is string => typeof value === "string" && value.length > 0),
+    },
     safety: {
       notificationEventsCreated: after.notificationEvents - before.notificationEvents,
       notificationAttemptsCreated: after.notificationAttempts - before.notificationAttempts,
       providerSends: 0,
       acumaticaWrites: 0,
+      holdActionsCreated: after.deliveryOrderHoldActions - before.deliveryOrderHoldActions,
       resetDeleteTruncate: false,
     },
   };

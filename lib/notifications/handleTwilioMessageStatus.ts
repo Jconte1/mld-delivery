@@ -1,6 +1,11 @@
 import { randomUUID } from "node:crypto";
 
-import { Prisma } from "@/lib/generated/prisma/client";
+import {
+  NotificationAttemptStatus,
+  NotificationChannel,
+  NotificationEventStatus,
+  Prisma,
+} from "@/lib/generated/prisma/client";
 import {
   DELIVERY_MANUAL_REVIEW_REASONS,
   formatManualReviewNote,
@@ -26,6 +31,8 @@ type StatusMatch =
       notificationAttemptId: string;
       notificationEventId: string;
       deliveryConfirmationId: string | null;
+      notificationAttemptNumber: number;
+      notificationAttemptChannel: NotificationChannel;
     }
   | {
       matchStatus: "MATCHED_EVENT";
@@ -54,7 +61,15 @@ export type HandleTwilioMessageStatusResult = {
 };
 
 const FAILURE_STATUSES = new Set(["FAILED", "UNDELIVERED"]);
-const SUCCESS_STATUSES = new Set(["SENT", "DELIVERED"]);
+const IN_FLIGHT_STATUSES = new Set(["ACCEPTED", "QUEUED", "SENDING", "SENT", "SUBMITTED"]);
+const DELIVERED_STATUSES = new Set(["DELIVERED"]);
+const ATTEMPT_CREATED = "CREATED" as NotificationAttemptStatus;
+const ATTEMPT_SUBMITTED = "SUBMITTED" as NotificationAttemptStatus;
+const ATTEMPT_DELIVERED = "DELIVERED" as NotificationAttemptStatus;
+const ATTEMPT_FAILED = "FAILED" as NotificationAttemptStatus;
+const EVENT_PENDING = "PENDING" as NotificationEventStatus;
+const EVENT_SENT = "SENT" as NotificationEventStatus;
+const EVENT_FAILED = "FAILED" as NotificationEventStatus;
 
 function payloadValue(payload: TwilioFormPayload, keys: string[]) {
   for (const key of keys) {
@@ -147,6 +162,8 @@ async function findStatusMatch(
       notificationAttemptId: attempt.id,
       notificationEventId: attempt.notificationEventId,
       deliveryConfirmationId: confirmations.length === 1 ? confirmations[0].id : null,
+      notificationAttemptNumber: attempt.attemptNumber,
+      notificationAttemptChannel: attempt.channel,
     };
   }
 
@@ -190,20 +207,150 @@ async function updateMatchedAttempt(params: {
 }) {
   if (params.match.matchStatus !== "MATCHED_ATTEMPT") return;
 
-  await params.client.notificationAttempt.update({
-    where: { id: params.match.notificationAttemptId },
+  const delivered = DELIVERED_STATUSES.has(params.messageStatus);
+  const inFlight = IN_FLIGHT_STATUSES.has(params.messageStatus);
+  const failed = FAILURE_STATUSES.has(params.messageStatus);
+
+  if (delivered) {
+    await params.client.notificationAttempt.updateMany({
+      where: {
+        id: params.match.notificationAttemptId,
+        status: { not: ATTEMPT_FAILED },
+      },
+      data: {
+        provider: "twilio",
+        providerCode: params.errorCode ?? params.messageStatus,
+        status: ATTEMPT_DELIVERED,
+        errorMessage: null,
+        success: true,
+        sentAt: params.now,
+      },
+    });
+    return;
+  }
+
+  if (inFlight) {
+    await params.client.notificationAttempt.updateMany({
+      where: {
+        id: params.match.notificationAttemptId,
+        status: { in: [ATTEMPT_CREATED, ATTEMPT_SUBMITTED] },
+      },
+      data: {
+        provider: "twilio",
+        providerCode: params.errorCode ?? params.messageStatus,
+        status: ATTEMPT_SUBMITTED,
+        success: true,
+      },
+    });
+    return;
+  }
+
+  if (failed) {
+    await params.client.notificationAttempt.updateMany({
+      where: {
+        id: params.match.notificationAttemptId,
+        status: { not: ATTEMPT_DELIVERED },
+      },
+      data: {
+        provider: "twilio",
+        providerCode: params.errorCode ?? params.messageStatus,
+        status: ATTEMPT_FAILED,
+        errorMessage: params.errorMessage,
+        success: false,
+      },
+    });
+  }
+}
+
+async function latestAttemptForEvent(
+  client: DeliveryTwilioStatusClient,
+  notificationEventId: string
+) {
+  return client.notificationAttempt.findFirst({
+    where: { notificationEventId },
+    orderBy: { attemptNumber: "desc" },
+    select: { id: true, status: true },
+  });
+}
+
+async function matchedAttemptCanUpdateEvent(params: {
+  client: DeliveryTwilioStatusClient;
+  match: StatusMatch;
+}) {
+  if (params.match.matchStatus !== "MATCHED_ATTEMPT") return true;
+  if (!params.match.notificationEventId) return false;
+
+  const latestAttempt = await latestAttemptForEvent(
+    params.client,
+    params.match.notificationEventId
+  );
+  return latestAttempt?.id === params.match.notificationAttemptId;
+}
+
+async function updateMatchedEventFromStatus(params: {
+  client: DeliveryTwilioStatusClient;
+  match: StatusMatch;
+  messageSid: string;
+  messageStatus: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  now: Date;
+}) {
+  if (!params.match.notificationEventId) return false;
+
+  if (DELIVERED_STATUSES.has(params.messageStatus) || IN_FLIGHT_STATUSES.has(params.messageStatus)) {
+    if (!(await matchedAttemptCanUpdateEvent({ client: params.client, match: params.match }))) {
+      return false;
+    }
+
+    const result = await params.client.notificationEvent.updateMany({
+      where: {
+        id: params.match.notificationEventId,
+        status: { in: [EVENT_PENDING, EVENT_SENT] },
+      },
+      data: {
+        status: EVENT_SENT,
+        provider: "twilio",
+        externalMessageId: params.messageSid,
+        sentAt: DELIVERED_STATUSES.has(params.messageStatus) ? params.now : undefined,
+        reasonFailed: null,
+      },
+    });
+    return result.count > 0;
+  }
+
+  if (!FAILURE_STATUSES.has(params.messageStatus)) return false;
+
+  if (params.match.matchStatus === "MATCHED_ATTEMPT") {
+    const latestAttempt = await latestAttemptForEvent(
+      params.client,
+      params.match.notificationEventId
+    );
+    if (
+      !latestAttempt ||
+      latestAttempt.id !== params.match.notificationAttemptId ||
+      latestAttempt.status === ATTEMPT_DELIVERED
+    ) {
+      return false;
+    }
+  }
+
+  await params.client.notificationEvent.update({
+    where: { id: params.match.notificationEventId },
     data: {
+      status: EVENT_FAILED,
       provider: "twilio",
-      providerCode: params.errorCode ?? params.messageStatus,
-      errorMessage: FAILURE_STATUSES.has(params.messageStatus) ? params.errorMessage : undefined,
-      success: SUCCESS_STATUSES.has(params.messageStatus)
-        ? true
-        : FAILURE_STATUSES.has(params.messageStatus)
-          ? false
-          : undefined,
-      sentAt: SUCCESS_STATUSES.has(params.messageStatus) ? params.now : undefined,
+      reasonFailed: [
+        `Twilio SMS delivery ${params.messageStatus.toLowerCase()}`,
+        params.errorCode,
+        params.errorMessage,
+      ]
+        .filter(Boolean)
+        .join(": ")
+        .slice(0, 1000),
     },
   });
+  return true;
 }
 
 async function flagSmsDeliveryFailureForManualReview(params: {
@@ -305,6 +452,15 @@ export async function handleTwilioMessageStatus(params: {
 
   const match = await findStatusMatch(client, messageSid);
   await updateMatchedAttempt({ client, match, messageStatus, errorCode, errorMessage, now });
+  await updateMatchedEventFromStatus({
+    client,
+    match,
+    messageSid,
+    messageStatus,
+    errorCode,
+    errorMessage,
+    now,
+  });
   const manualReviewFlagged = await flagSmsDeliveryFailureForManualReview({
     client,
     deliveryConfirmationId: match.deliveryConfirmationId,

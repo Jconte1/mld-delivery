@@ -1,6 +1,9 @@
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
-import { importSalesOrdersForLineRequestedOn } from "@/lib/erp/importSalesOrders";
+import {
+  importSalesOrdersForLineRequestedOn,
+  type ImportSalesOrdersResult,
+} from "@/lib/erp/importSalesOrders";
 import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
@@ -38,6 +41,12 @@ import {
   evaluateAndRecordDeliveryTenDayConfirmation,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  getFreshImportFailedOrders,
+  isFreshImportFailedOrder,
+  type FreshImportFailedOrder,
+} from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 
@@ -62,7 +71,7 @@ export type DeliveryReminder30DayEventReport = {
   deliveryGroupId: string;
   deliveryDate: string;
   eventId: string | null;
-  dedupeKey: string;
+  dedupeKey: string | null;
   status: string;
   selectedChannel: string | null;
   reasonSkipped: string | null;
@@ -88,11 +97,12 @@ export type Create30DayDeliveryReminderEventsSummary = {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
-  importResult: Awaited<ReturnType<typeof importSalesOrdersForLineRequestedOn>> | null;
+  importResult: ImportSalesOrdersResult | null;
   targetDeliveryGroups: number;
   eligibleDeliveryGroups: number;
   deliveryGroupsSkippedWeekendDeliveryDate: number;
   deliveryGroupsSkippedIneligible: number;
+  deliveryGroupsSkippedFailedImport: number;
   deliveryGroupsSkippedNotConfirmedInAcumatica: number;
   deliveryGroupsSkippedNoChannel: number;
   eventsCreated: number;
@@ -110,6 +120,7 @@ export type Create30DayDeliveryReminderEventsSummary = {
   weekendSkipped: boolean;
   dryRun: boolean;
   skippedReasons: Record<string, number>;
+  failedImportExclusions: FreshImportFailedOrder[];
   eventReports: DeliveryReminder30DayEventReport[];
 };
 
@@ -145,6 +156,7 @@ function emptySummary(params: {
     eligibleDeliveryGroups: 0,
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
     deliveryGroupsSkippedIneligible: 0,
+    deliveryGroupsSkippedFailedImport: 0,
     deliveryGroupsSkippedNotConfirmedInAcumatica: 0,
     deliveryGroupsSkippedNoChannel: 0,
     eventsCreated: 0,
@@ -162,6 +174,7 @@ function emptySummary(params: {
     weekendSkipped: false,
     dryRun: params.dryRun,
     skippedReasons: {},
+    failedImportExclusions: [],
     eventReports: [],
   };
 }
@@ -420,6 +433,7 @@ export async function createConfirmedDeliveryReminderEvents(
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate);
   if (!deliveryDateSkipReason) {
     summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn);
+    summary.failedImportExclusions = getFreshImportFailedOrders(summary.importResult);
   }
 
   const deliveryGroups = await find30DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
@@ -437,6 +451,42 @@ export async function createConfirmedDeliveryReminderEvents(
     const order = deliveryGroup.order;
     if (!is30DayDeliveryGroupEligible(deliveryGroup)) {
       summary.deliveryGroupsSkippedIneligible += 1;
+      continue;
+    }
+
+    if (
+      summary.importResult &&
+      isFreshImportFailedOrder({
+        importResult: summary.importResult,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: null,
+        dedupeKey: null,
+        status: "IMPORT_FAILED_EXCLUDED",
+        selectedChannel: null,
+        reasonSkipped: FRESH_IMPORT_FAILED_SKIP_REASON,
+        acumaticaConfirmVia: normalize30DayConfirmVia(order.confirmVia),
+        detailsLinkCreated: false,
+        detailsLinkReused: false,
+        detailsLinkTokenPresent: false,
+        detailsLinkUrl: null,
+        subject: null,
+        renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+        itemLineCount: 0,
+        paymentStatus: null,
+        amountDueNowRounded: null,
+        paymentReminderApplies: false,
+      });
       continue;
     }
 

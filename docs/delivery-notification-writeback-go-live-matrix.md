@@ -1,0 +1,34 @@
+# Delivery Notification Writeback Go-Live Matrix
+
+Status: writebacks remain disabled for customer go-live review.
+
+The delivery app can enqueue queue-backed writeback jobs, but live Acumatica writes require both the delivery payload dry-run posture and the mld-queue worker write gate to be deliberately changed.
+
+## Shared Queue Requirements
+
+Delivery app:
+
+- `MLD_QUEUE_BASE_URL` points at the deployed mld-queue gateway.
+- `MLD_QUEUE_TOKEN` matches the queue gateway token.
+
+mld-queue:
+
+- Gateway and worker are deployed from the reviewed source.
+- Worker has Acumatica credentials for the target tenant.
+- Worker-specific live write flags remain off until a separate approval.
+
+## Matrix
+
+| Writeback | Delivery env, dry run | Delivery env, live payload | Queue worker env, dry run | Queue worker env, live | Launch phase | Risk | Test procedure |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| 42-day `CONFIRMVIA` / `CONFIRMWTH` | `DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN=true` or unset | `DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN=false` | `ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED=false` | `ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED=true` | After controlled reply tests pass | Writes customer confirmation source/name to sales order attributes | Use one allowlisted real order in dry run, verify payload/status, then run one live write and verify only blank fields are filled. |
+| `ONEWEEKCON` | `DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN=true` or unset | `DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN=false` | `ACUMATICA_TEN_DAY_CONFIRMATION_DRY_RUN=true`; `ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED=false` | `ACUMATICA_TEN_DAY_CONFIRMATION_DRY_RUN=false`; `ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED=true`; optional `ACUMATICA_TEN_DAY_CONFIRMATION_ALLOWED_ORDER_NUMBER=<order>` | After 14/12/10/8 payment logic is approved | Marks Acumatica `Document.AttributeONEWEEKCON=true`; affects 2-day qualification | Use one allowlisted no-balance delivery group, compare before/after Acumatica value, confirm 2-day logic consumes local and ERP state correctly. |
+| 8-day prepayment hold | `DELIVERY_PREPAYMENT_HOLD_DRY_RUN=true` or unset | `DELIVERY_PREPAYMENT_HOLD_DRY_RUN=false` | `ACUMATICA_PREPAYMENT_HOLD_DRY_RUN=true`; `ACUMATICA_PREPAYMENT_HOLD_WRITE_ENABLED=false` | `ACUMATICA_PREPAYMENT_HOLD_DRY_RUN=false`; `ACUMATICA_PREPAYMENT_HOLD_WRITE_ENABLED=true`; required launch allowlist `ACUMATICA_PREPAYMENT_HOLD_ALLOWED_ORDER_NUMBER=<order>` | Last, after payment audit and operations approval | Places/maintains sales order hold in Acumatica | Run dry-run workbook, validate amount due/deadline, run one allowlisted live hold, verify Acumatica hold/status and internal alert behavior. |
+| Contact opt-out false writeback | `DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN=true` or unset | `DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN=false` | `ACUMATICA_CONTACT_OPT_IN_DRY_RUN=true`; `ACUMATICA_CONTACT_OPT_IN_WRITE_ENABLED=false` | `ACUMATICA_CONTACT_OPT_IN_DRY_RUN=false`; `ACUMATICA_CONTACT_OPT_IN_WRITE_ENABLED=true`; optional `ACUMATICA_CONTACT_OPT_IN_ALLOWED_CONTACT_ID=<contact>` | After STOP/email opt-out lifecycle is approved | Writes only false values to Contact opt-in attributes | Use one allowlisted contact, trigger STOP/email opt-out, verify queued action, worker result, Acumatica Contact custom fields, and local opt-out state. |
+
+## Current Recommendation
+
+Keep all delivery dry-run flags set to `true` and all mld-queue worker live write flags set to disabled until after the controlled all-interval send has passed.
+
+Do not enable `DELIVERY_REAL_CUSTOMER_SEND_ENABLED=true` in the same change window as any writeback live flip.
+

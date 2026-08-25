@@ -55,6 +55,11 @@ import {
   evaluateAndRecordDeliveryTenDayConfirmation,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
+import {
+  FRESH_IMPORT_FAILED_SKIP_REASON,
+  getFreshImportFailedOrders,
+  isFreshImportFailedOrder,
+} from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
 import {
   enqueueDeliveryPrepaymentHold,
@@ -399,26 +404,8 @@ export function get8DayPaymentEnforcementSkipReason(params: {
   return null;
 }
 
-function importErrorLooksLikeFailedOrder(error: ImportSalesOrdersResult["errors"][number]) {
-  return /failed|did not return/i.test(error.reason);
-}
-
-function importErrorMatchesOrder(
-  error: ImportSalesOrdersResult["errors"][number],
-  order: { orderType: string; orderNumber: string }
-) {
-  if (!error.orderNumber || error.orderNumber !== order.orderNumber) return false;
-  return !error.orderType || error.orderType === order.orderType;
-}
-
 export function get8DayFailedImportExclusions(importResult: ImportSalesOrdersResult) {
-  return importResult.errors
-    .filter((error) => error.orderNumber && importErrorLooksLikeFailedOrder(error))
-    .map((error) => ({
-      orderType: error.orderType ?? null,
-      orderNumber: error.orderNumber as string,
-      reason: error.reason,
-    }));
+  return getFreshImportFailedOrders(importResult);
 }
 
 export function isOrderExcludedBy8DayFailedImport(params: {
@@ -426,9 +413,7 @@ export function isOrderExcludedBy8DayFailedImport(params: {
   orderType: string;
   orderNumber: string;
 }) {
-  return params.importResult.errors.some(
-    (error) => importErrorLooksLikeFailedOrder(error) && importErrorMatchesOrder(error, params)
-  );
+  return isFreshImportFailedOrder(params);
 }
 
 export function holdQueueResultIsSuccess(result: DeliveryPrepaymentHoldQueueResult) {
@@ -1254,13 +1239,14 @@ export async function create8DayPaymentEnforcementEvents(
       })
     ) {
       summary.deliveryGroupsSkippedFailedImport += 1;
-      summary.eventReports.push(
-        baseReport({
-          deliveryGroup,
-          acumaticaConfirmVia: normalize8DayConfirmVia(order.confirmVia),
-          renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
-        })
-      );
+      addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+      const report = baseReport({
+        deliveryGroup,
+        acumaticaConfirmVia: normalize8DayConfirmVia(order.confirmVia),
+        renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+      });
+      report.customerEventSkippedReason = FRESH_IMPORT_FAILED_SKIP_REASON;
+      summary.eventReports.push(report);
       continue;
     }
 

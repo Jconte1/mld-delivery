@@ -47,6 +47,13 @@ enum NotificationEventStatus {
   ALREADY_SENT @map("already_sent")
 }
 
+enum NotificationAttemptStatus {
+  CREATED   @map("created")
+  SUBMITTED @map("submitted")
+  DELIVERED @map("delivered")
+  FAILED    @map("failed")
+}
+
 enum InternalOrderLifecycleStatus {
   ACTIVE                 @map("active")
   PAYMENT_PENDING        @map("payment_pending")
@@ -641,24 +648,46 @@ model NotificationAttempt {
   notificationEventId String
   attemptNumber       Int
   channel             NotificationChannel
+  status              NotificationAttemptStatus @default(CREATED)
+  recipient           String?             @db.VarChar(256)
+  suppressedRecipient String?             @db.VarChar(256)
   provider            String?             @db.VarChar(64)
   success             Boolean             @default(false)
   errorMessage        String?             @db.VarChar(1024)
   providerCode        String?             @db.VarChar(128)
   httpStatus          Int?
   externalMessageId   String?             @db.VarChar(256)
+  controlledRecipientMode Boolean          @default(false)
+  forcedContactEligibility Boolean         @default(false)
+  realSmsOptIn        Boolean?
+  realEmailOptIn      Boolean?
+  localSmsOptOutActive Boolean             @default(false)
+  localEmailOptOutActive Boolean           @default(false)
+  globalSmsOptOutActive Boolean            @default(false)
+  globalEmailOptOutActive Boolean          @default(false)
+  testRunId           String?             @db.VarChar(128)
+  fallbackFromAttemptId String?
+  metadata            Json?
   sentAt              DateTime?
   createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
 
   notificationEvent     NotificationEvent             @relation(fields: [notificationEventId], references: [id], onDelete: Cascade)
   twilioStatusCallbacks TwilioMessageStatusCallback[]
+  fallbackFromAttempt   NotificationAttempt?           @relation("NotificationAttemptFallback", fields: [fallbackFromAttemptId], references: [id], onDelete: SetNull)
+  fallbackAttempts      NotificationAttempt[]          @relation("NotificationAttemptFallback")
 
   @@unique([notificationEventId, attemptNumber])
   @@index([notificationEventId])
   @@index([channel])
+  @@index([status])
+  @@index([recipient])
   @@index([provider])
   @@index([success])
   @@index([externalMessageId])
+  @@index([controlledRecipientMode])
+  @@index([testRunId])
+  @@index([fallbackFromAttemptId])
   @@map("notification_attempts")
 }
 

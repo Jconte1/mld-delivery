@@ -140,6 +140,9 @@ export type DeliveryDispatchEventReport = {
   globalEmailOptOutActive: boolean;
   realRecipientSuppressed: boolean;
   finalRecipientKind: "test" | "customer" | null;
+  finalRecipientMasked: string | null;
+  suppressedRecipientMasked: string | null;
+  finalRecipientIsTestRecipient: boolean;
   externalMessageIdPresent: boolean;
   existingAttemptId: string | null;
   existingAttemptStatus: string | null;
@@ -280,6 +283,11 @@ function flagIsTrue(env: NodeJS.ProcessEnv, name: string) {
   return env[name]?.trim().toLowerCase() === "true";
 }
 
+function flagIsFalseOrUnset(env: NodeJS.ProcessEnv, name: string) {
+  const value = env[name]?.trim().toLowerCase();
+  return !value || value === "false";
+}
+
 function envValue(env: NodeJS.ProcessEnv, name: string) {
   return env[name]?.trim() ?? "";
 }
@@ -292,6 +300,63 @@ function clean(value: string | null | undefined) {
 function truncateError(value: unknown) {
   const message = value instanceof Error ? value.message : String(value);
   return message.slice(0, 1000);
+}
+
+function maskedEmail(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed) return null;
+  const [local, domain] = trimmed.split("@");
+  if (!local || !domain) return "<redacted-email>";
+  return `${local.slice(0, 1)}***@${domain}`;
+}
+
+function maskedPhone(value: string | null | undefined) {
+  const normalized = normalizeSmsPhoneForOptOut(value);
+  if (!normalized) return null;
+  return `***${normalized.slice(-4)}`;
+}
+
+function maskedRecipient(channel: HelperNotificationChannel, value: string | null | undefined) {
+  return channel === "SMS" ? maskedPhone(value) : maskedEmail(value);
+}
+
+function recipientMatchesConfiguredTestRecipient(params: {
+  channel: HelperNotificationChannel;
+  recipient: string;
+  env: NodeJS.ProcessEnv;
+}) {
+  const expected =
+    params.channel === "SMS"
+      ? envValue(params.env, "NOTIFICATIONS_TEST_PHONE")
+      : envValue(params.env, "NOTIFICATIONS_TEST_EMAIL");
+  if (!expected) return false;
+
+  if (params.channel === "SMS") {
+    const actualPhone = normalizeSmsPhoneForOptOut(params.recipient);
+    const expectedPhone = normalizeSmsPhoneForOptOut(expected);
+    return Boolean(actualPhone && expectedPhone && actualPhone === expectedPhone);
+  }
+
+  const actualEmail = normalizeEmailForOptOut(params.recipient);
+  const expectedEmail = normalizeEmailForOptOut(expected);
+  return Boolean(actualEmail && expectedEmail && actualEmail === expectedEmail);
+}
+
+function recipientReport(params: {
+  channel: HelperNotificationChannel;
+  finalRecipient: string;
+  suppressedRecipient: string | null;
+  env: NodeJS.ProcessEnv;
+}) {
+  return {
+    finalRecipientMasked: maskedRecipient(params.channel, params.finalRecipient),
+    suppressedRecipientMasked: maskedRecipient(params.channel, params.suppressedRecipient),
+    finalRecipientIsTestRecipient: recipientMatchesConfiguredTestRecipient({
+      channel: params.channel,
+      recipient: params.finalRecipient,
+      env: params.env,
+    }),
+  };
 }
 
 function amountIsMeaningful(value: string | null | undefined) {
@@ -338,6 +403,21 @@ export function evaluateDeliveryDispatcherPreflight(
     }
     if (controlledRecipientEnvEnabled) {
       failures.push(`${CONTROLLED_RECIPIENT_MODE_ENV} must be false or unset for real customer sends.`);
+    }
+    if (!flagIsFalseOrUnset(env, FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV)) {
+      failures.push(`${FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV} must be false or unset for real customer sends.`);
+    }
+    if (!flagIsTrue(env, "USE_QUEUE_ERP")) {
+      failures.push("USE_QUEUE_ERP must be exactly true for real customer sends.");
+    }
+    for (const name of ["MLD_QUEUE_BASE_URL", "MLD_QUEUE_TOKEN"]) {
+      if (!envValue(env, name)) failures.push(`${name} is required for real customer sends.`);
+    }
+    if (!flagIsFalseOrUnset(env, "DEMO_NOTIFICATION_SEND_ENABLED")) {
+      failures.push("DEMO_NOTIFICATION_SEND_ENABLED must be false or unset for real customer sends.");
+    }
+    if (!flagIsTrue(env, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES")) {
+      failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES must be exactly true for real customer sends.");
     }
     if (
       env.NODE_ENV !== "production" &&
@@ -400,9 +480,7 @@ export function evaluateDeliveryDispatcherPreflight(
     realCustomerSendMode,
     realCustomerSendEnabled,
     allowRealCustomerSendInNonProduction,
-    forceContactEligibilityForTest:
-      controlledRecipientMode &&
-      flagIsTrue(env, FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV),
+    forceContactEligibilityForTest: flagIsTrue(env, FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV),
     testEmail,
     testPhone,
   };
@@ -1072,6 +1150,9 @@ function reportBase(params: {
     localEmailOptOutActive: params.optOuts.localEmailOptOutActive,
     globalSmsOptOutActive: params.optOuts.globalSmsOptOutActive,
     globalEmailOptOutActive: params.optOuts.globalEmailOptOutActive,
+    finalRecipientMasked: null,
+    suppressedRecipientMasked: null,
+    finalRecipientIsTestRecipient: false,
     existingAttemptId: null,
     existingAttemptStatus: null,
   };
@@ -1169,6 +1250,12 @@ async function dispatchOne(params: {
     controlledRecipientMode: params.preflight.controlledRecipientMode,
     env: params.options.env ?? process.env,
   });
+  const selectedRecipientReport = recipientReport({
+    channel: selected.selectedChannel,
+    finalRecipient: recipient.finalRecipient,
+    suppressedRecipient: recipient.suppressedRecipient,
+    env: params.options.env ?? process.env,
+  });
 
   if (params.preflight.preview) {
     return {
@@ -1180,6 +1267,7 @@ async function dispatchOne(params: {
       fallbackAttemptId: null,
       realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
       finalRecipientKind: recipient.finalRecipientKind,
+      ...selectedRecipientReport,
       externalMessageIdPresent: false,
     };
   }
@@ -1231,6 +1319,7 @@ async function dispatchOne(params: {
       fallbackAttemptId: null,
       realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
       finalRecipientKind: recipient.finalRecipientKind,
+      ...selectedRecipientReport,
       externalMessageIdPresent: false,
     };
   }
@@ -1260,6 +1349,7 @@ async function dispatchOne(params: {
       fallbackAttemptId: null,
       realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
       finalRecipientKind: recipient.finalRecipientKind,
+      ...selectedRecipientReport,
       externalMessageIdPresent: Boolean(result.externalMessageId),
     };
   } catch (error) {
@@ -1284,6 +1374,12 @@ async function dispatchOne(params: {
         channel: "EMAIL",
         productionRecipient: fallback.recipientEmail,
         controlledRecipientMode: params.preflight.controlledRecipientMode,
+        env: params.options.env ?? process.env,
+      });
+      const fallbackRecipientReport = recipientReport({
+        channel: "EMAIL",
+        finalRecipient: fallbackRecipient.finalRecipient,
+        suppressedRecipient: fallbackRecipient.suppressedRecipient,
         env: params.options.env ?? process.env,
       });
       const fallbackAttempt = await createAttempt({
@@ -1328,6 +1424,7 @@ async function dispatchOne(params: {
           fallbackAttemptId: fallbackAttempt.id,
           realRecipientSuppressed: Boolean(fallbackRecipient.suppressedRecipient),
           finalRecipientKind: fallbackRecipient.finalRecipientKind,
+          ...fallbackRecipientReport,
           externalMessageIdPresent: Boolean(fallbackResult.externalMessageId),
         };
       } catch (fallbackError) {
@@ -1346,6 +1443,7 @@ async function dispatchOne(params: {
           fallbackAttemptId: fallbackAttempt.id,
           realRecipientSuppressed: Boolean(fallbackRecipient.suppressedRecipient),
           finalRecipientKind: fallbackRecipient.finalRecipientKind,
+          ...fallbackRecipientReport,
           externalMessageIdPresent: false,
         };
       }
@@ -1361,6 +1459,7 @@ async function dispatchOne(params: {
       fallbackAttemptId: null,
       realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
       finalRecipientKind: recipient.finalRecipientKind,
+      ...selectedRecipientReport,
       externalMessageIdPresent: false,
     };
   }

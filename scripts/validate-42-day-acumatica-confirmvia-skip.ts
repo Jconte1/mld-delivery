@@ -7,6 +7,8 @@ import {
   normalizeAcumaticaConfirmVia,
 } from "../lib/notifications/create42DayDeliveryConfirmationEvents";
 import {
+  buildDeliveryConfirmationAttributeWritebackPayload,
+  DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV,
   SMS_CONFIRMED_VIA_VALUE,
   WEBPAGE_CONFIRMED_VIA_VALUE,
 } from "../lib/notifications/deliveryConfirmationAttributeWritebackQueue";
@@ -207,6 +209,62 @@ assertSourceOmits("lib/notifications/create60DayDeliveryReminderEvents.ts", [
 ]);
 addEqualCheck("webpage confirmation writeback value remains WEBPAGE", WEBPAGE_CONFIRMED_VIA_VALUE, "WEBPAGE");
 addEqualCheck("SMS confirmation writeback value remains AUTOTXT", SMS_CONFIRMED_VIA_VALUE, "AUTOTXT");
+
+const previousDryRunEnv = process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV];
+try {
+  process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV] = "false";
+  const liveSmsPayload = buildDeliveryConfirmationAttributeWritebackPayload({
+    orderType: "SO",
+    orderNumber: "SO42",
+    deliveryConfirmationId: "dc_sms",
+    deliveryGroupId: "dg_sms",
+    deliveryDate: "2026-09-01",
+    contact: { displayName: "SMS Customer" },
+    confirmedVia: SMS_CONFIRMED_VIA_VALUE,
+    source: "SMS",
+  });
+  const liveWebPayload = buildDeliveryConfirmationAttributeWritebackPayload({
+    orderType: "SO",
+    orderNumber: "SO43",
+    deliveryConfirmationId: "dc_web",
+    deliveryGroupId: "dg_web",
+    deliveryDate: "2026-09-02",
+    contact: { displayName: "Web Customer" },
+    confirmedVia: WEBPAGE_CONFIRMED_VIA_VALUE,
+    source: "WEBPAGE",
+  });
+  addCheck(
+    "SMS confirmation can build live AUTOTXT writeback payload",
+    liveSmsPayload.dryRun === false &&
+      liveSmsPayload.confirmedVia === SMS_CONFIRMED_VIA_VALUE &&
+      liveSmsPayload.source === "SMS",
+    liveSmsPayload
+  );
+  addCheck(
+    "web confirmation can build live WEBPAGE writeback payload",
+    liveWebPayload.dryRun === false &&
+      liveWebPayload.confirmedVia === WEBPAGE_CONFIRMED_VIA_VALUE &&
+      liveWebPayload.source === "WEBPAGE",
+    liveWebPayload
+  );
+
+  process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV] = "true";
+  const dryRunPayload = buildDeliveryConfirmationAttributeWritebackPayload({
+    orderType: "SO",
+    orderNumber: "SO44",
+    deliveryConfirmationId: "dc_dry",
+    deliveryGroupId: "dg_dry",
+    deliveryDate: "2026-09-03",
+    contact: { displayName: "Dry Run Customer" },
+  });
+  addEqualCheck("confirmation writeback payload defaults back to dry-run when env is true", dryRunPayload.dryRun, true);
+} finally {
+  if (previousDryRunEnv === undefined) {
+    delete process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV];
+  } else {
+    process.env[DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV] = previousDryRunEnv;
+  }
+}
 
 const failed = checks.filter((check) => !check.passed);
 console.log(

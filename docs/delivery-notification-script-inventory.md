@@ -20,6 +20,8 @@ Status: package script targets audited on 2026-08-24. No current package script 
 
 Production dispatcher sends are still gated by `DELIVERY_REAL_CUSTOMER_SEND_ENABLED=true`. Controlled-recipient test envs are not a production send path.
 
+`run:delivery-interval` supports real production creation/dispatch for 180, 90, 60, and the initial 42-day confirmation request. The 42-day path dispatches only the exact event ids created by the current run and does not run no-response follow-up.
+
 ## Preview And Controlled Testing
 
 - `test:delivery-intervals:production-style`
@@ -59,4 +61,3 @@ Production dispatcher sends are still gated by `DELIVERY_REAL_CUSTOMER_SEND_ENAB
 The obsolete `manual-demo:test-interval-emails-with-salesperson` package script was removed because it targeted a deleted demo file.
 
 The remaining `scripts/manual-demo/demoNotificationDispatch.ts` helper is kept only because `run-42-day-special-date-rule-test.ts` imports it. It remains quarantined under `scripts/manual-demo/` and requires demo send guards before any provider call.
-

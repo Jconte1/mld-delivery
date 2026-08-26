@@ -163,8 +163,8 @@ function main() {
   );
   assertIncludes(
     confirmationPage,
-    "Items For This Delivery",
-    "42-day confirmation page still renders Items For This Delivery heading",
+    "DeliveryItemsForThisDelivery",
+    "42-day confirmation page still renders the shared Items For This Delivery component",
     failures
   );
 

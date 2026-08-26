@@ -200,6 +200,23 @@ function selectFields(record: Record<string, unknown>, select?: Record<string, b
   );
 }
 
+function matchesSimpleWhere(record: Record<string, unknown>, where?: Record<string, unknown>) {
+  if (!where) return true;
+
+  for (const [key, expected] of Object.entries(where)) {
+    const actual = record[key];
+    if (expected && typeof expected === "object" && !Array.isArray(expected)) {
+      const condition = expected as { in?: unknown[]; not?: unknown };
+      if (condition.in && !condition.in.includes(actual)) return false;
+      if ("not" in condition && actual === condition.not) return false;
+      continue;
+    }
+    if (actual !== expected) return false;
+  }
+
+  return true;
+}
+
 function matchesDate(left: Date | null, right: Date) {
   return Boolean(left && dateKey(left) === dateKey(right));
 }
@@ -382,21 +399,51 @@ class MockDeliveryStore {
           .length,
     },
     notificationAttempt: {
-      findFirst: async (args: { where: { externalMessageId?: string | null } }) => {
-        const attempt = this.notificationAttempts.find(
-          (row) => row.externalMessageId === args.where.externalMessageId
+      findFirst: async (args: {
+        where?: Record<string, unknown>;
+        orderBy?: { attemptNumber?: "desc" | "asc"; createdAt?: "desc" | "asc" };
+        include?: { notificationEvent?: boolean };
+        select?: Record<string, boolean>;
+      }) => {
+        const matches = this.notificationAttempts.filter((row) =>
+          matchesSimpleWhere(row as unknown as Record<string, unknown>, args.where)
         );
+        if (args.orderBy?.attemptNumber === "desc") {
+          matches.sort((left, right) => right.attemptNumber - left.attemptNumber);
+        } else if (args.orderBy?.attemptNumber === "asc") {
+          matches.sort((left, right) => left.attemptNumber - right.attemptNumber);
+        } else {
+          matches.sort((left, right) => right.createdAt.getTime() - left.createdAt.getTime());
+        }
+        const attempt = matches[0];
         if (!attempt) return null;
         const event = this.decorateNotificationEvent(
           this.notificationEvents.find((row) => row.id === attempt.notificationEventId)
         );
-        return { ...attempt, notificationEvent: event };
+        if (args.select) {
+          return selectFields(attempt as unknown as Record<string, unknown>, args.select);
+        }
+        return args.include?.notificationEvent ? { ...attempt, notificationEvent: event } : attempt;
       },
       update: async (args: { where: { id: string }; data: Partial<NotificationAttemptRecord> }) => {
         const record = this.notificationAttempts.find((row) => row.id === args.where.id);
         if (!record) throw new Error(`Missing NotificationAttempt ${args.where.id}`);
         applyData(record as unknown as Record<string, unknown>, args.data as Record<string, unknown>);
         return record;
+      },
+      updateMany: async (args: {
+        where?: Record<string, unknown>;
+        data: Partial<NotificationAttemptRecord>;
+      }) => {
+        let count = 0;
+        for (const record of this.notificationAttempts) {
+          if (!matchesSimpleWhere(record as unknown as Record<string, unknown>, args.where)) {
+            continue;
+          }
+          applyData(record as unknown as Record<string, unknown>, args.data as Record<string, unknown>);
+          count += 1;
+        }
+        return { count };
       },
     },
     notificationEvent: {
@@ -405,6 +452,29 @@ class MockDeliveryStore {
           (row) => row.externalMessageId === args.where.externalMessageId
         );
         return this.decorateNotificationEvent(event);
+      },
+      update: async (args: {
+        where: { id: string };
+        data: Partial<NotificationEventRecord>;
+      }) => {
+        const event = this.notificationEvents.find((row) => row.id === args.where.id);
+        if (!event) throw new Error(`Missing NotificationEvent ${args.where.id}`);
+        applyData(event as unknown as Record<string, unknown>, args.data as Record<string, unknown>);
+        return event;
+      },
+      updateMany: async (args: {
+        where?: Record<string, unknown>;
+        data: Partial<NotificationEventRecord>;
+      }) => {
+        let count = 0;
+        for (const event of this.notificationEvents) {
+          if (!matchesSimpleWhere(event as unknown as Record<string, unknown>, args.where)) {
+            continue;
+          }
+          applyData(event as unknown as Record<string, unknown>, args.data as Record<string, unknown>);
+          count += 1;
+        }
+        return { count };
       },
     },
     twilioMessageStatusCallback: {

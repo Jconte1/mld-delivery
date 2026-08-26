@@ -114,6 +114,7 @@ export type Create42DayDeliveryConfirmationEventsSummary = {
   wouldUpdateEvents: number;
   eventsDeduped: number;
   eventsSkipped: number;
+  createdEventIds: string[];
   scheduledEvents: number;
   scheduledByChannel: {
     SMS: number;
@@ -203,6 +204,7 @@ function emptySummary(params: {
     wouldUpdateEvents: 0,
     eventsDeduped: 0,
     eventsSkipped: 0,
+    createdEventIds: [],
     scheduledEvents: 0,
     scheduledByChannel: {
       SMS: 0,
@@ -652,6 +654,7 @@ export async function create42DayDeliveryConfirmationEvents(
             select: notificationEventSelect,
           });
           summary.eventsCreated += 1;
+          summary.createdEventIds.push(event.id);
         }
       }
 
@@ -818,6 +821,7 @@ export async function create42DayDeliveryConfirmationEvents(
           select: notificationEventSelect,
         });
         summary.eventsCreated += 1;
+        summary.createdEventIds.push(event.id);
       }
 
       if (event.status === NotificationEventStatus.SKIPPED) {

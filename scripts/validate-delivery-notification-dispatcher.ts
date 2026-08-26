@@ -399,6 +399,8 @@ async function runTwilioStatusValidation(failures: string[]) {
 async function main() {
   const failures: string[] = [];
   const cli = read("scripts/dispatch-delivery-notifications.ts");
+  const packageJson = read("package.json");
+  const productionIntervalRunner = read("scripts/run-delivery-interval.ts");
   const dispatcher = read("lib/notifications/deliveryNotificationDispatcher.ts");
   const providers = read("lib/notifications/deliveryNotificationProviders.ts");
   const twilioStatus = read("lib/notifications/handleTwilioMessageStatus.ts");
@@ -421,11 +423,88 @@ async function main() {
     failures
   );
   assert(
+    includes(packageJson, "\"run:delivery-interval\"") &&
+      includes(packageJson, "scripts/run-delivery-interval.ts"),
+    "package.json must expose the real production delivery interval runner",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "SUPPORTED_INTERVALS = [\"180\", \"90\", \"60\", \"42\"]") &&
+      includes(productionIntervalRunner, "RUN REAL 180 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 60 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 42 DAY CUSTOMER CONFIRMATION NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "options.confirmPhrase !== config.confirmPhrase") &&
+      includes(productionIntervalRunner, "create180DayDeliveryReminderEvents") &&
+      includes(productionIntervalRunner, "create90DayDeliveryReminderEvents") &&
+      includes(productionIntervalRunner, "create60DayDeliveryReminderEvents") &&
+      includes(productionIntervalRunner, "create42DayDeliveryConfirmationEvents") &&
+      includes(productionIntervalRunner, "dispatchDeliveryNotifications") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_180") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_90") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_60") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_42") &&
+      includes(productionIntervalRunner, "NotificationActionType.DELIVERY_REMINDER") &&
+      includes(productionIntervalRunner, "NotificationActionType.DELIVERY_CONFIRMATION_REQUEST"),
+    "production interval runner must support 180/90/60/42 with interval-specific confirmations and production create/dispatch paths",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "USE_QUEUE_ERP") &&
+      includes(productionIntervalRunner, "MLD_QUEUE_BASE_URL") &&
+      includes(productionIntervalRunner, "MLD_QUEUE_TOKEN") &&
+      includes(productionIntervalRunner, "createSummary.freshImport.perOrderFailed") &&
+      includes(productionIntervalRunner, "deliveryGroupsSkippedFailedImport"),
+    "production interval runner must require queue-backed import and fail closed on fresh-import failures",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED") &&
+      includes(productionIntervalRunner, "DELIVERY_CONTROLLED_RECIPIENT_MODE") &&
+      includes(productionIntervalRunner, "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST") &&
+      includes(productionIntervalRunner, "DEMO_NOTIFICATION_SEND_ENABLED") &&
+      includes(productionIntervalRunner, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES") &&
+      includes(productionIntervalRunner, "finalRecipientIsTestRecipient") &&
+      includes(productionIntervalRunner, "finalRecipientKind !== \"customer\"") &&
+      includes(productionIntervalRunner, "attemptsAfter !== attemptsBefore"),
+    "production interval runner must reject controlled/test routing and forced eligibility before real sends",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN") &&
+      includes(productionIntervalRunner, "confirmationWritebackDryRunRequired: false") &&
+      includes(productionIntervalRunner, "confirmationWritebackLivePayloadsEnabled") &&
+      includes(productionIntervalRunner, "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN") &&
+      includes(productionIntervalRunner, "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN") &&
+      includes(productionIntervalRunner, "DELIVERY_PREPAYMENT_HOLD_DRY_RUN"),
+    "production interval runner must require live 42 confirmation writeback posture while keeping unrelated writeback/hold dry-run flags protected",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "dispatchOnlyCurrentRunCreatedEvents: true") &&
+      includes(productionIntervalRunner, "createdEventIdsForCurrentRun") &&
+      includes(productionIntervalRunner, "currentRunCreatedEventIds") &&
+      includes(productionIntervalRunner, "otherScheduledEventsForInterval") &&
+      includes(productionIntervalRunner, "oldScheduledEventsWarning"),
+    "42 production runner must dispatch only current-run created event ids and report old scheduled rows",
+    failures
+  );
+  assert(
+    includes(productionIntervalRunner, "shell: process.platform === \"win32\"") &&
+      includes(productionIntervalRunner, "prisma\", \"migrate\", \"status\""),
+    "production interval runner must use a Windows-safe subprocess for its internal Prisma migration status check",
+    failures
+  );
+  assert(
     includes(dispatcher, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED") &&
       includes(dispatcher, "DELIVERY_ALLOW_REAL_CUSTOMER_SEND_IN_NON_PRODUCTION") &&
+      includes(dispatcher, "USE_QUEUE_ERP") &&
+      includes(dispatcher, "MLD_QUEUE_BASE_URL") &&
+      includes(dispatcher, "MLD_QUEUE_TOKEN") &&
+      includes(dispatcher, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES") &&
       includes(dispatcher, "DELIVERY_CONTROLLED_RECIPIENT_CONFIRM_PHRASE") &&
       includes(dispatcher, "Controlled recipient confirmation phrase did not match."),
-    "dispatcher preflight must gate real sends and require exact controlled confirmation",
+    "dispatcher preflight must gate real sends, queue-backed import, webhook signatures, and exact controlled confirmation",
     failures
   );
   assert(
@@ -561,6 +640,16 @@ async function main() {
     "broad-send preflight must reject controlled-recipient env during real sends",
     failures
   );
+  assert(
+    broad.failures.includes("DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST must be false or unset for real customer sends."),
+    "broad-send preflight must reject forced contact eligibility during real sends",
+    failures
+  );
+  assert(
+    broad.failures.includes("USE_QUEUE_ERP must be exactly true for real customer sends."),
+    "broad-send preflight must require queue-backed ERP for real sends",
+    failures
+  );
 
   const productionRealSendEnv: NodeJS.ProcessEnv = {
     ...safeEnv,
@@ -568,6 +657,11 @@ async function main() {
     DELIVERY_REAL_CUSTOMER_SEND_ENABLED: "true",
     DELIVERY_CONTROLLED_RECIPIENT_MODE: "false",
     DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST: "false",
+    DEMO_NOTIFICATION_SEND_ENABLED: "false",
+    USE_QUEUE_ERP: "true",
+    MLD_QUEUE_BASE_URL: "https://mld-queue.example.test",
+    MLD_QUEUE_TOKEN: "token",
+    TWILIO_WEBHOOK_VALIDATE_SIGNATURES: "true",
   };
   const realCustomer = evaluateDeliveryDispatcherPreflight(
     { send: true, controlledRecipientSend: false, testRunId: "validation" },
@@ -581,6 +675,69 @@ async function main() {
   assert(
     realCustomer.mode === "real-customer send" && realCustomer.realCustomerSendMode,
     "real customer preflight must report real-customer send mode",
+    failures
+  );
+
+  const realCustomerWithForcedEligibility = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...productionRealSendEnv, DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST: "true" }
+  );
+  assert(
+    !realCustomerWithForcedEligibility.ok,
+    "real customer preflight must reject forced contact eligibility",
+    failures
+  );
+  assert(
+    realCustomerWithForcedEligibility.failures.includes(
+      "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST must be false or unset for real customer sends."
+    ),
+    "real customer preflight must include forced eligibility rejection reason",
+    failures
+  );
+
+  const realCustomerWithDemoMode = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...productionRealSendEnv, DEMO_NOTIFICATION_SEND_ENABLED: "true" }
+  );
+  assert(!realCustomerWithDemoMode.ok, "real customer preflight must reject demo send mode", failures);
+  assert(
+    realCustomerWithDemoMode.failures.includes(
+      "DEMO_NOTIFICATION_SEND_ENABLED must be false or unset for real customer sends."
+    ),
+    "real customer preflight must include demo mode rejection reason",
+    failures
+  );
+
+  const realCustomerWithQueueDisabled = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...productionRealSendEnv, USE_QUEUE_ERP: "false" }
+  );
+  assert(!realCustomerWithQueueDisabled.ok, "real customer preflight must reject disabled queue ERP", failures);
+  assert(
+    realCustomerWithQueueDisabled.failures.includes("USE_QUEUE_ERP must be exactly true for real customer sends."),
+    "real customer preflight must include queue ERP rejection reason",
+    failures
+  );
+
+  const realCustomerMissingTwilio = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...productionRealSendEnv, TWILIO_AUTH_TOKEN: "" }
+  );
+  assert(!realCustomerMissingTwilio.ok, "real customer preflight must reject missing Twilio env", failures);
+  assert(
+    realCustomerMissingTwilio.failures.includes("TWILIO_AUTH_TOKEN is required for dispatcher sends."),
+    "real customer preflight must include missing Twilio provider env reason",
+    failures
+  );
+
+  const realCustomerMissingGraph = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...productionRealSendEnv, MS_GRAPH_CLIENT_SECRET: "" }
+  );
+  assert(!realCustomerMissingGraph.ok, "real customer preflight must reject missing Graph env", failures);
+  assert(
+    realCustomerMissingGraph.failures.includes("MS_GRAPH_CLIENT_SECRET is required for dispatcher sends."),
+    "real customer preflight must include missing Graph provider env reason",
     failures
   );
 

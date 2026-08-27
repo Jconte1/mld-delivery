@@ -45,6 +45,7 @@
     "refresh:contact-opt-ins": "tsx -r dotenv/config scripts/refresh-contact-opt-ins-from-erp.ts",
     "validate:salesperson-rendering": "tsx scripts/validate-salesperson-rendering.ts",
     "validate:delivery-date-eligibility": "tsx scripts/validate-delivery-date-eligibility.ts",
+    "validate:delivery-requested-date-writeback": "tsx scripts/validate-delivery-requested-date-writeback.ts",
     "validate:twilio-inbound": "tsx scripts/validate-twilio-inbound-sms-foundation.ts",
     "validate:twilio-inbound-sms-foundation": "tsx scripts/validate-twilio-inbound-sms-foundation.ts",
     "test:42-day-special-date-rules": "tsx -r dotenv/config scripts/run-42-day-special-date-rule-test.ts",

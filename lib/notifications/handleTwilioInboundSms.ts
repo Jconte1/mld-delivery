@@ -9,6 +9,11 @@ import {
   type EnqueueDeliveryConfirmationAttributeWritebackOptions,
 } from "@/lib/notifications/deliveryConfirmationAttributeWritebackQueue";
 import {
+  enqueueDeliveryRequestedDateWriteback,
+  loadDeliveryRequestedDateWritebackLineNumbers,
+  type EnqueueDeliveryRequestedDateWritebackOptions,
+} from "@/lib/notifications/deliveryRequestedDateWritebackQueue";
+import {
   enqueueSmsOptOutContactWritebacks,
   type ContactOptInWritebackDispatchOptions,
 } from "@/lib/notifications/contactOptInWritebackActions";
@@ -40,7 +45,7 @@ import type { TwilioFormPayload } from "@/lib/notifications/twilioWebhook";
 
 type DeliveryTwilioInboundClient = Pick<
   typeof prisma,
-  "twilioInboundMessage" | "deliveryConfirmation" | "smsOptOut" | "contact"
+  "twilioInboundMessage" | "deliveryConfirmation" | "smsOptOut" | "contact" | "orderDeliveryGroupLine"
 >;
 
 type InboundCandidate = Awaited<ReturnType<typeof findActiveDeliveryConfirmationCandidates>>[number];
@@ -567,6 +572,7 @@ async function applyRequestedDate(params: {
   candidate: InboundCandidate;
   body: string | null;
   now: Date;
+  queueOptions?: EnqueueDeliveryRequestedDateWritebackOptions;
 }) {
   const validation = validateRequestedDeliveryDate({
     rawValue: params.body ?? "",
@@ -587,7 +593,7 @@ async function applyRequestedDate(params: {
         lastSmsResponseBody: params.body,
       },
     });
-    return validation.responseMessage;
+    return { responseMessage: validation.responseMessage, writebackJobId: null, error: null };
   }
 
   await params.client.deliveryConfirmation.update({
@@ -613,7 +619,44 @@ async function applyRequestedDate(params: {
     },
   });
 
-  return getSmsNewDateReceivedMessage(validation.date);
+  const responseMessage = getSmsNewDateReceivedMessage(validation.date);
+
+  try {
+    const lineNumbers = await loadDeliveryRequestedDateWritebackLineNumbers({
+      deliveryGroupId: params.candidate.deliveryGroupId,
+      client: params.client,
+    });
+    const queued = await enqueueDeliveryRequestedDateWriteback(
+      {
+        orderType: params.candidate.orderType,
+        orderNumber: params.candidate.orderNumber,
+        deliveryConfirmationId: params.candidate.id,
+        deliveryGroupId: params.candidate.deliveryGroupId,
+        originalDeliveryDate: params.candidate.deliveryDate,
+        requestedDeliveryDate: validation.date,
+        lineNumbers,
+        source: "SMS",
+        requestedAt: params.now,
+        contact: {
+          displayName: params.candidate.contact.displayName,
+          companyName: params.candidate.contact.companyName,
+          firstName: params.candidate.contact.firstName,
+          lastName: params.candidate.contact.lastName,
+          email: params.candidate.contact.email,
+          phone: params.candidate.contact.phone1 ?? params.candidate.contact.phone2,
+        },
+      },
+      params.queueOptions
+    );
+
+    return { responseMessage, writebackJobId: queued.jobId, error: null };
+  } catch (error) {
+    return {
+      responseMessage,
+      writebackJobId: null,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 async function applyUnrecognizedResponse(params: {
@@ -764,7 +807,8 @@ export async function handleTwilioInboundSms(params: {
   payload: TwilioFormPayload;
   prismaClient?: DeliveryTwilioInboundClient;
   now?: Date;
-  queueOptions?: EnqueueDeliveryConfirmationAttributeWritebackOptions;
+  queueOptions?: EnqueueDeliveryConfirmationAttributeWritebackOptions &
+    EnqueueDeliveryRequestedDateWritebackOptions;
   contactOptInWriteback?: ContactOptInWritebackDispatchOptions;
   currentStateRefresher?: SmsCurrentStateRefresher;
 }): Promise<HandleTwilioInboundSmsResult> {
@@ -1014,7 +1058,16 @@ export async function handleTwilioInboundSms(params: {
         },
       });
     } else if (parsedIntent === "REQUESTED_DATE") {
-      responseMessage = await applyRequestedDate({ client, candidate, body, now });
+      const requestedDateResult = await applyRequestedDate({
+        client,
+        candidate,
+        body,
+        now,
+        queueOptions: params.queueOptions,
+      });
+      responseMessage = requestedDateResult.responseMessage;
+      writebackJobId = requestedDateResult.writebackJobId;
+      writebackError = requestedDateResult.error;
     } else if (isAwaitingNewDate(candidate.status)) {
       responseMessage = await applyInvalidDateResponse({
         client,

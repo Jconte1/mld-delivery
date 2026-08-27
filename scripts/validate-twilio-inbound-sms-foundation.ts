@@ -107,6 +107,13 @@ type DeliveryConfirmationRecord = {
   } | null;
 };
 
+type OrderDeliveryGroupLineRecord = {
+  id: string;
+  orderDeliveryGroupId: string;
+  lineNbr: number | null;
+  isActive: boolean;
+};
+
 type SmsOptOutRecord = {
   id: string;
   contactId: string | null;
@@ -227,6 +234,7 @@ class MockDeliveryStore {
   notificationEvents: NotificationEventRecord[] = [];
   notificationAttempts: NotificationAttemptRecord[] = [];
   deliveryConfirmations: DeliveryConfirmationRecord[] = [];
+  orderDeliveryGroupLines: OrderDeliveryGroupLineRecord[] = [];
   smsOptOuts: SmsOptOutRecord[] = [];
   inboundMessages: TwilioInboundRecord[] = [];
   statusCallbacks: TwilioStatusRecord[] = [];
@@ -398,6 +406,25 @@ class MockDeliveryStore {
       count: async (args: { where?: Record<string, unknown> }) =>
         this.deliveryConfirmations.filter((record) => this.confirmationMatchesWhere(record, args.where))
           .length,
+    },
+    orderDeliveryGroupLine: {
+      findMany: async (args: {
+        where: { orderDeliveryGroupId: string; isActive?: boolean };
+        orderBy?: { lineNbr?: "asc" | "desc" };
+        select?: Record<string, boolean>;
+      }) => {
+        const rows = this.orderDeliveryGroupLines.filter(
+          (row) =>
+            row.orderDeliveryGroupId === args.where.orderDeliveryGroupId &&
+            (args.where.isActive === undefined || row.isActive === args.where.isActive)
+        );
+        rows.sort((left, right) => {
+          const leftLine = left.lineNbr ?? 0;
+          const rightLine = right.lineNbr ?? 0;
+          return args.orderBy?.lineNbr === "desc" ? rightLine - leftLine : leftLine - rightLine;
+        });
+        return rows.map((row) => selectFields(row as unknown as Record<string, unknown>, args.select));
+      },
     },
     notificationAttempt: {
       findFirst: async (args: {
@@ -605,6 +632,12 @@ class MockDeliveryStore {
       },
     };
     this.deliveryConfirmations.push(confirmation);
+    this.orderDeliveryGroupLines.push({
+      id: this.id("delivery_group_line"),
+      orderDeliveryGroupId: deliveryGroupId,
+      lineNbr: 1,
+      isActive: true,
+    });
     return confirmation;
   }
 
@@ -820,7 +853,8 @@ async function runInboundReplyValidation() {
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
   });
-  await handleTwilioInboundSms({
+  const dateAfterNQueueCount = duplicateRequests.length;
+  const dateAfterNResult = await handleTwilioInboundSms({
     payload: inboundPayload("09/01/2026", "SM-DATE-AFTER-N"),
     prismaClient: dateAfterNStore.client,
     now: NOW,
@@ -837,6 +871,25 @@ async function runInboundReplyValidation() {
     "date after N requested date"
   );
   assertEqual(dateAfterN.manualReviewRequired, true, "date after N manual review");
+  assertEqual(
+    duplicateRequests.length,
+    dateAfterNQueueCount + 1,
+    "date after N queues requested-date writeback"
+  );
+  assertEqual(dateAfterNResult.writebackJobId, `mock-job-${duplicateRequests.length}`, "date after N writeback job id");
+  assertEqual(duplicateRequests[duplicateRequests.length - 1].payload.source, "SMS", "date after N writeback source");
+  assertEqual(
+    JSON.stringify(duplicateRequests[duplicateRequests.length - 1].payload.lineNumbers),
+    JSON.stringify([1]),
+    "date after N writeback line numbers"
+  );
+  assert(
+    !Object.prototype.hasOwnProperty.call(
+      duplicateRequests[duplicateRequests.length - 1].payload,
+      "RequestedOn"
+    ),
+    "delivery queue payload must not include header RequestedOn"
+  );
 
   const dateWithoutNStore = new MockDeliveryStore();
   const dateWithoutN = dateWithoutNStore.seedConfirmation({ phone: "+18015550123" });
@@ -857,6 +910,7 @@ async function runInboundReplyValidation() {
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
   });
+  const invalidDateQueueCount = duplicateRequests.length;
   const invalidDateResult = await handleTwilioInboundSms({
     payload: inboundPayload("tomorrow", "SM-INVALID-DATE"),
     prismaClient: invalidDateStore.client,
@@ -864,7 +918,9 @@ async function runInboundReplyValidation() {
     queueOptions: duplicateOptions,
   });
   assertIncludes(invalidDateResult.responseMessage, "MM/DD/YYYY", "invalid date response");
+  assertEqual(duplicateRequests.length, invalidDateQueueCount, "invalid date must not queue writeback");
 
+  const weekendQueueCount = duplicateRequests.length;
   const weekendResult = await handleTwilioInboundSms({
     payload: inboundPayload("08/29/2026", "SM-WEEKEND-DATE"),
     prismaClient: newStoreWithAwaitingConfirmation().client,
@@ -872,6 +928,7 @@ async function runInboundReplyValidation() {
     queueOptions: duplicateOptions,
   });
   assertIncludes(weekendResult.responseMessage, "weekend", "weekend date response");
+  assertEqual(duplicateRequests.length, weekendQueueCount, "weekend date must not queue writeback");
 
   const pastResult = await handleTwilioInboundSms({
     payload: inboundPayload("07/20/2026", "SM-PAST-DATE"),
@@ -916,6 +973,7 @@ async function runInboundReplyValidation() {
     "Wyoming on Tuesdays only",
     "Wyoming invalid weekday response"
   );
+  assertEqual(duplicateRequests.length, weekendQueueCount, "Wyoming invalid weekday must not queue writeback");
 
   const wyomingValidStore = new MockDeliveryStore();
   const wyomingValid = wyomingValidStore.seedConfirmation({
@@ -925,6 +983,7 @@ async function runInboundReplyValidation() {
     addressState: "Wyoming",
     postalCode: "82001",
   });
+  const wyomingValidQueueCount = duplicateRequests.length;
   await handleTwilioInboundSms({
     payload: inboundPayload("09/01/2026", "SM-WY-TUESDAY-DATE"),
     prismaClient: wyomingValidStore.client,
@@ -938,6 +997,11 @@ async function runInboundReplyValidation() {
   );
   assertEqual(dateKey(wyomingValid.requestedNewDate as Date), "2026-09-01", "Wyoming Tuesday date");
   assertEqual(wyomingValid.manualReviewRequired, true, "Wyoming Tuesday manual review");
+  assertEqual(
+    duplicateRequests.length,
+    wyomingValidQueueCount + 1,
+    "Wyoming valid weekday queues requested-date writeback"
+  );
 
   const mccallInvalidStore = new MockDeliveryStore();
   const mccallInvalid = mccallInvalidStore.seedConfirmation({
@@ -947,6 +1011,7 @@ async function runInboundReplyValidation() {
     addressState: "ID",
     postalCode: "83638",
   });
+  const mccallInvalidQueueCount = duplicateRequests.length;
   const mccallInvalidResult = await handleTwilioInboundSms({
     payload: inboundPayload("09/01/2026", "SM-MCCALL-TUESDAY-DATE"),
     prismaClient: mccallInvalidStore.client,
@@ -964,6 +1029,52 @@ async function runInboundReplyValidation() {
     "McCall, Idaho on Mondays only",
     "McCall invalid weekday response"
   );
+  assertEqual(duplicateRequests.length, mccallInvalidQueueCount, "McCall invalid weekday must not queue writeback");
+
+  const noLineStore = new MockDeliveryStore();
+  const noLineConfirmation = noLineStore.seedConfirmation({
+    phone: "+18015550123",
+    status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
+  });
+  noLineStore.orderDeliveryGroupLines = [];
+  const noLineRequests: QueueRequest[] = [];
+  const noLineResult = await handleTwilioInboundSms({
+    payload: inboundPayload("09/01/2026", "SM-DATE-NO-LINES"),
+    prismaClient: noLineStore.client,
+    now: NOW,
+    queueOptions: {
+      baseUrl: "http://mld-queue.local.test",
+      token: "test-token",
+      fetchImpl: mockQueueFetch(noLineRequests),
+    },
+  });
+  assertEqual(
+    noLineConfirmation.status,
+    DeliveryConfirmationStatus.NEW_DATE_REQUESTED,
+    "delivery group with no lines still records local date request"
+  );
+  assertEqual(noLineRequests.length, 0, "delivery group with no lines must not queue writeback");
+  assertIncludes(noLineResult.writebackError, "no active line memberships", "delivery group with no lines writeback error");
+
+  const missingLineNbrStore = new MockDeliveryStore();
+  missingLineNbrStore.seedConfirmation({
+    phone: "+18015550123",
+    status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
+  });
+  missingLineNbrStore.orderDeliveryGroupLines[0].lineNbr = null;
+  const missingLineNbrRequests: QueueRequest[] = [];
+  const missingLineNbrResult = await handleTwilioInboundSms({
+    payload: inboundPayload("09/01/2026", "SM-DATE-MISSING-LINE"),
+    prismaClient: missingLineNbrStore.client,
+    now: NOW,
+    queueOptions: {
+      baseUrl: "http://mld-queue.local.test",
+      token: "test-token",
+      fetchImpl: mockQueueFetch(missingLineNbrRequests),
+    },
+  });
+  assertEqual(missingLineNbrRequests.length, 0, "missing lineNbr must not queue writeback");
+  assertIncludes(missingLineNbrResult.writebackError, "line number", "missing lineNbr writeback error");
 
   const mccallValidStore = new MockDeliveryStore();
   const mccallValid = mccallValidStore.seedConfirmation({

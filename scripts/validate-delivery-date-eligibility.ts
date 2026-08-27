@@ -205,7 +205,7 @@ addCheck(
 );
 addCheck(
   "19. Invalid requested date does not set NEW_DATE_REQUESTED",
-  sourceContains("lib/notifications/handleTwilioInboundSms.ts", /if \(!validation\.valid\)[\s\S]*return validation\.responseMessage;/)
+  sourceContains("lib/notifications/handleTwilioInboundSms.ts", /if \(!validation\.valid\)[\s\S]*return \{\s*responseMessage:\s*validation\.responseMessage/)
 );
 
 const requestDifferentSource = requestDifferentDateSource();
@@ -216,7 +216,15 @@ addCheck(
   )
 );
 addCheck(
-  "21. Delivery confirmation date eligibility does not call Acumatica directly",
+  "21. Request Different Date queues requested-date writeback after local update",
+  /deliveryConfirmation\.update[\s\S]*enqueueDeliveryRequestedDateWriteback/.test(requestDifferentSource)
+);
+addCheck(
+  "22. Request Different Date resolves delivery-group member lines",
+  /loadDeliveryRequestedDateWritebackLineNumbers/.test(requestDifferentSource)
+);
+addCheck(
+  "23. Delivery confirmation date eligibility does not call Acumatica directly",
   [
     "lib/notifications/deliveryDateEligibility.ts",
     "lib/notifications/deliveryConfirmationSmsReplies.ts",
@@ -231,29 +239,29 @@ const mccall83638Sms = smsFor({ state: "ID", postalCode: "83638" });
 const mccall83635Sms = smsFor({ state: "ID", postalCode: "83635" });
 const idahoStandardSms = smsFor({ state: "ID", postalCode: "83702" });
 addCheck(
-  "22. Standard 42-day SMS does not include Wyoming/McCall route note and uses short link",
+  "24. Standard 42-day SMS does not include Wyoming/McCall route note and uses short link",
   !/Wyoming deliveries|McCall deliveries/.test(standardSms) &&
     standardSms.includes("https://delivery.example.test/c/abc123") &&
     !standardSms.includes("/delivery/confirm/abc123"),
   { standardSms }
 );
 addCheck(
-  "23. Wyoming 42-day SMS includes Tuesday-only note",
+  "25. Wyoming 42-day SMS includes Tuesday-only note",
   wyomingSms.includes("Wyoming deliveries are available on Tuesdays only."),
   { wyomingSms }
 );
 addCheck(
-  "24. McCall ZIP 83638 42-day SMS includes Monday-only note",
+  "26. McCall ZIP 83638 42-day SMS includes Monday-only note",
   mccall83638Sms.includes("McCall deliveries are available on Mondays only."),
   { mccall83638Sms }
 );
 addCheck(
-  "25. McCall ZIP 83635 42-day SMS includes Monday-only note",
+  "27. McCall ZIP 83635 42-day SMS includes Monday-only note",
   mccall83635Sms.includes("McCall deliveries are available on Mondays only."),
   { mccall83635Sms }
 );
 addCheck(
-  "26. Idaho non-McCall ZIP does not include McCall note",
+  "28. Idaho non-McCall ZIP does not include McCall note",
   !idahoStandardSms.includes("McCall deliveries are available on Mondays only."),
   { idahoStandardSms }
 );

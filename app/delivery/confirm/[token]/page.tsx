@@ -16,6 +16,10 @@ import {
   type DeliveryDateEligibilityAddress,
 } from "@/lib/notifications/deliveryDateEligibility";
 import {
+  enqueueDeliveryRequestedDateWriteback,
+  loadDeliveryRequestedDateWritebackLineNumbers,
+} from "@/lib/notifications/deliveryRequestedDateWritebackQueue";
+import {
   dateFromKey,
   dateKey,
   formatCustomerFriendlyDate,
@@ -211,6 +215,43 @@ async function requestDifferentDate(formData: FormData) {
         "Customer requested a different delivery date through the webpage confirmation link.",
     },
   });
+
+  try {
+    const lineNumbers = await loadDeliveryRequestedDateWritebackLineNumbers({
+      deliveryGroupId: confirmation.deliveryGroupId,
+      client: prisma,
+    });
+    const queued = await enqueueDeliveryRequestedDateWriteback({
+      orderType: confirmation.orderType,
+      orderNumber: confirmation.orderNumber,
+      deliveryConfirmationId: confirmation.id,
+      deliveryGroupId: confirmation.deliveryGroupId,
+      originalDeliveryDate: confirmation.deliveryDate,
+      requestedDeliveryDate: validation.date,
+      lineNumbers,
+      source: "WEBPAGE",
+      requestedAt: now,
+      contact: confirmation.contact,
+    });
+
+    console.info("[delivery-requested-date-writeback] queued requested-date job", {
+      jobId: queued.jobId,
+      deliveryConfirmationId: confirmation.id,
+      orderType: confirmation.orderType,
+      orderNumber: confirmation.orderNumber,
+      deliveryGroupId: confirmation.deliveryGroupId,
+      lineCount: queued.payload.lineNumbers.length,
+      dryRun: queued.payload.dryRun,
+    });
+  } catch (error) {
+    console.error("[delivery-requested-date-writeback] enqueue failed after request saved", {
+      deliveryConfirmationId: confirmation.id,
+      orderType: confirmation.orderType,
+      orderNumber: confirmation.orderNumber,
+      deliveryGroupId: confirmation.deliveryGroupId,
+      error: error instanceof Error ? error.message : String(error),
+    });
+  }
 
   redirect(`/delivery/confirm/${encodeURIComponent(token)}?updated=change_requested`);
 }

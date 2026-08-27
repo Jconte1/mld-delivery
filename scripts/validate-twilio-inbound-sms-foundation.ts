@@ -1,5 +1,6 @@
 import "dotenv/config";
 
+import { readFileSync } from "node:fs";
 import { POST as inboundSmsPost } from "../app/api/webhooks/twilio/inbound-sms/route";
 import {
   DeliveryConfirmationStatus,
@@ -1502,11 +1503,37 @@ async function runSignatureValidation() {
   };
 }
 
+function runWebhookFastResponseValidation() {
+  const routeSource = readFileSync("app/api/webhooks/twilio/inbound-sms/route.ts", "utf8");
+
+  assertIncludes(
+    routeSource,
+    "fastLocalCurrentStateRefresher",
+    "live Twilio inbound route uses fast local current-state refresher"
+  );
+  assertIncludes(
+    routeSource,
+    "currentStateRefresher: fastLocalCurrentStateRefresher",
+    "live Twilio inbound route passes fast refresher to handler"
+  );
+  assertIncludes(
+    routeSource,
+    "twimlResponse(result.responseMessage)",
+    "live Twilio inbound route returns handler response as TwiML"
+  );
+
+  return {
+    fastLocalCurrentStateRefresher: true,
+    twimlReturnedFromHandlerResponse: true,
+  };
+}
+
 async function main() {
   const inbound = await runInboundReplyValidation();
   const status = await runStatusCallbackValidation();
   const noResponse = await runNoResponseValidation();
   const signature = await runSignatureValidation();
+  const webhook = runWebhookFastResponseValidation();
 
   console.log(
     JSON.stringify(
@@ -1515,6 +1542,7 @@ async function main() {
         status,
         noResponse,
         signature,
+        webhook,
         liveSmsSent: false,
         liveEmailSent: false,
         acumaticaCalledDirectly: false,

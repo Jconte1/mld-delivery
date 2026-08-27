@@ -7,6 +7,15 @@ import {
 
 export const runtime = "nodejs";
 
+type TwilioCurrentStateRefresher = NonNullable<
+  Parameters<typeof handleTwilioInboundSms>[0]["currentStateRefresher"]
+>;
+
+const fastLocalCurrentStateRefresher: TwilioCurrentStateRefresher = async ({ candidate }) => ({
+  ok: true,
+  candidate,
+});
+
 export async function POST(request: Request) {
   const payload = await readTwilioFormPayload(request);
   const signature = validateTwilioWebhookSignature({ request, payload });
@@ -20,7 +29,12 @@ export async function POST(request: Request) {
   }
 
   try {
-    const result = await handleTwilioInboundSms({ payload });
+    const result = await handleTwilioInboundSms({
+      payload,
+      // The webhook must return TwiML inside Twilio's response window. The
+      // queue worker still fetches current ERP confirmation fields before writeback.
+      currentStateRefresher: fastLocalCurrentStateRefresher,
+    });
     console.info("[twilio][inbound-sms] processed", {
       messageSid: result.messageSid,
       parsedIntent: result.parsedIntent,

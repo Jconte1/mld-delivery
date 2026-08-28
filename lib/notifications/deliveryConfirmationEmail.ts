@@ -3,6 +3,7 @@ import {
   formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
+  normalizeCustomerDisplayText,
 } from "@/lib/notifications/helpers";
 import {
   renderSalespersonEmailFooterText,
@@ -38,13 +39,13 @@ function escapeHtml(value: string) {
 }
 
 function safeEmailJobName(value: string | null | undefined) {
-  const cleaned = cleanNotificationText(value);
+  const cleaned = normalizeCustomerDisplayText(value);
   if (!cleaned || cleaned.toUpperCase() === "MAIN") return "your delivery";
   return cleaned;
 }
 
 function safeEmailJobAddress(value: string | null | undefined) {
-  const cleaned = cleanNotificationText(value);
+  const cleaned = normalizeCustomerDisplayText(value);
   if (!cleaned || cleaned.toUpperCase() === "MAIN") return "the job site";
   return cleaned;
 }
@@ -54,8 +55,8 @@ function htmlJobName(params: {
   locationDescription?: string | null;
   jobName: string;
 }) {
-  const customerDescription = cleanNotificationText(params.customerDescription);
-  const locationDescription = cleanNotificationText(params.locationDescription);
+  const customerDescription = normalizeCustomerDisplayText(params.customerDescription);
+  const locationDescription = normalizeCustomerDisplayText(params.locationDescription);
 
   if (!locationDescription || locationDescription.toUpperCase() === "MAIN") {
     return `<strong>${escapeHtml(customerDescription ?? params.jobName)}</strong>`;
@@ -75,7 +76,7 @@ export function render42DayEmailConfirmationSubject(params: {
   jobName?: string | null;
   deliveryDate: Date | string;
 }) {
-  const buyerGroup = cleanNotificationText(params.buyerGroup);
+  const buyerGroup = normalizeCustomerDisplayText(params.buyerGroup);
   const jobName = safeEmailJobName(params.jobName);
   const hasJobName = jobName !== "your delivery";
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
@@ -109,7 +110,7 @@ export function render42DayEmailConfirmationBody(params: {
   amountDueNowRounded?: string | null;
   salespersonContact?: SalespersonContactInput | null;
 }) {
-  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? "there";
   const jobName = safeEmailJobName(params.jobName);
   const jobAddress = safeEmailJobAddress(params.jobAddress);
   const link = cleanNotificationText(params.link) ?? "";
@@ -156,7 +157,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
   amountDueNowRounded?: string | null;
   salespersonContact?: SalespersonContactInput | null;
 }) {
-  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? "there";
   const jobName = safeEmailJobName(params.jobName);
   const jobAddress = safeEmailJobAddress(params.jobAddress);
   const link = cleanNotificationText(params.link) ?? "";
@@ -216,8 +217,19 @@ export function render42DayEmailConfirmationMessage(params: {
   };
 }
 
-export function render42DayEmailConfirmationReminderSubject(params: { orderNumber: string }) {
-  return `Reminder: Please Confirm Your Delivery for Order ${params.orderNumber}`;
+type DeliveryConfirmationReminderTouchNumber = 2 | 3;
+
+function isFinalDeliveryConfirmationReminder(touchNumber?: DeliveryConfirmationReminderTouchNumber) {
+  return touchNumber === 3;
+}
+
+export function render42DayEmailConfirmationReminderSubject(params: {
+  orderNumber: string;
+  touchNumber?: DeliveryConfirmationReminderTouchNumber;
+}) {
+  return isFinalDeliveryConfirmationReminder(params.touchNumber)
+    ? `Final Reminder: Please Confirm Your Delivery for Order ${params.orderNumber}`
+    : `Reminder: Please Confirm Your Delivery for Order ${params.orderNumber}`;
 }
 
 export function render42DayEmailConfirmationReminderBody(params: {
@@ -225,19 +237,29 @@ export function render42DayEmailConfirmationReminderBody(params: {
   contactName: string;
   deliveryDate: Date | string;
   link: string;
+  touchNumber?: DeliveryConfirmationReminderTouchNumber;
 }) {
-  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? "there";
   const link = cleanNotificationText(params.link) ?? "";
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+  const finalReminder = isFinalDeliveryConfirmationReminder(params.touchNumber);
 
   return [
     `Hello ${contactName},`,
     "",
     `Order: ${params.orderNumber}`,
-    `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`,
+    finalReminder
+      ? `This is the final reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`
+      : `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`,
     "",
     "Please confirm your delivery or request a different date using the link below:",
     link,
+    ...(finalReminder
+      ? [
+          "",
+          "If we do not receive a response, our team will follow up directly.",
+        ]
+      : []),
     "",
     NO_REPLY_NOTICE,
     "",
@@ -250,22 +272,29 @@ export function render42DayEmailConfirmationReminderHtmlBody(params: {
   contactName: string;
   deliveryDate: Date | string;
   link: string;
+  touchNumber?: DeliveryConfirmationReminderTouchNumber;
 }) {
-  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? "there";
   const link = cleanNotificationText(params.link) ?? "";
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+  const finalReminder = isFinalDeliveryConfirmationReminder(params.touchNumber);
   const paragraph = (value: string) => `<p>${escapeHtml(value)}</p>`;
 
   return [
     paragraph(`Hello ${contactName},`),
     `<p>Order: <strong>${escapeHtml(params.orderNumber)}</strong></p>`,
     paragraph(
-      `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`
+      finalReminder
+        ? `This is the final reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`
+        : `This is a reminder to confirm your upcoming delivery scheduled for ${deliveryDate}.`
     ),
     paragraph("Please confirm your delivery or request a different date using the link below:"),
     `<p><a href="${escapeHtml(
       link
     )}" style="display:inline-block;background-color:#1f2937;color:#ffffff;text-decoration:none;padding:12px 18px;border-radius:6px;font-weight:600;">Confirm/ Change Delivery</a></p>`,
+    ...(finalReminder
+      ? [paragraph("If we do not receive a response, our team will follow up directly.")]
+      : []),
     paragraph(NO_REPLY_NOTICE),
     paragraph("Thank you."),
   ].join("\n");
@@ -276,6 +305,7 @@ export function render42DayEmailConfirmationReminderMessage(params: {
   contactName: string;
   deliveryDate: Date | string;
   link: string;
+  touchNumber?: DeliveryConfirmationReminderTouchNumber;
 }) {
   return {
     subject: render42DayEmailConfirmationReminderSubject(params),

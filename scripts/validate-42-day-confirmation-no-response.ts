@@ -7,6 +7,7 @@ import {
   InternalNotificationPurpose,
   InternalNotificationStatus,
   NotificationActionType,
+  NotificationAttemptStatus,
   NotificationChannel,
   NotificationEventStatus,
   NotificationIntervalType,
@@ -18,6 +19,7 @@ import {
   DELIVERY_CONFIRMATION_NO_RESPONSE_SALESPERSON_PURPOSE,
   DELIVERY_CONFIRMATION_NO_RESPONSE_SKIP_REASONS,
   DELIVERY_CONFIRMATION_ORIGINAL_TOUCH_NUMBER,
+  deliveryConfirmationReminderTouchNumberFromDedupeKey,
   render42DayNoResponseSalespersonEmail,
   run42DayDeliveryConfirmationNoResponse,
   type DeliveryConfirmationNoResponseCandidate,
@@ -26,7 +28,7 @@ import {
 import { DELIVERY_MANUAL_REVIEW_REASONS } from "../lib/notifications/deliveryConfirmationManualReview";
 import { render42DayEmailConfirmationReminderMessage } from "../lib/notifications/deliveryConfirmationEmail";
 import { render42DaySmsConfirmationReminderMessage } from "../lib/notifications/deliveryConfirmationSms";
-import { addDays, dateKey } from "../lib/notifications/helpers";
+import { addDays, buildNotificationDedupeKey, dateKey } from "../lib/notifications/helpers";
 
 const ROOT = process.cwd();
 const RUN_DATE = "2026-07-23";
@@ -42,6 +44,21 @@ type FakeNotificationEvent = {
   recipientEmail: string | null;
   recipientPhone: string | null;
   reasonSkipped: string | null;
+  attempts: FakeNotificationAttempt[];
+};
+
+type FakeNotificationAttempt = {
+  id: string;
+  attemptNumber: number;
+  channel: NotificationChannel;
+  status: NotificationAttemptStatus;
+  provider: string | null;
+  providerCode: string | null;
+  success: boolean;
+  errorMessage: string | null;
+  externalMessageId: string | null;
+  sentAt: Date | null;
+  createdAt: Date;
 };
 
 type FakeInternalNotificationEvent = {
@@ -91,6 +108,10 @@ type SeedConfirmationOptions = {
   internalLifecycleStatus?: string | null;
   addressState?: string | null;
   postalCode?: string | null;
+  initialTouchCompleted?: boolean;
+  reminder1Completed?: boolean;
+  reminder2Completed?: boolean;
+  initialTouchFailed?: boolean;
 };
 
 function assert(condition: unknown, message: string, failures: string[]) {
@@ -175,6 +196,7 @@ function matchesWhere(
 class FakeDeliveryStore {
   confirmations: DeliveryConfirmationNoResponseCandidate[] = [];
   notificationEvents: FakeNotificationEvent[] = [];
+  seededNotificationEvents: FakeNotificationEvent[] = [];
   internalNotificationEvents: FakeInternalNotificationEvent[] = [];
   salespersonContacts = [
     {
@@ -222,7 +244,9 @@ class FakeDeliveryStore {
       findUnique: async (args: unknown) => {
         const where = asRecord(asRecord(args).where);
         return (
-          this.notificationEvents.find((event) => event.dedupeKey === where.dedupeKey) ?? null
+          [...this.notificationEvents, ...this.seededNotificationEvents].find(
+            (event) => event.dedupeKey === where.dedupeKey
+          ) ?? null
         );
       },
       create: async (args) => {
@@ -237,6 +261,7 @@ class FakeDeliveryStore {
           recipientEmail: (data.recipientEmail as string | null) ?? null,
           recipientPhone: (data.recipientPhone as string | null) ?? null,
           reasonSkipped: (data.reasonSkipped as string | null) ?? null,
+          attempts: [],
         };
         this.notificationEvents.push(event);
         return event;
@@ -297,17 +322,120 @@ class FakeDeliveryStore {
     },
   };
 
+  private seedCompletedTouch(params: {
+    eventId: string;
+    dedupeKey: string;
+    actionType: NotificationActionType;
+    status?: NotificationAttemptStatus;
+    providerCode?: string | null;
+  }) {
+    const event: FakeNotificationEvent = {
+      id: params.eventId,
+      dedupeKey: params.dedupeKey,
+      intervalType: NotificationIntervalType.DAY_42,
+      actionType: params.actionType,
+      status:
+        params.status === NotificationAttemptStatus.FAILED
+          ? NotificationEventStatus.FAILED
+          : NotificationEventStatus.SENT,
+      selectedChannel: NotificationChannel.SMS,
+      recipientEmail: null,
+      recipientPhone: "8015550100",
+      reasonSkipped: null,
+      attempts: [
+        {
+          id: `attempt_${params.eventId}`,
+          attemptNumber: 1,
+          channel: NotificationChannel.SMS,
+          status: params.status ?? NotificationAttemptStatus.SUBMITTED,
+          provider: "twilio",
+          providerCode: params.providerCode ?? "SENT",
+          success: params.status !== NotificationAttemptStatus.FAILED,
+          errorMessage:
+            params.status === NotificationAttemptStatus.FAILED ? "provider failed" : null,
+          externalMessageId: `SM_${params.eventId}`,
+          sentAt: NOW,
+          createdAt: NOW,
+        },
+      ],
+    };
+    this.seededNotificationEvents.push(event);
+    return event;
+  }
+
   seedConfirmation(options: SeedConfirmationOptions = {}) {
     const index = this.confirmations.length + 1;
     const deliveryDate = options.deliveryDate ?? addDays(RUN_DATE, 41);
     const groupDeliveryDate = options.groupDeliveryDate ?? deliveryDate;
     const orderNumber = options.orderNumber ?? `SO42NR${index}`;
     const id = options.id ?? `confirmation_${index}`;
+    const originalEventId = `original_event_${id}`;
+    const originalDedupeKey = buildNotificationDedupeKey({
+      orderType: "SO",
+      orderNumber,
+      deliveryDate,
+      intervalType: NotificationIntervalType.DAY_42,
+      actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+    });
+    const initialTouchCompleted = options.initialTouchCompleted ?? true;
+    const reminder1Completed =
+      options.reminder1Completed ?? (options.confirmationFollowUpCount ?? 0) >= 1;
+    const reminder2Completed =
+      options.reminder2Completed ?? (options.confirmationFollowUpCount ?? 0) >= 2;
+    const originalEvent = initialTouchCompleted || options.initialTouchFailed
+      ? this.seedCompletedTouch({
+          eventId: originalEventId,
+          dedupeKey: originalDedupeKey,
+          actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+          status: options.initialTouchFailed ? NotificationAttemptStatus.FAILED : undefined,
+          providerCode: options.initialTouchFailed ? "FAILED" : "SENT",
+        })
+      : {
+          id: originalEventId,
+          dedupeKey: originalDedupeKey,
+          intervalType: NotificationIntervalType.DAY_42,
+          actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+          status: NotificationEventStatus.SCHEDULED,
+          selectedChannel: NotificationChannel.SMS,
+          recipientEmail: null,
+          recipientPhone: "8015550100",
+          reasonSkipped: null,
+          attempts: [],
+    };
+    if (!initialTouchCompleted && !options.initialTouchFailed) {
+      this.seededNotificationEvents.push(originalEvent);
+    }
+    if (reminder1Completed) {
+      this.seedCompletedTouch({
+        eventId: `reminder1_event_${id}`,
+        dedupeKey: buildDeliveryConfirmationReminderDedupeKey({
+          confirmationId: id,
+          orderType: "SO",
+          orderNumber,
+          deliveryDate,
+          touchNumber: 2,
+        }),
+        actionType: NotificationActionType.DELIVERY_CONFIRMATION_REMINDER,
+      });
+    }
+    if (reminder2Completed) {
+      this.seedCompletedTouch({
+        eventId: `reminder2_event_${id}`,
+        dedupeKey: buildDeliveryConfirmationReminderDedupeKey({
+          confirmationId: id,
+          orderType: "SO",
+          orderNumber,
+          deliveryDate,
+          touchNumber: 3,
+        }),
+        actionType: NotificationActionType.DELIVERY_CONFIRMATION_REMINDER,
+      });
+    }
     const confirmation: DeliveryConfirmationNoResponseCandidate = {
       id,
       orderId: `order_${id}`,
       deliveryGroupId: `group_${id}`,
-      notificationEventId: `original_event_${id}`,
+      notificationEventId: originalEvent.id,
       orderType: "SO",
       orderNumber,
       deliveryDate,
@@ -325,9 +453,7 @@ class FakeDeliveryStore {
       linkToken: options.linkToken === undefined ? `token_${id}` : options.linkToken,
       linkExpiresAt: options.linkExpiresAt ?? new Date("2026-12-31T00:00:00.000Z"),
       linkExpiredAt: options.linkExpiredAt ?? null,
-      notificationEvent: {
-        selectedChannel: NotificationChannel.SMS,
-      },
+      notificationEvent: originalEvent,
       orderDeliveryGroup: {
         id: `group_${id}`,
         deliveryDate: groupDeliveryDate,
@@ -401,6 +527,15 @@ async function validateReminderTouches(failures: string[]) {
   assert(Boolean(touch2.reminderSentAt), "touch 2 sets reminderSentAt", failures);
   assertEqual(touch2.manualReviewRequired, false, "touch 2 does not mark manual review", failures);
   assertEqual(touch2Summary.remindersScheduled, 1, "touch 2 summary scheduled count", failures);
+  assertEqual(touch2Summary.reminderEventsCreatedByTouch.touch2, 1, "touch 2 created count", failures);
+  assertEqual(touch2Summary.remindersScheduledByTouch.touch2, 1, "touch 2 scheduled count", failures);
+  assertEqual(touch2Summary.dispatchableReminderEventIdsCreatedThisRun[0], touch2Event?.id, "touch 2 current-run event id", failures);
+  assertEqual(
+    deliveryConfirmationReminderTouchNumberFromDedupeKey(touch2Event?.dedupeKey),
+    2,
+    "touch 2 dedupe parses touch number",
+    failures
+  );
 
   const touch3Store = new FakeDeliveryStore();
   const touch3 = touch3Store.seedConfirmation({
@@ -418,6 +553,15 @@ async function validateReminderTouches(failures: string[]) {
   assertEqual(touch3.confirmationFollowUpCount, 2, "touch 3 increments follow-up count to 2", failures);
   assertEqual(touch3.manualReviewRequired, false, "touch 3 does not mark manual review same day", failures);
   assertEqual(touch3Summary.remindersScheduledByChannel.EMAIL, 1, "touch 3 summary email count", failures);
+  assertEqual(touch3Summary.reminderEventsCreatedByTouch.touch3, 1, "touch 3 created count", failures);
+  assertEqual(touch3Summary.remindersScheduledByTouch.touch3, 1, "touch 3 scheduled count", failures);
+  assertEqual(touch3Summary.dispatchableReminderEventIdsCreatedThisRun[0], touch3Event?.id, "touch 3 current-run event id", failures);
+  assertEqual(
+    deliveryConfirmationReminderTouchNumberFromDedupeKey(touch3Event?.dedupeKey),
+    3,
+    "touch 3 dedupe parses touch number",
+    failures
+  );
 }
 
 async function validateEscalation(failures: string[]) {
@@ -438,6 +582,10 @@ async function validateEscalation(failures: string[]) {
   assertEqual(candidate.manualReviewReason, DELIVERY_MANUAL_REVIEW_REASONS.NO_CUSTOMER_RESPONSE, "day 39 manual reason", failures);
   assert(Boolean(candidate.noResponseAt), "day 39 sets noResponseAt", failures);
   assertEqual(summary.manualReviewMarked, 1, "summary manual review marked", failures);
+  assertEqual(summary.internalEscalationEventIdsCreatedThisRun[0], internal?.id, "day 39 current-run internal id", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "Touch history", "day 39 internal body summarizes touches", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "Delivery address", "day 39 internal body includes address", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "No Acumatica writeback", "day 39 internal body states no writeback", failures);
 }
 
 async function validateStops(failures: string[]) {
@@ -585,6 +733,8 @@ async function validateDedupeAndDryRun(failures: string[]) {
   assertEqual(dryRunStore.notificationEvents.length, 0, "dry-run creates no notification event", failures);
   assertEqual(dryRunCandidate.confirmationFollowUpCount, 0, "dry-run does not update confirmation", failures);
   assertEqual(dryRunSummary.reminderEventsWouldCreate, 1, "dry-run reports would-create", failures);
+  assertEqual(dryRunSummary.reminderEventsWouldCreateByTouch.touch2, 1, "dry-run reports touch 2 would-create", failures);
+  assertEqual(dryRunSummary.dispatchableReminderEventIdsCreatedThisRun.length, 0, "dry-run has no dispatchable event ids", failures);
 }
 
 function validateRendering(failures: string[]) {
@@ -597,31 +747,56 @@ function validateRendering(failures: string[]) {
       state: "ID",
       postalCode: "83638",
     },
+    touchNumber: 2,
   });
-  assertIncludes(sms, "Order SO42", "SMS includes order number", failures);
-  assertIncludes(sms, "Confirm or request a different date", "SMS includes confirmation action", failures);
-  assertIncludes(sms, link, "SMS includes confirmation link", failures);
+  assertIncludes(sms, "MLD Reminder", "SMS is labeled reminder", failures);
+  assertIncludes(sms, "Order# SO42", "SMS includes order number", failures);
+  assertIncludes(sms, "Reply Y to confirm or N", "SMS includes Y/N action", failures);
+  assertIncludes(sms, "https://delivery.example.test/c/token", "SMS includes short confirmation link", failures);
   assertIncludes(sms, "McCall deliveries are available on Mondays only.", "SMS preserves McCall route note", failures);
   assertIncludes(sms, "Reply STOP to opt out", "SMS includes STOP language", failures);
+
+  const finalSms = render42DaySmsConfirmationReminderMessage({
+    orderNumber: "SO42",
+    deliveryDate: "2026-09-02",
+    link,
+    touchNumber: 3,
+  });
+  assertIncludes(finalSms, "Final reminder", "touch 3 SMS is labeled final reminder", failures);
+  assertIncludes(finalSms, "Reply Y or N", "touch 3 SMS includes Y/N action", failures);
 
   const email = render42DayEmailConfirmationReminderMessage({
     orderNumber: "SO42",
     contactName: "Customer",
     deliveryDate: "2026-09-02",
     link,
+    touchNumber: 2,
   });
   assertIncludes(email.subject, "Reminder: Please Confirm Your Delivery for Order SO42", "email subject", failures);
   assertIncludes(email.body, "Order: SO42", "email body order", failures);
   assertIncludes(email.body, link, "email body link", failures);
   assertNotIncludes(email.body, "Balance owed", "reminder email has no payment content", failures);
 
+  const finalEmail = render42DayEmailConfirmationReminderMessage({
+    orderNumber: "SO42",
+    contactName: "Customer",
+    deliveryDate: "2026-09-02",
+    link,
+    touchNumber: 3,
+  });
+  assertIncludes(finalEmail.subject, "Final Reminder", "touch 3 email subject", failures);
+  assertIncludes(finalEmail.body, "final reminder", "touch 3 email body", failures);
+
   const internal = render42DayNoResponseSalespersonEmail({
     salespersonName: "Sales Person",
+    salespersonNumber: "SP1",
     customerName: "Customer",
     customerEmail: "customer@example.test",
     customerPhone: "8015550100",
     orderType: "SO",
     orderNumber: "SO42",
+    jobName: "Customer / Residence",
+    jobAddress: "123 Main, Salt Lake City UT 84101",
     deliveryDate: "2026-09-02",
     confirmationLink: link,
     currentStatus: DeliveryConfirmationStatus.PENDING,
@@ -629,6 +804,10 @@ function validateRendering(failures: string[]) {
   });
   assertIncludes(internal.subject, "Order SO42", "internal subject order", failures);
   assertIncludes(internal.body, "Recommended action", "internal body recommended action", failures);
+  assertIncludes(internal.body, "Job: Customer / Residence", "internal body job", failures);
+  assertIncludes(internal.body, "Delivery address", "internal body address", failures);
+  assertIncludes(internal.body, "Touches sent", "internal body touches", failures);
+  assertIncludes(internal.body, "No Acumatica writeback", "internal body writeback posture", failures);
 }
 
 function validateStaticSafety(failures: string[]) {
@@ -641,7 +820,18 @@ function validateStaticSafety(failures: string[]) {
   assertIncludes(service, "confirmationFollowUpCount", "service tracks follow-up count", failures);
   assertIncludes(service, "reminderSentAt", "service tracks reminderSentAt", failures);
   assertIncludes(service, "noResponseAt", "service tracks noResponseAt", failures);
+  assertIncludes(service, "dispatchableReminderEventIdsCreatedThisRun", "service exposes current-run dispatch ids", failures);
+  assertIncludes(service, "reminderEventsCreatedByTouch", "service reports touch-specific create counts", failures);
   assertNotIncludes(service, "selectNotificationChannelWithOptOutRepair", "service does not run opt-out repair/writeback", failures);
+
+  assertIncludes(runner, "RUN REAL 42 DAY NO RESPONSE FOLLOW UPS", "runner requires exact send phrase", failures);
+  assertIncludes(runner, "dispatchableReminderEventIdsCreatedThisRun", "runner dispatches current-run ids", failures);
+  assertIncludes(runner, "oldScheduledDay42Events", "runner reports old scheduled DAY_42 rows", failures);
+  assertIncludes(runner, "controlledRecipientSend: false", "runner disables controlled-recipient send", failures);
+  assertIncludes(runner, "finalRecipientKind !== \"customer\"", "runner verifies customer routing", failures);
+  assertIncludes(runner, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED", "runner requires real customer send gate", failures);
+  assertIncludes(runner, "DELIVERY_CONTROLLED_RECIPIENT_MODE", "runner refuses controlled-recipient mode", failures);
+  assertIncludes(runner, "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST", "runner refuses forced eligibility", failures);
 
   for (const [label, source] of [
     ["service", service],

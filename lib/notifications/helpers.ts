@@ -74,6 +74,135 @@ export function cleanNotificationText(value: string | null | undefined) {
   return trimmed || null;
 }
 
+const CUSTOMER_DISPLAY_UPPERCASE_TOKENS = new Set([
+  "AK",
+  "AL",
+  "AR",
+  "AZ",
+  "CA",
+  "CO",
+  "CT",
+  "DC",
+  "DE",
+  "FL",
+  "GA",
+  "HI",
+  "IA",
+  "ID",
+  "IL",
+  "IN",
+  "KS",
+  "KY",
+  "LA",
+  "MA",
+  "MD",
+  "ME",
+  "MI",
+  "MN",
+  "MO",
+  "MS",
+  "MT",
+  "NC",
+  "ND",
+  "NE",
+  "NH",
+  "NJ",
+  "NM",
+  "NV",
+  "NY",
+  "OH",
+  "OK",
+  "OR",
+  "PA",
+  "RI",
+  "SC",
+  "SD",
+  "TN",
+  "TX",
+  "UT",
+  "VA",
+  "VT",
+  "WA",
+  "WI",
+  "WV",
+  "WY",
+  "INC",
+  "LLC",
+  "MLD",
+  "P.O.",
+  "PO",
+  "USA",
+]);
+
+const CUSTOMER_DISPLAY_TITLECASE_TOKENS = new Map([
+  ["APARTMENT", "Apartment"],
+  ["APT", "Apt"],
+  ["BUILDING", "Building"],
+  ["BLDG", "Bldg"],
+  ["FLOOR", "Floor"],
+  ["STE", "Ste"],
+  ["SUITE", "Suite"],
+  ["UNIT", "Unit"],
+]);
+
+function compactWhitespace(value: string) {
+  return value.replace(/\s+/g, " ").trim();
+}
+
+function isMostlyUppercase(value: string) {
+  const letters = value.match(/[A-Za-z]/g) ?? [];
+  if (letters.length < 3) return false;
+  const uppercaseLetters = letters.filter((letter) => letter === letter.toUpperCase()).length;
+  return uppercaseLetters / letters.length >= 0.8;
+}
+
+function isModelLikeDisplayText(value: string) {
+  const cleaned = value.trim();
+  if (/\s/.test(cleaned)) return false;
+  return /[A-Za-z]/.test(cleaned) && /\d/.test(cleaned) && /[-/#_.]/.test(cleaned);
+}
+
+function titleCasePlainCustomerToken(value: string) {
+  const upper = value.toUpperCase();
+  if (CUSTOMER_DISPLAY_UPPERCASE_TOKENS.has(upper)) return upper;
+  if (CUSTOMER_DISPLAY_TITLECASE_TOKENS.has(upper)) {
+    return CUSTOMER_DISPLAY_TITLECASE_TOKENS.get(upper)!;
+  }
+  if (/^\d+[A-Z]?$/.test(upper)) return upper;
+
+  const apostropheTitle = value
+    .toLowerCase()
+    .replace(/(^|')([a-z])/g, (match) => match.toUpperCase());
+  return apostropheTitle
+    .replace(/^Mc([a-z])/, (_match, letter: string) => `Mc${letter.toUpperCase()}`)
+    .replace(/^Mac([a-z])/, (_match, letter: string) => `Mac${letter.toUpperCase()}`);
+}
+
+function titleCaseCustomerDisplayToken(value: string): string {
+  if (!value) return value;
+  if (value.includes("/")) {
+    return value.split("/").map(titleCaseCustomerDisplayToken).join("/");
+  }
+  if (value.includes("-")) {
+    return value.split("-").map(titleCaseCustomerDisplayToken).join("-");
+  }
+
+  const match = value.match(/^([^A-Za-z0-9]*)(.*?)([^A-Za-z0-9.]*)$/);
+  if (!match) return titleCasePlainCustomerToken(value);
+  const [, prefix, core, suffix] = match;
+  if (!core) return value;
+  return `${prefix}${titleCasePlainCustomerToken(core)}${suffix}`;
+}
+
+export function normalizeCustomerDisplayText(value: string | null | undefined) {
+  const cleaned = cleanNotificationText(value);
+  if (!cleaned) return null;
+  const compacted = compactWhitespace(cleaned);
+  if (isModelLikeDisplayText(compacted)) return compacted;
+  if (!isMostlyUppercase(compacted)) return compacted;
+  return compacted.split(" ").map(titleCaseCustomerDisplayToken).join(" ");
+}
+
 export function dateKey(value: Date | string) {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
 
@@ -203,8 +332,8 @@ export function formatJobName(params: {
   customerDescription?: string | null;
   locationDescription?: string | null;
 }) {
-  const customerDescription = cleanNotificationText(params.customerDescription);
-  const locationDescription = cleanNotificationText(params.locationDescription);
+  const customerDescription = normalizeCustomerDisplayText(params.customerDescription);
+  const locationDescription = normalizeCustomerDisplayText(params.locationDescription);
 
   if (!locationDescription || locationDescription.toUpperCase() === "MAIN") {
     return customerDescription ?? "your delivery";
@@ -222,12 +351,12 @@ export function formatJobAddress(params: {
   postalCode?: string | null;
 }) {
   const cityStatePostal = [params.city, params.state, params.postalCode]
-    .map(cleanNotificationText)
+    .map(normalizeCustomerDisplayText)
     .filter(Boolean);
 
   return [
-    cleanNotificationText(params.addressLine1),
-    cleanNotificationText(params.addressLine2),
+    normalizeCustomerDisplayText(params.addressLine1),
+    normalizeCustomerDisplayText(params.addressLine2),
     cityStatePostal.join(" "),
   ]
     .filter(Boolean)
@@ -242,6 +371,27 @@ export function formatCustomerFriendlyDate(value: Date | string) {
     day: "numeric",
     year: "numeric",
   }).format(dateFromKey(value));
+}
+
+export function formatCustomerFriendlyDateTime(value: Date | string) {
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Denver",
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+    timeZoneName: "short",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) =>
+    parts.find((candidate) => candidate.type === type)?.value ?? "";
+
+  return `${part("month")} ${part("day")}, ${part("year")} at ${part("hour")}:${part(
+    "minute"
+  )} ${part("dayPeriod")} ${part("timeZoneName")}`.replace(/\s+/g, " ").trim();
 }
 
 export function formatCurrencyAmount(value: string | number | null | undefined) {
@@ -272,7 +422,7 @@ export function getDeliveryReminderIntro(intervalType: NotificationIntervalType)
 }
 
 export function formatDeliveryDescription(buyerGroup: string | null | undefined) {
-  const cleanedBuyerGroup = cleanNotificationText(buyerGroup);
+  const cleanedBuyerGroup = normalizeCustomerDisplayText(buyerGroup);
   return cleanedBuyerGroup ? `${cleanedBuyerGroup} delivery` : "delivery";
 }
 
@@ -283,15 +433,15 @@ export function formatContactName(params: {
   lastName?: string | null;
 }) {
   const fullName = [params.firstName, params.lastName]
-    .map(cleanNotificationText)
+    .map(normalizeCustomerDisplayText)
     .filter(Boolean)
     .join(" ");
 
   return (
-    cleanNotificationText(params.firstName) ??
-    cleanNotificationText(params.displayName) ??
-    cleanNotificationText(fullName) ??
-    cleanNotificationText(params.companyName) ??
+    normalizeCustomerDisplayText(params.firstName) ??
+    normalizeCustomerDisplayText(params.displayName) ??
+    normalizeCustomerDisplayText(fullName) ??
+    normalizeCustomerDisplayText(params.companyName) ??
     "there"
   );
 }
@@ -320,9 +470,11 @@ export function renderDeliveryReminderSummarySentence(params: {
 }) {
   const intro = getDeliveryReminderIntro(params.intervalType);
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
-  const jobAddress = cleanNotificationText(params.jobAddress) ?? "the job site";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? params.contactName;
+  const jobName = normalizeCustomerDisplayText(params.jobName) ?? params.jobName;
+  const jobAddress = normalizeCustomerDisplayText(params.jobAddress) ?? "the job site";
 
-  return `Hello ${params.contactName}, ${intro} your ${deliveryDescription} for ${params.jobName} at ${jobAddress} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}.`;
+  return `Hello ${contactName}, ${intro} your ${deliveryDescription} for ${jobName} at ${jobAddress} is scheduled for ${formatCustomerFriendlyDate(params.deliveryDate)}.`;
 }
 
 export function buildDeliveryReminderMessage(params: {
@@ -348,8 +500,8 @@ export function renderDeliveryReminderEmailSubject(params: {
   jobName?: string | null;
   deliveryDate: Date | string;
 }) {
-  const buyerGroup = cleanNotificationText(params.buyerGroup);
-  const jobName = cleanNotificationText(params.jobName);
+  const buyerGroup = normalizeCustomerDisplayText(params.buyerGroup);
+  const jobName = normalizeCustomerDisplayText(params.jobName);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
   if (buyerGroup && jobName && jobName !== "your delivery") {

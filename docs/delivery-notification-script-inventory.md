@@ -22,6 +22,8 @@ Production dispatcher sends are still gated by `DELIVERY_REAL_CUSTOMER_SEND_ENAB
 
 `run:delivery-interval` supports real production creation/dispatch for 180, 90, 60, and the initial 42-day confirmation request. The 42-day path dispatches only the exact event ids created by the current run and does not run no-response follow-up.
 
+`run:42-day-confirmation-no-response` supports the separate 41/40/39 no-response lifecycle. Send mode requires `RUN REAL 42 DAY NO RESPONSE FOLLOW UPS`, dispatches only customer reminder events created by that run, and leaves old scheduled `DAY_42` events untouched. The 39-day salesperson escalation currently uses `InternalNotificationEvent` as a review queue; inspect it with `review:42-day-no-response-internal-escalations`.
+
 ## Preview And Controlled Testing
 
 - `test:delivery-intervals:production-style`
@@ -36,6 +38,7 @@ Production dispatcher sends are still gated by `DELIVERY_REAL_CUSTOMER_SEND_ENAB
 ## Validation And Inspection
 
 - `validate:delivery-notification-dispatcher`
+- `review:42-day-no-response-internal-escalations`
 - `validate:sharepoint-stock-sync`
 - `validate:sharepoint-stock-readiness-integration`
 - `validate:salesperson-contact-sync`

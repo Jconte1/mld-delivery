@@ -1,8 +1,13 @@
 import { readFileSync } from "fs";
 import path from "path";
 
+import {
+  InternalOrderLifecycleStatus,
+} from "../lib/generated/prisma/client";
+import { create42DayDeliveryConfirmationEvents } from "../lib/notifications/create42DayDeliveryConfirmationEvents";
 import { evaluateDeliveryDispatcherPreflight } from "../lib/notifications/deliveryNotificationDispatcher";
 import { handleTwilioMessageStatus } from "../lib/notifications/handleTwilioMessageStatus";
+import { dateFromKey } from "../lib/notifications/helpers";
 
 const projectRoot = process.cwd();
 
@@ -260,6 +265,171 @@ function statusPayload(messageSid: string, messageStatus: string, extra: Record<
   };
 }
 
+function fake42DeliveryGroup(params: {
+  orderNumber: string;
+  deliveryDate: Date;
+  orderStatus?: string;
+  groupStatus?: string;
+  internalLifecycleStatus?: InternalOrderLifecycleStatus;
+}) {
+  return {
+    id: `group_${params.orderNumber}`,
+    orderId: `order_${params.orderNumber}`,
+    orderType: "SO",
+    orderNumber: params.orderNumber,
+    deliveryDate: params.deliveryDate,
+    isActive: true,
+    lineCount: 1,
+    lastSeenAt: new Date("2026-08-20T00:00:00.000Z"),
+    status: params.groupStatus ?? "Open",
+    order: {
+      id: `order_${params.orderNumber}`,
+      orderType: "SO",
+      orderNumber: params.orderNumber,
+      status: params.orderStatus ?? "Open",
+      internalLifecycleStatus: params.internalLifecycleStatus ?? InternalOrderLifecycleStatus.ACTIVE,
+      buyerGroup: "Appliances",
+      confirmVia: null,
+      salespersonNumber: null,
+      customerDescription: "Customer",
+      locationDescription: "Residence",
+      address: {
+        addressLine1: "123 Main",
+        addressLine2: null,
+        city: "Salt Lake City",
+        state: "UT",
+        postalCode: "84101",
+      },
+      contact: {
+        contactId: `contact_${params.orderNumber}`,
+        companyName: null,
+        displayName: "Customer Person",
+        firstName: "Customer",
+        lastName: "Person",
+        email: "customer@example.test",
+        phone1: "8015550100",
+        phone2: null,
+        smsOptIn: true,
+        emailOptIn: true,
+        smsOptOuts: [],
+        emailOptOuts: [],
+      },
+    },
+  };
+}
+
+function fake42Client(groups: ReturnType<typeof fake42DeliveryGroup>[]) {
+  const state = {
+    events: [] as Array<Record<string, unknown>>,
+  };
+  const client = {
+    orderDeliveryGroup: {
+      findMany: async () => groups,
+    },
+    notificationEvent: {
+      findUnique: async (args: { where: { dedupeKey: string } }) =>
+        state.events.find((event) => event.dedupeKey === args.where.dedupeKey) ?? null,
+      create: async (args: { data: Record<string, unknown> }) => {
+        const event = {
+          id: `event_${state.events.length + 1}`,
+          dedupeKey: args.data.dedupeKey,
+          intervalType: args.data.intervalType,
+          actionType: args.data.actionType,
+          status: args.data.status,
+          selectedChannel: args.data.selectedChannel,
+          recipientEmail: args.data.recipientEmail,
+          recipientPhone: args.data.recipientPhone,
+          reasonSkipped: args.data.reasonSkipped,
+          orderType: args.data.orderType,
+          orderNumber: args.data.orderNumber,
+        };
+        state.events.push(event);
+        return event;
+      },
+      update: async (args: { where: { id: string }; data: Record<string, unknown> }) => {
+        const event = state.events.find((row) => row.id === args.where.id);
+        if (!event) throw new Error(`Missing fake 42 event ${args.where.id}`);
+        Object.assign(event, args.data);
+        return event;
+      },
+    },
+    deliveryConfirmation: {
+      findUnique: async () => null,
+    },
+  };
+
+  return { client, state };
+}
+
+async function run42OrderScopeValidation(failures: string[]) {
+  const targetDeliveryDate = dateFromKey("2026-09-05");
+  const scopedOrder = { orderType: "SO", orderNumber: "SO38056" };
+
+  {
+    const fake = fake42Client([
+      fake42DeliveryGroup({ orderNumber: "SO38056", deliveryDate: targetDeliveryDate }),
+      fake42DeliveryGroup({ orderNumber: "SO99999", deliveryDate: targetDeliveryDate }),
+    ]);
+    const summary = await create42DayDeliveryConfirmationEvents({
+      runDate: "2026-07-25",
+      now: new Date("2026-07-25T09:19:00.000Z"),
+      dryRun: false,
+      freshImport: false,
+      prismaClient: fake.client as never,
+      orderScope: scopedOrder,
+    });
+    assert(summary.orderScope.enabled === true, "42 scoped canary mode should be reported", failures);
+    assert(summary.orderScope.unscopedCount === 2, "42 scoped canary should count unscoped candidates", failures);
+    assert(summary.orderScope.scopedCount === 1, "42 scoped canary should evaluate one scoped candidate", failures);
+    assert(fake.state.events.length === 1, "42 scoped canary should create only one scoped event", failures);
+    assert(fake.state.events[0]?.orderNumber === "SO38056", "42 scoped canary should create SO38056 only", failures);
+    assert(
+      summary.eventReports.every((report) => report.orderType === "SO" && report.orderNumber === "SO38056"),
+      "42 scoped canary reports should include only SO38056",
+      failures
+    );
+  }
+
+  {
+    const fake = fake42Client([
+      fake42DeliveryGroup({ orderNumber: "SO38056", deliveryDate: targetDeliveryDate, orderStatus: "Completed" }),
+      fake42DeliveryGroup({ orderNumber: "SO99999", deliveryDate: targetDeliveryDate }),
+    ]);
+    const summary = await create42DayDeliveryConfirmationEvents({
+      runDate: "2026-07-25",
+      now: new Date("2026-07-25T09:19:00.000Z"),
+      dryRun: false,
+      freshImport: false,
+      prismaClient: fake.client as never,
+      orderScope: scopedOrder,
+    });
+    assert(summary.deliveryGroupsSkippedIneligible === 1, "42 scoped canary should not force production eligibility", failures);
+    assert(fake.state.events.length === 0, "42 scoped ineligible order should create no event", failures);
+    assert(
+      summary.eventReports[0]?.reasonSkipped === "ineligible_order_or_delivery_group_status",
+      "42 scoped ineligible order should report why it was skipped",
+      failures
+    );
+  }
+
+  {
+    const fake = fake42Client([
+      fake42DeliveryGroup({ orderNumber: "SO38056", deliveryDate: targetDeliveryDate }),
+    ]);
+    const summary = await create42DayDeliveryConfirmationEvents({
+      runDate: "2026-07-25",
+      now: new Date("2026-07-25T09:19:00.000Z"),
+      dryRun: false,
+      freshImport: false,
+      prismaClient: fake.client as never,
+      orderScope: { orderType: "SO", orderNumber: "SO-NOT-THERE" },
+    });
+    assert(summary.orderScope.scopedCount === 0, "42 wrong scoped order should evaluate zero candidates", failures);
+    assert(fake.state.events.length === 0, "42 wrong scoped order should create nothing", failures);
+    assert(summary.eventReports.length === 0, "42 wrong scoped order should report no touched orders", failures);
+  }
+}
+
 async function runTwilioStatusValidation(failures: string[]) {
   {
     const fake = createFakeStatusClient({
@@ -398,9 +568,11 @@ async function runTwilioStatusValidation(failures: string[]) {
 
 async function main() {
   const failures: string[] = [];
+  await run42OrderScopeValidation(failures);
   const cli = read("scripts/dispatch-delivery-notifications.ts");
   const packageJson = read("package.json");
   const productionIntervalRunner = read("scripts/run-delivery-interval.ts");
+  const noResponseRunner = read("scripts/run-42-day-confirmation-no-response.ts");
   const dispatcher = read("lib/notifications/deliveryNotificationDispatcher.ts");
   const providers = read("lib/notifications/deliveryNotificationProviders.ts");
   const twilioStatus = read("lib/notifications/handleTwilioMessageStatus.ts");
@@ -490,6 +662,29 @@ async function main() {
     failures
   );
   assert(
+    includes(productionIntervalRunner, "--order-type") &&
+      includes(productionIntervalRunner, "--order-number") &&
+      includes(productionIntervalRunner, "normalizeDeliveryOrderScope") &&
+      includes(productionIntervalRunner, "orderScope: options.orderScope") &&
+      includes(productionIntervalRunner, "assertRowsWithinOrderScope(options.orderScope, createEventReports") &&
+      includes(productionIntervalRunner, "assertRowsWithinOrderScope(options.orderScope, scheduledEvents") &&
+      includes(productionIntervalRunner, "blastRadiusLimitedOnly") &&
+      includes(productionIntervalRunner, "productionEligibilityStillRequired: true"),
+    "42 production runner must support scoped canary mode without bypassing production eligibility",
+    failures
+  );
+  assert(
+    includes(noResponseRunner, "--order-type") &&
+      includes(noResponseRunner, "--order-number") &&
+      includes(noResponseRunner, "normalizeDeliveryOrderScope") &&
+      includes(noResponseRunner, "orderScope: options.orderScope") &&
+      includes(noResponseRunner, "assertRowsWithinOrderScope(options.orderScope, summary.eventReports") &&
+      includes(noResponseRunner, "assertRowsWithinOrderScope(options.orderScope, events") &&
+      includes(noResponseRunner, "touchHistoryStateMachineStillRequired: true"),
+    "42 no-response runner must support scoped canary mode without bypassing touch-history state machine",
+    failures
+  );
+  assert(
     includes(productionIntervalRunner, "shell: process.platform === \"win32\"") &&
       includes(productionIntervalRunner, "prisma\", \"migrate\", \"status\""),
     "production interval runner must use a Windows-safe subprocess for its internal Prisma migration status check",
@@ -552,8 +747,10 @@ async function main() {
   );
   assert(
     includes(create42DayDeliveryConfirmationEvents, "prepareFreshDeliveryIntervalImport") &&
-      includes(create42DayDeliveryConfirmationEvents, "summary.freshImport"),
-    "42-day confirmation creation must prepare fresh import before event selection",
+      includes(create42DayDeliveryConfirmationEvents, "summary.freshImport") &&
+      includes(create42DayDeliveryConfirmationEvents, "filterByDeliveryOrderScope") &&
+      includes(create42DayDeliveryConfirmationEvents, "orderScope: DeliveryOrderScopeReport"),
+    "42-day confirmation creation must prepare fresh import and scoped canary filtering before event selection",
     failures
   );
   assert(

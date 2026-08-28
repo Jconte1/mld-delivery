@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FormEvent } from "react";
+import { useFormStatus } from "react-dom";
 
 import {
   parseDateInputValue,
@@ -23,14 +24,27 @@ type DeliveryConfirmationActionsProps = {
   requestDifferentDateAction: (formData: FormData) => void | Promise<void>;
 };
 
-function dateLabel(value: string) {
-  return new Intl.DateTimeFormat("en-US", {
-    timeZone: "UTC",
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  }).format(new Date(`${value}T00:00:00.000Z`));
+function SubmitButton({
+  children,
+  className,
+  disabled,
+  isSubmitting,
+  pendingLabel,
+}: {
+  children: React.ReactNode;
+  className: string;
+  disabled?: boolean;
+  isSubmitting?: boolean;
+  pendingLabel: string;
+}) {
+  const { pending } = useFormStatus();
+  const submitting = pending || Boolean(isSubmitting);
+
+  return (
+    <button className={className} disabled={disabled || submitting}>
+      {submitting ? pendingLabel : children}
+    </button>
+  );
 }
 
 function lockedMessage(props: DeliveryConfirmationActionsProps) {
@@ -51,19 +65,35 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
   );
   const [selectedDate, setSelectedDate] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
+  const [confirmSubmitting, setConfirmSubmitting] = useState(false);
+  const [requestSubmitting, setRequestSubmitting] = useState(false);
   const finalMessage = lockedMessage(props);
 
   function onConfirmSubmit(event: FormEvent<HTMLFormElement>) {
+    if (confirmSubmitting) {
+      event.preventDefault();
+      return;
+    }
+
     if (
       !window.confirm(
-        `Are you sure you want to confirm your delivery for ${props.scheduledDateLabel}?`
+        "Are you sure you want to confirm this delivery date? Once confirmed, you will need to call Mountain Land Design to make changes."
       )
     ) {
       event.preventDefault();
+      setConfirmSubmitting(false);
+      return;
     }
+
+    setConfirmSubmitting(true);
   }
 
   function onRequestedDateSubmit(event: FormEvent<HTMLFormElement>) {
+    if (requestSubmitting) {
+      event.preventDefault();
+      return;
+    }
+
     if (!selectedDate) {
       event.preventDefault();
       setClientError("Please choose a requested delivery date.");
@@ -72,7 +102,7 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
 
     if (selectedDate < props.minimumRequestedDate) {
       event.preventDefault();
-      setClientError("That date has already passed. Please choose a future delivery date.");
+      setClientError("Please select a date after your current scheduled delivery date.");
       return;
     }
 
@@ -94,11 +124,15 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
 
     if (
       !window.confirm(
-        `Are you sure you want to request moving your delivery to ${dateLabel(selectedDate)}?`
+        "Are you sure you want to request this new delivery date? After submitting, you will need to call Mountain Land Design to make additional changes."
       )
     ) {
       event.preventDefault();
+      setRequestSubmitting(false);
+      return;
     }
+
+    setRequestSubmitting(true);
   }
 
   if (props.isLocked) {
@@ -114,19 +148,24 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
       <div className="flex flex-col gap-3 sm:flex-row">
         <form action={props.confirmDeliveryAction} onSubmit={onConfirmSubmit}>
           <input type="hidden" name="token" value={props.token} />
-          <button className="w-full rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 sm:w-auto">
+          <SubmitButton
+            className="w-full rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400 sm:w-auto"
+            isSubmitting={confirmSubmitting}
+            pendingLabel="Confirming..."
+          >
             Confirm Delivery
-          </button>
+          </SubmitButton>
         </form>
 
         {!showDatePicker ? (
           <button
             type="button"
+            disabled={confirmSubmitting || requestSubmitting}
             onClick={() => {
               setShowDatePicker(true);
               setClientError(null);
             }}
-            className="rounded-md border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100"
+            className="rounded-md border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
           >
             Request Different Date
           </button>
@@ -158,17 +197,22 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
             />
             <p className="mt-2 text-xs text-zinc-500">{props.requestedDateInstruction}</p>
           </div>
-          <button className="rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800">
+          <SubmitButton
+            className="rounded-md bg-zinc-950 px-5 py-3 text-sm font-semibold text-white hover:bg-zinc-800 disabled:cursor-not-allowed disabled:bg-zinc-400"
+            isSubmitting={requestSubmitting}
+            pendingLabel="Submitting request..."
+          >
             Confirm Requested Date
-          </button>
+          </SubmitButton>
           <button
             type="button"
+            disabled={requestSubmitting}
             onClick={() => {
               setShowDatePicker(false);
               setSelectedDate("");
               setClientError(null);
             }}
-            className="rounded-md border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100"
+            className="rounded-md border border-zinc-300 px-5 py-3 text-sm font-semibold text-zinc-900 hover:bg-zinc-100 disabled:cursor-not-allowed disabled:bg-zinc-100 disabled:text-zinc-400"
           >
             Cancel
           </button>

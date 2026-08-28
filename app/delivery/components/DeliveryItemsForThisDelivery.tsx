@@ -85,10 +85,12 @@ export function DeliveryItemsForThisDelivery({
   lines,
   includedLineCount,
   hasActionableIssues,
+  availabilityLastUpdatedLabel,
 }: {
   lines: OrderLineReadinessSummary[];
   includedLineCount: number;
   hasActionableIssues: boolean;
+  availabilityLastUpdatedLabel?: string | null;
 }) {
   return (
     <section className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
@@ -99,6 +101,12 @@ export function DeliveryItemsForThisDelivery({
             {includedLineCount} included lines,{" "}
             {hasActionableIssues ? "some items need review" : "items look ready or complete"}.
           </p>
+          {availabilityLastUpdatedLabel ? (
+            <p className="mt-2 text-xs text-zinc-500">
+              Product availability and ETA information last updated from ERP import:{" "}
+              {availabilityLastUpdatedLabel}
+            </p>
+          ) : null}
         </div>
       </div>
       <div className="mt-5 overflow-x-auto">

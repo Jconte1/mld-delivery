@@ -39,6 +39,12 @@ import {
   type DeliveryIntervalFreshImportLoader,
   type DeliveryIntervalFreshImportResult,
 } from "@/lib/notifications/freshDeliveryIntervalImport";
+import {
+  deliveryOrderScopeReport,
+  filterByDeliveryOrderScope,
+  type DeliveryOrderScope,
+  type DeliveryOrderScopeReport,
+} from "@/lib/notifications/orderScope";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
   loadActiveNotificationOptOutAddresses,
@@ -52,6 +58,8 @@ export const DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_REASON =
   "already_confirmed_for_delivery_date";
 export const DELIVERY_CONFIRMATION_ALREADY_CONFIRMED_IN_ACUMATICA_REASON =
   "already_confirmed_in_acumatica";
+export const DELIVERY_CONFIRMATION_INELIGIBLE_DELIVERY_GROUP_REASON =
+  "ineligible_order_or_delivery_group_status";
 
 export type DeliveryConfirmation42DayClient = Pick<
   typeof prisma,
@@ -104,6 +112,7 @@ export type Create42DayDeliveryConfirmationEventsSummary = {
   targetDeliveryDate: string;
   dryRun: boolean;
   freshImport: DeliveryIntervalFreshImportResult;
+  orderScope: DeliveryOrderScopeReport;
   targetDeliveryGroups: number;
   eligibleDeliveryGroups: number;
   deliveryGroupsSkippedWeekendDeliveryDate: number;
@@ -138,6 +147,7 @@ export type Create42DayDeliveryConfirmationEventsOptions = {
   requireQueueBackedImport?: boolean;
   importSalesOrders?: DeliveryIntervalFreshImportLoader;
   prismaClient?: DeliveryConfirmation42DayClient;
+  orderScope?: DeliveryOrderScope | null;
 };
 
 export type DeliveryConfirmation42DayTargetGroup = Awaited<
@@ -194,6 +204,11 @@ function emptySummary(params: {
       perOrderFailed: false,
       errorMessage: null,
     },
+    orderScope: deliveryOrderScopeReport({
+      scope: null,
+      unscopedCount: 0,
+      scopedCount: 0,
+    }),
     targetDeliveryGroups: 0,
     eligibleDeliveryGroups: 0,
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
@@ -503,7 +518,13 @@ export async function create42DayDeliveryConfirmationEvents(
     addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
     return summary;
   }
-  const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
+  const allDeliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
+  const deliveryGroups = filterByDeliveryOrderScope(allDeliveryGroups, options.orderScope);
+  summary.orderScope = deliveryOrderScopeReport({
+    scope: options.orderScope,
+    unscopedCount: allDeliveryGroups.length,
+    scopedCount: deliveryGroups.length,
+  });
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
     deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
     client
@@ -515,6 +536,53 @@ export async function create42DayDeliveryConfirmationEvents(
     const order = deliveryGroup.order;
     if (!is42DayDeliveryGroupEligible(deliveryGroup)) {
       summary.deliveryGroupsSkippedIneligible += 1;
+      if (options.orderScope) {
+        const paymentReport = emptyPaymentReport();
+        const acumaticaConfirmVia = normalizeAcumaticaConfirmVia(order.confirmVia);
+        summary.eventsSkipped += 1;
+        addSkippedReason(summary, DELIVERY_CONFIRMATION_INELIGIBLE_DELIVERY_GROUP_REASON);
+        summary.eventReports.push({
+          orderType: order.orderType,
+          orderNumber: order.orderNumber,
+          deliveryGroupId: deliveryGroup.id,
+          deliveryDate: dateKey(deliveryGroup.deliveryDate),
+          eventId: null,
+          dedupeKey: null,
+          intervalType: NotificationIntervalType.DAY_42,
+          actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+          status: "INELIGIBLE",
+          selectedChannel: null,
+          recipientEmail: null,
+          recipientPhone: null,
+          reasonSkipped: DELIVERY_CONFIRMATION_INELIGIBLE_DELIVERY_GROUP_REASON,
+          alreadyConfirmedForDeliveryDate: false,
+          alreadyConfirmedInAcumatica: isAlreadyConfirmedInAcumatica(acumaticaConfirmVia),
+          acumaticaConfirmVia,
+          subject: null,
+          renderedMessagePreview:
+            "Scoped canary order failed normal production eligibility; no event was created.",
+          linkTokenPresent: false,
+          linkScopeKey: null,
+          confirmationState: null,
+          paymentTerms: paymentReport.paymentTerms,
+          unpaidBalance: paymentReport.unpaidBalance,
+          orderTotal: paymentReport.orderTotal,
+          paidToDate: paymentReport.paidToDate,
+          paymentApplicabilityStatus: paymentReport.paymentApplicabilityStatus,
+          paymentStatus: paymentReport.paymentStatus,
+          amountDueNow: paymentReport.amountDueNow,
+          amountDueNowRounded: paymentReport.amountDueNowRounded,
+          currentDeliveryGroupValue: paymentReport.currentDeliveryGroupValue,
+          currentDeliveryGroupMerchandiseValue: paymentReport.currentDeliveryGroupMerchandiseValue,
+          currentDeliveryGroupTaxAmount: paymentReport.currentDeliveryGroupTaxAmount,
+          remainingUndeliveredValueAfterCurrentDelivery:
+            paymentReport.remainingUndeliveredValueAfterCurrentDelivery,
+          requiredDownOnRemaining: paymentReport.requiredDownOnRemaining,
+          paymentReminderApplies: false,
+          emailPaymentReminderIncluded: false,
+          paymentCalculationWarnings: paymentReport.paymentCalculationWarnings,
+        });
+      }
       continue;
     }
 

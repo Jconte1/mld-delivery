@@ -10,6 +10,12 @@ import {
   NotificationIntervalType,
 } from "../lib/generated/prisma/client";
 import { dateFromKey, dateKey, getNotificationTargetDate } from "../lib/notifications/helpers";
+import {
+  deliveryOrderMatchesScope,
+  describeDeliveryOrderScope,
+  normalizeDeliveryOrderScope,
+  type DeliveryOrderScope,
+} from "../lib/notifications/orderScope";
 import { create180DayDeliveryReminderEvents } from "../lib/notifications/create180DayDeliveryReminderEvents";
 import { create90DayDeliveryReminderEvents } from "../lib/notifications/create90DayDeliveryReminderEvents";
 import { create60DayDeliveryReminderEvents } from "../lib/notifications/create60DayDeliveryReminderEvents";
@@ -30,6 +36,7 @@ type CreateDeliveryIntervalEventsSummary =
 type CreateDeliveryIntervalEvents = (options: {
   runDate?: Date | string;
   dryRun?: boolean;
+  orderScope?: DeliveryOrderScope | null;
 }) => Promise<CreateDeliveryIntervalEventsSummary>;
 
 type IntervalConfig = {
@@ -94,6 +101,9 @@ type CliOptions = {
   send: boolean;
   confirmPhrase: string | null;
   runId: string | null;
+  orderType: string | null;
+  orderNumber: string | null;
+  orderScope: DeliveryOrderScope | null;
 };
 
 function isSupportedInterval(value: string): value is SupportedInterval {
@@ -119,6 +129,9 @@ function parseArgs(args: string[]): CliOptions {
     send: false,
     confirmPhrase: null,
     runId: null,
+    orderType: null,
+    orderNumber: null,
+    orderScope: null,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -158,9 +171,26 @@ function parseArgs(args: string[]): CliOptions {
       index = parsed.nextIndex;
       continue;
     }
+    if (arg === "--order-type" || arg.startsWith("--order-type=")) {
+      const parsed = readOption(args, index, "--order-type");
+      options.orderType = parsed.value;
+      index = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--order-number" || arg.startsWith("--order-number=")) {
+      const parsed = readOption(args, index, "--order-number");
+      options.orderNumber = parsed.value;
+      index = parsed.nextIndex;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${arg}`);
   }
+
+  options.orderScope = normalizeDeliveryOrderScope({
+    orderType: options.orderType,
+    orderNumber: options.orderNumber,
+  });
 
   return options;
 }
@@ -304,6 +334,9 @@ function preflight(options: CliOptions, env: NodeJS.ProcessEnv = process.env) {
   } else if (!config && !options.confirmPhrase) {
     failures.push("--confirm is required.");
   }
+  if (options.orderScope && config?.interval !== "42") {
+    failures.push("--order-type/--order-number canary scope is currently supported only for interval 42.");
+  }
 
   addMissingEnvFailure(failures, "DATABASE_URL", "database access", env);
   addMissingEnvFailure(failures, "MLD_QUEUE_BASE_URL", "queue-backed ERP import", env);
@@ -408,6 +441,7 @@ async function scheduledEventsForRun(params: {
   runDate: string;
   targetDate: string;
   currentRunCreatedEventIds?: string[] | null;
+  orderScope?: DeliveryOrderScope | null;
 }) {
   if (params.currentRunCreatedEventIds && params.currentRunCreatedEventIds.length === 0) {
     return [];
@@ -418,6 +452,8 @@ async function scheduledEventsForRun(params: {
       id: params.currentRunCreatedEventIds ? { in: params.currentRunCreatedEventIds } : undefined,
       intervalType: params.config.intervalType,
       actionType: params.config.actionType,
+      orderType: params.orderScope?.orderType,
+      orderNumber: params.orderScope?.orderNumber,
       deliveryDate: dateFromKey(params.targetDate),
       scheduledAt: dateFromKey(params.runDate),
       status: NotificationEventStatus.SCHEDULED,
@@ -446,6 +482,54 @@ function createdEventIdsForCurrentRun(summary: CreateDeliveryIntervalEventsSumma
     return summary.createdEventIds;
   }
   return null;
+}
+
+function eventReportsForSummary(summary: CreateDeliveryIntervalEventsSummary) {
+  if ("eventReports" in summary && Array.isArray(summary.eventReports)) {
+    return summary.eventReports as Array<{
+      orderType?: string | null;
+      orderNumber?: string | null;
+      deliveryGroupId?: string | null;
+      deliveryDate?: string | null;
+      eventId?: string | null;
+      status?: string | null;
+      selectedChannel?: string | null;
+      reasonSkipped?: string | null;
+    }>;
+  }
+  return [];
+}
+
+function summarizeCreateEventReports(summary: CreateDeliveryIntervalEventsSummary) {
+  return eventReportsForSummary(summary).map((report) => ({
+    orderType: report.orderType ?? null,
+    orderNumber: report.orderNumber ?? null,
+    deliveryGroupId: report.deliveryGroupId ?? null,
+    deliveryDate: report.deliveryDate ?? null,
+    eventId: report.eventId ?? null,
+    status: report.status ?? null,
+    selectedChannel: report.selectedChannel ?? null,
+    reasonSkipped: report.reasonSkipped ?? null,
+  }));
+}
+
+function summaryOrderScope(summary: CreateDeliveryIntervalEventsSummary) {
+  if ("orderScope" in summary) return summary.orderScope;
+  return null;
+}
+
+function assertRowsWithinOrderScope(
+  scope: DeliveryOrderScope | null,
+  rows: Array<{ orderType?: string | null; orderNumber?: string | null }>,
+  label: string
+) {
+  if (!scope) return;
+  const mismatches = rows.filter((row) => !deliveryOrderMatchesScope(row, scope));
+  if (mismatches.length > 0) {
+    throw new Error(
+      `${label} included ${mismatches.length} row(s) outside scoped canary order ${describeDeliveryOrderScope(scope)}; refusing to continue.`
+    );
+  }
 }
 
 async function countOtherScheduledEventsForInterval(params: {
@@ -599,7 +683,10 @@ async function run() {
   const createSummary = await config.createEvents({
     runDate,
     dryRun: false,
+    orderScope: options.orderScope,
   });
+  const createEventReports = eventReportsForSummary(createSummary);
+  assertRowsWithinOrderScope(options.orderScope, createEventReports, "Create summary event reports");
 
   if (createSummary.freshImport.globalFailed || createSummary.freshImport.errorMessage) {
     throw new Error(
@@ -628,7 +715,9 @@ async function run() {
     runDate,
     targetDate,
     currentRunCreatedEventIds,
+    orderScope: options.orderScope,
   });
+  assertRowsWithinOrderScope(options.orderScope, scheduledEvents, "Scheduled dispatch events");
   const unsafeScheduledEvents = scheduledEvents.filter(
     (event) => !event.selectedChannel || event._count.attempts > 0
   );
@@ -650,9 +739,18 @@ async function run() {
           targetDeliveryDate: targetDate,
           migrationStatus,
           importSummary: createSummary.freshImport.importResult,
+          orderScope: {
+            requested: options.orderScope,
+            summary: summaryOrderScope(createSummary),
+            blastRadiusLimitedOnly: Boolean(options.orderScope),
+            productionEligibilityStillRequired: true,
+            forcedEligibility: false,
+            controlledRecipientMode: false,
+          },
           candidateCount: createSummary.targetDeliveryGroups,
           productionQualifiedCount: 0,
           skippedCountByReason: summarizeSkippedReasons(createSummary.skippedReasons),
+          createEventReports: summarizeCreateEventReports(createSummary),
           failedImportExclusions: createSummary.failedImportExclusions,
           currentRunCreatedEventIds,
           otherScheduledEventsForInterval,
@@ -711,6 +809,14 @@ async function run() {
         confirmationWritebackDryRunRequired: config.confirmationWritebackDryRunRequired,
         confirmationWritebackLivePayloadsEnabled: !config.confirmationWritebackDryRunRequired,
         importSummary: createSummary.freshImport.importResult,
+        orderScope: {
+          requested: options.orderScope,
+          summary: summaryOrderScope(createSummary),
+          blastRadiusLimitedOnly: Boolean(options.orderScope),
+          productionEligibilityStillRequired: true,
+          forcedEligibility: false,
+          controlledRecipientMode: false,
+        },
         failedImportExclusions: createSummary.failedImportExclusions,
         currentRunCreatedEventIds,
         otherScheduledEventsForInterval,
@@ -721,6 +827,7 @@ async function run() {
         candidateCount: createSummary.targetDeliveryGroups,
         productionQualifiedCount: scheduledEvents.length,
         skippedCountByReason: summarizeSkippedReasons(createSummary.skippedReasons),
+        createEventReports: summarizeCreateEventReports(createSummary),
         smsAttemptsCreated,
         emailAttemptsCreated,
         providerAcceptedCount,

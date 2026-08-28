@@ -1,4 +1,7 @@
-import { cleanNotificationText } from "@/lib/notifications/helpers";
+import {
+  cleanNotificationText,
+  normalizeCustomerDisplayText,
+} from "@/lib/notifications/helpers";
 
 export type SalespersonContactInput = {
   salespersonName?: string | null;
@@ -58,7 +61,7 @@ export function getSalespersonContactDisplay(
 ): SalespersonContactDisplay | null {
   if (!contact || contact.isActive !== true) return null;
 
-  const name = cleanNotificationText(contact.salespersonName);
+  const name = normalizeCustomerDisplayText(contact.salespersonName);
   const email = normalizeEmail(contact.salespersonEmail);
   const phone = formatPhone(normalizePhone(contact.salespersonPhone));
   const target = targetText({ name, phone, email });

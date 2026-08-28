@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import type { Metadata } from "next";
 
 import { DeliveryConfirmationStatus } from "@/lib/generated/prisma/client";
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
@@ -23,8 +24,10 @@ import {
   dateFromKey,
   dateKey,
   formatCustomerFriendlyDate,
+  formatCustomerFriendlyDateTime,
   formatJobAddress,
   formatJobName,
+  normalizeCustomerDisplayText,
 } from "@/lib/notifications/helpers";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
@@ -44,6 +47,20 @@ async function loadConfirmation(token: string) {
     include: {
       orderDeliveryGroup: {
         include: {
+          deliveryGroupLines: {
+            where: { isActive: true },
+            select: {
+              lastSeenAt: true,
+              updatedAt: true,
+              orderLine: {
+                select: {
+                  lastSyncedAt: true,
+                  readinessCalculatedAt: true,
+                  updatedAt: true,
+                },
+              },
+            },
+          },
           order: {
             include: {
               address: true,
@@ -68,6 +85,58 @@ async function loadConfirmation(token: string) {
       confirmation.linkExpiredAt ||
         (confirmation.linkExpiresAt && confirmation.linkExpiresAt.getTime() < Date.now())
     ),
+  };
+}
+
+type LoadedConfirmation = NonNullable<Awaited<ReturnType<typeof loadConfirmation>>>;
+
+function formatOrderForTitle(params: { orderType?: string | null; orderNumber?: string | null }) {
+  const orderType = normalizeCustomerDisplayText(params.orderType)?.toUpperCase() ?? "";
+  const orderNumber = normalizeCustomerDisplayText(params.orderNumber)?.toUpperCase() ?? "";
+  if (!orderType) return orderNumber;
+  if (!orderNumber) return orderType;
+  return orderNumber.startsWith(orderType) ? orderNumber : `${orderType}${orderNumber}`;
+}
+
+function latestDateValue(values: Array<Date | null | undefined>) {
+  const dates = values.filter((value): value is Date => Boolean(value));
+  if (dates.length === 0) return null;
+  return new Date(Math.max(...dates.map((date) => date.getTime())));
+}
+
+function productAvailabilityUpdatedAt(group: LoadedConfirmation["orderDeliveryGroup"]) {
+  const lineDates = group.deliveryGroupLines.flatMap((membership) => [
+    membership.lastSeenAt,
+    membership.updatedAt,
+    membership.orderLine?.lastSyncedAt,
+    membership.orderLine?.readinessCalculatedAt,
+    membership.orderLine?.updatedAt,
+  ]);
+
+  return latestDateValue([group.lastSeenAt, group.lastSyncedAt, group.updatedAt, ...lineDates]);
+}
+
+export async function generateMetadata({ params }: PageProps): Promise<Metadata> {
+  const { token } = await params;
+  const confirmation = await loadConfirmation(token);
+  if (!confirmation) {
+    return {
+      title: "Delivery Confirmation - Mountain Land Design",
+    };
+  }
+
+  const group = confirmation.orderDeliveryGroup;
+  const order = group.order;
+  const jobName = formatJobName({
+    customerDescription: order.customerDescription,
+    locationDescription: order.locationDescription,
+  });
+
+  return {
+    title: `Delivery Confirmation - ${jobName} - ${formatOrderForTitle({
+      orderType: group.orderType,
+      orderNumber: group.orderNumber,
+    })}`,
   };
 }
 
@@ -305,11 +374,15 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
     ? formatCustomerFriendlyDate(confirmation.requestedNewDate)
     : null;
   const isFinalStatus = isFinalConfirmationStatus(confirmation.status);
-  const minimumRequestedDate = nextDateKey(new Date());
+  const minimumRequestedDate = nextDateKey(group.deliveryDate);
   const deliveryAddress: DeliveryDateEligibilityAddress | null = order.address;
   const requestedDateInstruction = getRequestedDeliveryDateWebInstruction(deliveryAddress);
   const errorMessage = requestDateErrorMessage(search.error);
   const actionMessage = actionStateMessage(search.updated);
+  const availabilityUpdatedAt = productAvailabilityUpdatedAt(group);
+  const availabilityUpdatedLabel = availabilityUpdatedAt
+    ? formatCustomerFriendlyDateTime(availabilityUpdatedAt)
+    : null;
   const headerDateLine =
     confirmation.status === DeliveryConfirmationStatus.CONFIRMED
       ? `${order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery"} confirmed for ${scheduledDateLabel}`
@@ -352,13 +425,13 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
               <div>
                 <dt className="font-medium text-zinc-500">Customer</dt>
                 <dd className="mt-1 font-semibold text-zinc-900">
-                  {order.customerDescription ?? "Not provided"}
+                  {normalizeCustomerDisplayText(order.customerDescription) ?? "Not provided"}
                 </dd>
               </div>
               <div>
                 <dt className="font-medium text-zinc-500">Job</dt>
                 <dd className="mt-1 font-semibold text-zinc-900">
-                  {order.locationDescription ?? "Not provided"}
+                  {normalizeCustomerDisplayText(order.locationDescription) ?? "Not provided"}
                 </dd>
               </div>
               <div className="sm:col-span-2">
@@ -408,6 +481,7 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
           lines={readiness.lines}
           includedLineCount={readiness.includedLineCount}
           hasActionableIssues={readiness.hasActionableIssues}
+          availabilityLastUpdatedLabel={availabilityUpdatedLabel}
         />
       </section>
     </main>

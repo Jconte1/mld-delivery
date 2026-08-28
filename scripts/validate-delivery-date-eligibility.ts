@@ -18,7 +18,7 @@ type Check = {
 const checks: Check[] = [];
 const projectRoot = process.cwd();
 const now = new Date("2026-07-21T12:00:00.000Z");
-const currentDeliveryDate = "2026-09-03";
+const currentDeliveryDate = "2026-08-28";
 const link = "https://delivery.example.test/delivery/confirm/abc123";
 
 function readProjectFile(relativePath: string) {
@@ -169,7 +169,7 @@ assertRejected(
   "14. Past date rejected",
   {
     requestedDate: "2026-07-20",
-    currentDeliveryDate,
+    currentDeliveryDate: "2026-07-19",
     address: { state: "UT", postalCode: "84101" },
   },
   REQUESTED_DELIVERY_DATE_REASON_CODES.DATE_IN_PAST,

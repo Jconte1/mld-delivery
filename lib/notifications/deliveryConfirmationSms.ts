@@ -6,6 +6,7 @@ import {
   cleanNotificationText,
   dateKey,
   formatCustomerFriendlyDate,
+  normalizeCustomerDisplayText,
 } from "@/lib/notifications/helpers";
 import { shortenDeliveryConfirmationLink } from "@/lib/notifications/deliveryConfirmationLinks";
 
@@ -107,9 +108,9 @@ export function render42DaySmsConfirmationMessage(params: {
   link: string;
   deliveryAddress?: DeliveryDateEligibilityAddress | null;
 }) {
-  const contactName = cleanNotificationText(params.contactName) ?? "there";
+  const contactName = normalizeCustomerDisplayText(params.contactName) ?? "there";
   const firstName = contactName.split(/\s+/)[0] || contactName;
-  const jobName = cleanNotificationText(params.jobName) ?? "your delivery";
+  const jobName = normalizeCustomerDisplayText(params.jobName) ?? "your delivery";
   const link = shortenDeliveryConfirmationLink(cleanNotificationText(params.link) ?? "");
   const routeNote = getRequestedDeliveryDateRouteNote(params.deliveryAddress, "sms");
   const routeNoteParagraph = routeNote ? `\n\n${routeNote}` : "";
@@ -122,12 +123,18 @@ export function render42DaySmsConfirmationReminderMessage(params: {
   deliveryDate: Date | string;
   link: string;
   deliveryAddress?: DeliveryDateEligibilityAddress | null;
+  touchNumber?: 2 | 3;
 }) {
-  const link = cleanNotificationText(params.link) ?? "";
+  const link = shortenDeliveryConfirmationLink(cleanNotificationText(params.link) ?? "");
   const routeNote = getRequestedDeliveryDateRouteNote(params.deliveryAddress, "sms");
   const routeNoteSentence = routeNote ? ` ${routeNote}` : "";
+  const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
-  return `MLD: Order ${params.orderNumber}: Reminder to confirm your delivery for ${formatCustomerFriendlyDate(params.deliveryDate)}. Confirm or request a different date here: ${link}.${routeNoteSentence} Reply STOP to opt out.`;
+  if (params.touchNumber === 3) {
+    return `MLD Final reminder: Order# ${params.orderNumber}: Please confirm or request a different date for your Mountain Land Design delivery on ${deliveryDate}. Reply Y or N. Details: ${link}.${routeNoteSentence} Reply STOP to opt out.`;
+  }
+
+  return `MLD Reminder: Order# ${params.orderNumber}: Please confirm your Mountain Land Design delivery for ${deliveryDate}. Reply Y to confirm or N to request a different date. Details: ${link}.${routeNoteSentence} Reply STOP to opt out.`;
 }
 
 export function buildDeliveryConfirmationScopeKey(params: {

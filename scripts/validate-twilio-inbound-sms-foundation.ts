@@ -921,9 +921,15 @@ async function runInboundReplyValidation() {
   assertEqual(duplicateRequests.length, invalidDateQueueCount, "invalid date must not queue writeback");
 
   const weekendQueueCount = duplicateRequests.length;
+  const weekendStore = new MockDeliveryStore();
+  weekendStore.seedConfirmation({
+    phone: "+18015550123",
+    status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
+    deliveryDate: day("2026-08-28"),
+  });
   const weekendResult = await handleTwilioInboundSms({
     payload: inboundPayload("08/29/2026", "SM-WEEKEND-DATE"),
-    prismaClient: newStoreWithAwaitingConfirmation().client,
+    prismaClient: weekendStore.client,
     now: NOW,
     queueOptions: duplicateOptions,
   });
@@ -936,7 +942,11 @@ async function runInboundReplyValidation() {
     now: NOW,
     queueOptions: duplicateOptions,
   });
-  assertIncludes(pastResult.responseMessage, "already passed", "past date response");
+  assertIncludes(
+    pastResult.responseMessage,
+    "current scheduled delivery date",
+    "past-before-current date response"
+  );
 
   const sameDateStore = new MockDeliveryStore();
   sameDateStore.seedConfirmation({ phone: "+18015550123", deliveryDate: day("2026-08-31") });
@@ -946,13 +956,13 @@ async function runInboundReplyValidation() {
     now: NOW,
     queueOptions: duplicateOptions,
   });
-  assertIncludes(sameDateResult.responseMessage, "already your current", "same date response");
+  assertIncludes(sameDateResult.responseMessage, "current scheduled delivery date", "same date response");
 
   const wyomingInvalidStore = new MockDeliveryStore();
   const wyomingInvalid = wyomingInvalidStore.seedConfirmation({
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
-    deliveryDate: day("2026-09-03"),
+    deliveryDate: day("2026-08-28"),
     addressState: "WY",
     postalCode: "82001",
   });
@@ -979,7 +989,7 @@ async function runInboundReplyValidation() {
   const wyomingValid = wyomingValidStore.seedConfirmation({
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
-    deliveryDate: day("2026-09-03"),
+    deliveryDate: day("2026-08-28"),
     addressState: "Wyoming",
     postalCode: "82001",
   });
@@ -1007,7 +1017,7 @@ async function runInboundReplyValidation() {
   const mccallInvalid = mccallInvalidStore.seedConfirmation({
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
-    deliveryDate: day("2026-09-03"),
+    deliveryDate: day("2026-08-28"),
     addressState: "ID",
     postalCode: "83638",
   });
@@ -1080,7 +1090,7 @@ async function runInboundReplyValidation() {
   const mccallValid = mccallValidStore.seedConfirmation({
     phone: "+18015550123",
     status: DeliveryConfirmationStatus.AWAITING_NEW_DATE,
-    deliveryDate: day("2026-09-03"),
+    deliveryDate: day("2026-08-28"),
     addressState: "ID",
     postalCode: "83635-1234",
   });

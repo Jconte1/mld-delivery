@@ -53,6 +53,10 @@ export function DeliveryPaymentSummary({
             <dd className="mt-1 text-2xl font-semibold">
               {formatCurrencyAmount(payment.amountDueNowRounded)}
             </dd>
+            <dd className="mt-2 text-xs leading-5 text-zinc-500">
+              Balance owed is based on items expected to be available for this delivery. You
+              will not be asked to pay for backordered items at this time.
+            </dd>
           </div>
         ) : null}
         {showUnpaidBalance ? (

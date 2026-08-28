@@ -9,6 +9,7 @@ export const REQUESTED_DELIVERY_DATE_RULES = {
 export const REQUESTED_DELIVERY_DATE_REASON_CODES = {
   INVALID_DATE_FORMAT: "INVALID_DATE_FORMAT",
   DATE_IN_PAST: "DATE_IN_PAST",
+  REQUESTED_DATE_BEFORE_CURRENT_DELIVERY_DATE: "REQUESTED_DATE_BEFORE_CURRENT_DELIVERY_DATE",
   SAME_AS_CURRENT_DELIVERY_DATE: "SAME_AS_CURRENT_DELIVERY_DATE",
   WEEKEND_NOT_ALLOWED: "WEEKEND_NOT_ALLOWED",
   WYOMING_TUESDAY_ONLY: "WYOMING_TUESDAY_ONLY",
@@ -111,8 +112,10 @@ function codeCustomerMessage(code: RequestedDeliveryDateReasonCode) {
       return "MLD: That date falls on a weekend. Please reply with a weekday delivery date in MM/DD/YYYY format. Reply STOP to opt out.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.DATE_IN_PAST:
       return "MLD: That date has already passed. Please reply with a future delivery date in MM/DD/YYYY format. Reply STOP to opt out.";
+    case REQUESTED_DELIVERY_DATE_REASON_CODES.REQUESTED_DATE_BEFORE_CURRENT_DELIVERY_DATE:
+      return "MLD: Please select a date after your current scheduled delivery date. Reply STOP to opt out.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.SAME_AS_CURRENT_DELIVERY_DATE:
-      return "MLD: That is already your current scheduled delivery date. Please reply Y to confirm or send a different allowed delivery date in MM/DD/YYYY format. Reply STOP to opt out.";
+      return "MLD: Please select a date after your current scheduled delivery date. Reply STOP to opt out.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.INVALID_DATE_FORMAT:
       return "MLD: Please send the date as MM/DD/YYYY, for example 08/31/2026. Reply STOP to opt out.";
   }
@@ -128,8 +131,10 @@ function codeWebMessage(code: RequestedDeliveryDateReasonCode) {
       return "That date falls on a weekend. Please choose a weekday delivery date.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.DATE_IN_PAST:
       return "That date has already passed. Please choose a future delivery date.";
+    case REQUESTED_DELIVERY_DATE_REASON_CODES.REQUESTED_DATE_BEFORE_CURRENT_DELIVERY_DATE:
+      return "Please select a date after your current scheduled delivery date.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.SAME_AS_CURRENT_DELIVERY_DATE:
-      return "That is already your current scheduled delivery date. Please choose a different allowed delivery date.";
+      return "Please select a date after your current scheduled delivery date.";
     case REQUESTED_DELIVERY_DATE_REASON_CODES.INVALID_DATE_FORMAT:
       return "Please choose a valid requested delivery date.";
   }
@@ -241,6 +246,14 @@ export function validateRequestedDeliveryDateEligibility(params: {
     return invalidResult(
       rule,
       REQUESTED_DELIVERY_DATE_REASON_CODES.SAME_AS_CURRENT_DELIVERY_DATE,
+      requestedDate
+    );
+  }
+
+  if (requestedDate.getTime() < dateFromKey(params.currentDeliveryDate).getTime()) {
+    return invalidResult(
+      rule,
+      REQUESTED_DELIVERY_DATE_REASON_CODES.REQUESTED_DATE_BEFORE_CURRENT_DELIVERY_DATE,
       requestedDate
     );
   }

@@ -26,6 +26,7 @@
     "create:8-day-payment-enforcement-events": "tsx -r dotenv/config scripts/create-8-day-payment-enforcement-events.ts",
     "create:2-day-delivery-reminder-events": "tsx -r dotenv/config scripts/create-2-day-delivery-reminder-events.ts",
     "run:42-day-confirmation-no-response": "tsx -r dotenv/config scripts/run-42-day-confirmation-no-response.ts",
+    "review:42-day-no-response-internal-escalations": "tsx -r dotenv/config scripts/review-42-day-no-response-internal-escalations.ts",
     "run:42-day-no-response-real-order-dry-run": "tsx -r dotenv/config scripts/run-42-day-no-response-real-order-dry-run.ts",
     "sync:salesperson-contacts": "tsx -r dotenv/config scripts/sync-salesperson-contacts.ts",
     "backfill:order-delivery-group-lines": "tsx -r dotenv/config scripts/backfill-order-delivery-group-lines.ts",

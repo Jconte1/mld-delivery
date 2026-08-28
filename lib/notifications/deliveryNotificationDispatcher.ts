@@ -11,6 +11,11 @@ import {
 } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { buildDeliveryConfirmationLink } from "@/lib/notifications/deliveryConfirmationLinks";
 import {
+  deliveryConfirmationReminderTouchNumberFromDedupeKey,
+  guardDeliveryConfirmationNoResponseDispatch,
+  isDeliveryConfirmationNoResponseManagedEvent,
+} from "@/lib/notifications/deliveryConfirmationNoResponse";
+import {
   render42DayEmailConfirmationMessage,
   render42DayEmailConfirmationReminderMessage,
 } from "@/lib/notifications/deliveryConfirmationEmail";
@@ -714,6 +719,7 @@ async function renderForChannel(params: {
   if (event.intervalType === NotificationIntervalType.DAY_42) {
     const link = requireConfirmationLink(event);
     if (event.actionType === "DELIVERY_CONFIRMATION_REMINDER") {
+      const touchNumber = deliveryConfirmationReminderTouchNumberFromDedupeKey(event.dedupeKey);
       if (channel === "SMS") {
         return {
           subject: null,
@@ -722,6 +728,7 @@ async function renderForChannel(params: {
             deliveryDate: event.deliveryDate,
             link,
             deliveryAddress: event.order.address,
+            touchNumber: touchNumber ?? undefined,
           }),
           htmlBody: null,
         };
@@ -731,6 +738,7 @@ async function renderForChannel(params: {
         contactName: common.contactName,
         deliveryDate: event.deliveryDate,
         link,
+        touchNumber: touchNumber ?? undefined,
       });
       return {
         subject: rendered.subject,
@@ -1098,6 +1106,20 @@ async function markEventFailed(params: {
   });
 }
 
+async function markEventSkipped(params: {
+  client: typeof prisma;
+  eventId: string;
+  reason: string;
+}) {
+  await params.client.notificationEvent.update({
+    where: { id: params.eventId },
+    data: {
+      status: NotificationEventStatus.SKIPPED,
+      reasonSkipped: params.reason.slice(0, 1000),
+    },
+  });
+}
+
 async function callProvider(params: {
   provider: DeliveryNotificationProvider;
   channel: HelperNotificationChannel;
@@ -1185,6 +1207,42 @@ async function dispatchOne(params: {
       existingAttemptId: latestAttempt?.id ?? null,
       existingAttemptStatus: latestAttempt?.status ?? null,
     };
+  }
+
+  if (isDeliveryConfirmationNoResponseManagedEvent(params.event)) {
+    const guard = await guardDeliveryConfirmationNoResponseDispatch({
+      client: params.client as never,
+      event: {
+        id: params.event.id,
+        dedupeKey: params.event.dedupeKey,
+        intervalType: params.event.intervalType,
+        actionType: params.event.actionType,
+        deliveryGroupId: params.event.deliveryGroupId,
+        deliveryDate: params.event.deliveryDate,
+      },
+      now: params.now,
+    });
+    if (!guard.ok) {
+      const reason = `no_response_dispatch_guard_${guard.reason ?? "blocked"}`;
+      if (params.preflight.send) {
+        await markEventSkipped({
+          client: params.client,
+          eventId: params.event.id,
+          reason,
+        });
+      }
+      return {
+        ...base,
+        outcome: "skipped" as const,
+        reason,
+        selectedChannel: params.event.selectedChannel,
+        attemptId: null,
+        fallbackAttemptId: null,
+        realRecipientSuppressed: false,
+        finalRecipientKind: null,
+        externalMessageIdPresent: false,
+      };
+    }
   }
 
   const selected = selectChannelForEvent({

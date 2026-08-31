@@ -19,20 +19,39 @@ import {
 import { create180DayDeliveryReminderEvents } from "../lib/notifications/create180DayDeliveryReminderEvents";
 import { create90DayDeliveryReminderEvents } from "../lib/notifications/create90DayDeliveryReminderEvents";
 import { create60DayDeliveryReminderEvents } from "../lib/notifications/create60DayDeliveryReminderEvents";
+import { create14DayDeliveryReminderEvents } from "../lib/notifications/create14DayDeliveryReminderEvents";
+import type { Create30DayDeliveryReminderEventsSummary } from "../lib/notifications/create30DayDeliveryReminderEvents";
 import type { CreateDeliveryReminderEventsSummary } from "../lib/notifications/createDeliveryReminderEvents";
 import {
   create42DayDeliveryConfirmationEvents,
   type Create42DayDeliveryConfirmationEventsSummary,
 } from "../lib/notifications/create42DayDeliveryConfirmationEvents";
+import {
+  create12DayDeliveryPaymentRequestEvents,
+  type Create12DayDeliveryPaymentRequestEventsSummary,
+} from "../lib/notifications/create12DayDeliveryPaymentRequestEvents";
+import {
+  create10DayDeliveryPaymentRequestEvents,
+  type Create10DayDeliveryPaymentRequestEventsSummary,
+} from "../lib/notifications/create10DayDeliveryPaymentRequestEvents";
 import { dispatchDeliveryNotifications } from "../lib/notifications/deliveryNotificationDispatcher";
+import {
+  createFreshImportFailedOrderLookup,
+  getFreshImportFailedOrders,
+  requestedOnForDeliveryIntervalTargetDate,
+  type DeliveryIntervalFreshImportResult,
+} from "../lib/notifications/freshDeliveryIntervalImport";
 import { prisma } from "../lib/prisma";
 
-const SUPPORTED_INTERVALS = ["180", "90", "60", "42"] as const;
+const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "14", "12", "10"] as const;
 
 type SupportedInterval = (typeof SUPPORTED_INTERVALS)[number];
 type CreateDeliveryIntervalEventsSummary =
   | CreateDeliveryReminderEventsSummary
-  | Create42DayDeliveryConfirmationEventsSummary;
+  | Create30DayDeliveryReminderEventsSummary
+  | Create42DayDeliveryConfirmationEventsSummary
+  | Create12DayDeliveryPaymentRequestEventsSummary
+  | Create10DayDeliveryPaymentRequestEventsSummary;
 type CreateDeliveryIntervalEvents = (options: {
   runDate?: Date | string;
   dryRun?: boolean;
@@ -92,6 +111,39 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     dispatchOnlyCurrentRunCreatedEvents: true,
     confirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: false,
+  },
+  "14": {
+    interval: "14",
+    days: 14,
+    intervalType: NotificationIntervalType.DAY_14,
+    actionType: NotificationActionType.DELIVERY_REMINDER,
+    confirmPhrase: "RUN REAL 14 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create14DayDeliveryReminderEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    abortOnPerOrderImportFailure: true,
+  },
+  "12": {
+    interval: "12",
+    days: 12,
+    intervalType: NotificationIntervalType.DAY_12,
+    actionType: NotificationActionType.PAYMENT_REQUEST,
+    confirmPhrase: "RUN REAL 12 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create12DayDeliveryPaymentRequestEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    abortOnPerOrderImportFailure: true,
+  },
+  "10": {
+    interval: "10",
+    days: 10,
+    intervalType: NotificationIntervalType.DAY_10,
+    actionType: NotificationActionType.PAYMENT_REQUEST,
+    confirmPhrase: "RUN REAL 10 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create10DayDeliveryPaymentRequestEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    abortOnPerOrderImportFailure: true,
   },
 };
 
@@ -481,7 +533,9 @@ function createdEventIdsForCurrentRun(summary: CreateDeliveryIntervalEventsSumma
   if ("createdEventIds" in summary && Array.isArray(summary.createdEventIds)) {
     return summary.createdEventIds;
   }
-  return null;
+  return eventReportsForSummary(summary)
+    .filter((report) => report.eventId && report.status === NotificationEventStatus.SCHEDULED)
+    .map((report) => report.eventId as string);
 }
 
 function eventReportsForSummary(summary: CreateDeliveryIntervalEventsSummary) {
@@ -516,6 +570,29 @@ function summarizeCreateEventReports(summary: CreateDeliveryIntervalEventsSummar
 function summaryOrderScope(summary: CreateDeliveryIntervalEventsSummary) {
   if ("orderScope" in summary) return summary.orderScope;
   return null;
+}
+
+function freshImportForSummary(
+  summary: CreateDeliveryIntervalEventsSummary
+): DeliveryIntervalFreshImportResult {
+  if ("freshImport" in summary) return summary.freshImport;
+
+  const failedOrders = getFreshImportFailedOrders(summary.importResult);
+  return {
+    required: true,
+    performed: Boolean(summary.importResult),
+    targetDate: summary.targetDeliveryDate,
+    requestedOn:
+      summary.importRequestedOn ||
+      requestedOnForDeliveryIntervalTargetDate(summary.targetDeliveryDate),
+    skippedReason: summary.importResult ? null : "not_reported",
+    importResult: summary.importResult,
+    failedOrders,
+    failedOrderLookup: createFreshImportFailedOrderLookup(failedOrders),
+    globalFailed: false,
+    perOrderFailed: failedOrders.length > 0,
+    errorMessage: null,
+  };
 }
 
 function assertRowsWithinOrderScope(
@@ -685,17 +762,18 @@ async function run() {
     dryRun: false,
     orderScope: options.orderScope,
   });
+  const freshImport = freshImportForSummary(createSummary);
   const createEventReports = eventReportsForSummary(createSummary);
   assertRowsWithinOrderScope(options.orderScope, createEventReports, "Create summary event reports");
 
-  if (createSummary.freshImport.globalFailed || createSummary.freshImport.errorMessage) {
+  if (freshImport.globalFailed || freshImport.errorMessage) {
     throw new Error(
-      `Fresh import failed globally; refusing to dispatch: ${redactSensitiveText(createSummary.freshImport.errorMessage)}`
+      `Fresh import failed globally; refusing to dispatch: ${redactSensitiveText(freshImport.errorMessage)}`
     );
   }
   if (
     config.abortOnPerOrderImportFailure &&
-    (createSummary.freshImport.perOrderFailed ||
+    (freshImport.perOrderFailed ||
       createSummary.deliveryGroupsSkippedFailedImport > 0)
   ) {
     throw new Error(
@@ -738,7 +816,7 @@ async function run() {
           runDate,
           targetDeliveryDate: targetDate,
           migrationStatus,
-          importSummary: createSummary.freshImport.importResult,
+          importSummary: freshImport.importResult,
           orderScope: {
             requested: options.orderScope,
             summary: summaryOrderScope(createSummary),
@@ -808,7 +886,7 @@ async function run() {
         realCustomerRecipientsUsed: true,
         confirmationWritebackDryRunRequired: config.confirmationWritebackDryRunRequired,
         confirmationWritebackLivePayloadsEnabled: !config.confirmationWritebackDryRunRequired,
-        importSummary: createSummary.freshImport.importResult,
+        importSummary: freshImport.importResult,
         orderScope: {
           requested: options.orderScope,
           summary: summaryOrderScope(createSummary),

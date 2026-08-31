@@ -588,6 +588,68 @@ async function validateEscalation(failures: string[]) {
   assertIncludes(internal?.bodyPreview ?? "", "No Acumatica writeback", "day 39 internal body states no writeback", failures);
 }
 
+async function validateCatchUpBeforeEscalation(failures: string[]) {
+  const missingReminder1Store = new FakeDeliveryStore();
+  const missingReminder1 = missingReminder1Store.seedConfirmation({
+    id: "missing_reminder_1",
+    deliveryDate: addDays(RUN_DATE, 39),
+    confirmationFollowUpCount: 0,
+  });
+  await runApply(missingReminder1Store);
+  assertEqual(
+    missingReminder1Store.notificationEvents.length,
+    1,
+    "day 39 with missing reminder 1 creates customer touch",
+    failures
+  );
+  assertIncludes(
+    missingReminder1Store.notificationEvents[0]?.dedupeKey ?? "",
+    "touch_2",
+    "day 39 with missing reminder 1 sends reminder 1",
+    failures
+  );
+  assertEqual(
+    missingReminder1Store.internalNotificationEvents.length,
+    0,
+    "day 39 with missing reminder 1 does not escalate",
+    failures
+  );
+  assertEqual(
+    missingReminder1.confirmationFollowUpCount,
+    1,
+    "day 39 with missing reminder 1 advances follow-up count",
+    failures
+  );
+  assertEqual(
+    missingReminder1.manualReviewRequired,
+    false,
+    "day 39 with missing reminder 1 does not mark manual review",
+    failures
+  );
+
+  const missingFinalStore = new FakeDeliveryStore();
+  missingFinalStore.seedConfirmation({
+    id: "missing_final_reminder",
+    deliveryDate: addDays("2026-07-28", 38),
+    confirmationFollowUpCount: 1,
+    reminder1Completed: true,
+    reminder2Completed: false,
+  });
+  await runApply(missingFinalStore, "2026-07-28");
+  assertIncludes(
+    missingFinalStore.notificationEvents[0]?.dedupeKey ?? "",
+    "touch_3",
+    "day 38 with missing final reminder sends final reminder",
+    failures
+  );
+  assertEqual(
+    missingFinalStore.internalNotificationEvents.length,
+    0,
+    "day 38 with missing final reminder does not escalate",
+    failures
+  );
+}
+
 async function validateStops(failures: string[]) {
   const store = new FakeDeliveryStore();
   store.seedConfirmation({
@@ -881,6 +943,7 @@ async function main() {
   const failures: string[] = [];
   await validateReminderTouches(failures);
   await validateEscalation(failures);
+  await validateCatchUpBeforeEscalation(failures);
   await validateStops(failures);
   await validateUnrecognizedAndOptOuts(failures);
   await validateNoChannelAndSafetySkips(failures);

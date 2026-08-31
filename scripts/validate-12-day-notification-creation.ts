@@ -456,7 +456,7 @@ async function main() {
   const helper = read("lib/notifications/helpers.ts");
   const renderer = read("lib/notifications/deliveryPaymentReminder12Day.ts");
   const script = read("scripts/create-12-day-delivery-payment-request-events.ts");
-  const manualHarness = read("scripts/manual-demo/test-interval-emails-with-salesperson.ts");
+  const productionRunner = read("scripts/run-delivery-interval.ts");
   const detailsSafety = read("scripts/validate-delivery-details-link-safety.ts");
   const thirty = read("lib/notifications/create30DayDeliveryReminderEvents.ts");
   const fourteen = read("lib/notifications/create14DayDeliveryReminderEvents.ts");
@@ -690,23 +690,40 @@ async function main() {
     assertNotIncludes(script, forbidden, `12-day script must not include ${forbidden}`, failures);
   }
 
-  assertIncludes(manualHarness, '"12"', "manual harness supports --interval=12", failures);
   assertIncludes(
-    manualHarness,
+    renderer,
     "render12DayDeliveryPaymentReminderEmail",
-    "manual harness renders dedicated 12-day email",
+    "12-day renderer exposes dedicated email rendering",
     failures
   );
   assertIncludes(
-    manualHarness,
-    "NOTIFICATIONS_TEST_EMAIL",
-    "manual harness sends only to test email when --send is explicit",
+    renderer,
+    "render12DayDeliveryPaymentReminderSms",
+    "12-day renderer exposes dedicated SMS rendering",
     failures
   );
   assertIncludes(
-    manualHarness,
-    "getDeliveryDateCustomerNotificationSkipReason(targetDate)",
-    "manual harness excludes weekend delivery dates before selecting 12-day candidates",
+    productionRunner,
+    '"12"',
+    "production runner supports interval 12",
+    failures
+  );
+  assertIncludes(
+    productionRunner,
+    "RUN REAL 12 DAY CUSTOMER NOTIFICATIONS",
+    "production runner requires exact 12-day confirmation phrase",
+    failures
+  );
+  assertIncludes(
+    productionRunner,
+    "create12DayDeliveryPaymentRequestEvents",
+    "production runner uses the 12-day creation path",
+    failures
+  );
+  assertIncludes(
+    productionRunner,
+    "NotificationIntervalType.DAY_12",
+    "production runner maps interval 12 to DAY_12",
     failures
   );
   assertIncludes(

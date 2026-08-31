@@ -205,6 +205,7 @@ const notificationEventInclude = {
       id: true,
       orderType: true,
       orderNumber: true,
+      acumaticaOneWeekConfirmed: true,
       buyerGroup: true,
       customerDescription: true,
       locationDescription: true,
@@ -791,6 +792,9 @@ async function renderForChannel(params: {
       throw new Error("unsupported_event_action_for_interval");
     }
     const detailsLink = requireDetailsLink(event);
+    if (event.order.acumaticaOneWeekConfirmed === true) {
+      throw new Error("one_week_confirmation_already_true");
+    }
     const payment = await paymentEvaluationForEvent(event);
     const input = {
       ...common,
@@ -866,6 +870,9 @@ async function renderForChannel(params: {
       throw new Error("unsupported_event_action_for_interval");
     }
     const detailsLink = requireDetailsLink(event);
+    if (event.order.acumaticaOneWeekConfirmed === true) {
+      throw new Error("one_week_confirmation_already_true");
+    }
     const latestHold = event.paymentEnforcementHoldActions[0];
     const payment = latestHold ? null : await paymentEvaluationForEvent(event);
     const amountDueNowRounded =

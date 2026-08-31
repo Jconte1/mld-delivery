@@ -601,31 +601,43 @@ async function main() {
     failures
   );
   assert(
-    includes(productionIntervalRunner, "SUPPORTED_INTERVALS = [\"180\", \"90\", \"60\", \"42\"]") &&
+    includes(productionIntervalRunner, "SUPPORTED_INTERVALS = [\"180\", \"90\", \"60\", \"42\", \"14\", \"12\", \"10\"]") &&
       includes(productionIntervalRunner, "RUN REAL 180 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 60 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 42 DAY CUSTOMER CONFIRMATION NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 14 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 12 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 10 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "options.confirmPhrase !== config.confirmPhrase") &&
       includes(productionIntervalRunner, "create180DayDeliveryReminderEvents") &&
       includes(productionIntervalRunner, "create90DayDeliveryReminderEvents") &&
       includes(productionIntervalRunner, "create60DayDeliveryReminderEvents") &&
       includes(productionIntervalRunner, "create42DayDeliveryConfirmationEvents") &&
+      includes(productionIntervalRunner, "create14DayDeliveryReminderEvents") &&
+      includes(productionIntervalRunner, "create12DayDeliveryPaymentRequestEvents") &&
+      includes(productionIntervalRunner, "create10DayDeliveryPaymentRequestEvents") &&
       includes(productionIntervalRunner, "dispatchDeliveryNotifications") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_180") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_90") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_60") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_42") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_14") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_12") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_10") &&
       includes(productionIntervalRunner, "NotificationActionType.DELIVERY_REMINDER") &&
-      includes(productionIntervalRunner, "NotificationActionType.DELIVERY_CONFIRMATION_REQUEST"),
-    "production interval runner must support 180/90/60/42 with interval-specific confirmations and production create/dispatch paths",
+      includes(productionIntervalRunner, "NotificationActionType.DELIVERY_CONFIRMATION_REQUEST") &&
+      includes(productionIntervalRunner, "NotificationActionType.PAYMENT_REQUEST") &&
+      !includes(productionIntervalRunner, "NotificationIntervalType.DAY_8"),
+    "production interval runner must support 180/90/60/42/14/12/10 with interval-specific confirmations, keep 8-day live runner blocked, and use production create/dispatch paths",
     failures
   );
   assert(
     includes(productionIntervalRunner, "USE_QUEUE_ERP") &&
       includes(productionIntervalRunner, "MLD_QUEUE_BASE_URL") &&
       includes(productionIntervalRunner, "MLD_QUEUE_TOKEN") &&
-      includes(productionIntervalRunner, "createSummary.freshImport.perOrderFailed") &&
+    includes(productionIntervalRunner, "freshImportForSummary(createSummary)") &&
+      includes(productionIntervalRunner, "freshImport.perOrderFailed") &&
       includes(productionIntervalRunner, "deliveryGroupsSkippedFailedImport"),
     "production interval runner must require queue-backed import and fail closed on fresh-import failures",
     failures
@@ -658,7 +670,7 @@ async function main() {
       includes(productionIntervalRunner, "currentRunCreatedEventIds") &&
       includes(productionIntervalRunner, "otherScheduledEventsForInterval") &&
       includes(productionIntervalRunner, "oldScheduledEventsWarning"),
-    "42 production runner must dispatch only current-run created event ids and report old scheduled rows",
+    "42/14/12/10 production runner must dispatch only current-run created event ids and report old scheduled rows",
     failures
   );
   assert(

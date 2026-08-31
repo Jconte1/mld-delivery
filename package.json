@@ -57,6 +57,7 @@
     "validate:delivery-group-payment-scenarios": "tsx -r dotenv/config scripts/validate-delivery-group-payment-scenarios.ts",
     "validate:delivery-payment-payable-basis": "tsx scripts/validate-delivery-payment-payable-basis.tsx",
     "validate:delivery-payment-interval-scenarios": "tsx scripts/validate-delivery-payment-interval-scenarios.tsx",
+    "validate:14-12-10-8-lifecycle-scenarios": "tsx scripts/validate-14-12-10-8-lifecycle-scenarios.ts",
     "validate:one-week-confirmation-foundation": "tsx scripts/validate-one-week-confirmation-foundation.ts",
     "validate:one-week-confirmation-intervals": "tsx scripts/validate-one-week-confirmation-intervals.ts",
     "validate:14-day-notification": "tsx scripts/validate-14-day-notification-creation.ts",

@@ -207,7 +207,7 @@ function validateSource(failures: string[]) {
   assertBefore(
     confirmation42,
     "summary.freshImport = await prepareFreshDeliveryIntervalImport",
-    "const deliveryGroups = await find42DayDeliveryConfirmationTargetGroups",
+    "const allDeliveryGroups = await find42DayDeliveryConfirmationTargetGroups",
     "42 import before target evaluation",
     failures
   );

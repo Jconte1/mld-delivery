@@ -334,6 +334,8 @@ export type DeliveryConfirmationNoResponseRunSummary = {
     touch2: string;
     touch3: string;
     salespersonEscalation: string;
+    catchUpWindowStart: string;
+    catchUpWindowEnd: string;
   };
   reminderCandidatesChecked: number;
   escalationCandidatesChecked: number;
@@ -633,6 +635,8 @@ function emptyRunSummary(params: {
       touch2: dateKey(addDays(params.runDate, 41)),
       touch3: dateKey(addDays(params.runDate, 40)),
       salespersonEscalation: dateKey(addDays(params.runDate, 39)),
+      catchUpWindowStart: dateKey(params.runDate),
+      catchUpWindowEnd: dateKey(addDays(params.runDate, 41)),
     },
     reminderCandidatesChecked: 0,
     escalationCandidatesChecked: 0,
@@ -1571,7 +1575,10 @@ export function chooseDeliveryConfirmationNoResponseAction(params: {
   let action: DeliveryConfirmationNoResponseAction = "SKIP_TOO_EARLY";
   let reason: string | null = null;
 
-  if (intervalDay === 41 || intervalDay === 40) {
+  if (intervalDay > 41 || intervalDay < 0) {
+    action = "SKIP_TOO_EARLY";
+    reason = `delivery_interval_day_${intervalDay}_outside_41_40_39_no_response_window`;
+  } else if (intervalDay === 41) {
     if (!params.touchHistory.initial.completed) {
       customerAction = "SEND_INITIAL_CATCH_UP";
       action = customerAction;
@@ -1580,7 +1587,20 @@ export function chooseDeliveryConfirmationNoResponseAction(params: {
       customerAction = "SEND_REMINDER_1";
       action = customerAction;
       reason = reminderTouchIncompleteReason(params.touchHistory);
-    } else if (intervalDay === 40 && !params.touchHistory.reminder2.completed) {
+    } else {
+      action = "SKIP_TOO_EARLY";
+      reason = "waiting_for_final_reminder_window";
+    }
+  } else if (intervalDay === 40) {
+    if (!params.touchHistory.initial.completed) {
+      customerAction = "SEND_INITIAL_CATCH_UP";
+      action = customerAction;
+      reason = initialTouchIncompleteReason(params.touchHistory);
+    } else if (!params.touchHistory.reminder1.completed) {
+      customerAction = "SEND_REMINDER_1";
+      action = customerAction;
+      reason = reminderTouchIncompleteReason(params.touchHistory);
+    } else if (!params.touchHistory.reminder2.completed) {
       customerAction = "SEND_REMINDER_2";
       action = customerAction;
       reason = reminderTouchIncompleteReason(params.touchHistory);
@@ -1588,8 +1608,22 @@ export function chooseDeliveryConfirmationNoResponseAction(params: {
       action = "SKIP_TOO_EARLY";
       reason = "waiting_for_39_day_no_response_checkpoint";
     }
-  } else if (intervalDay === 39) {
-    if (params.touchHistory.completedTouchCount >= DELIVERY_CONFIRMATION_MAX_TOTAL_CUSTOMER_TOUCHES) {
+  } else {
+    if (!params.touchHistory.initial.completed) {
+      customerAction = "SEND_INITIAL_CATCH_UP";
+      action = customerAction;
+      reason = initialTouchIncompleteReason(params.touchHistory);
+    } else if (!params.touchHistory.reminder1.completed) {
+      customerAction = "SEND_REMINDER_1";
+      action = customerAction;
+      reason = reminderTouchIncompleteReason(params.touchHistory);
+    } else if (!params.touchHistory.reminder2.completed) {
+      customerAction = "SEND_REMINDER_2";
+      action = customerAction;
+      reason = reminderTouchIncompleteReason(params.touchHistory);
+    } else if (
+      params.touchHistory.completedTouchCount >= DELIVERY_CONFIRMATION_MAX_TOTAL_CUSTOMER_TOUCHES
+    ) {
       action = "ESCALATE_NO_RESPONSE";
       reason = "Customer did not respond after 3 total 42-day confirmation touches.";
     } else {
@@ -1599,9 +1633,6 @@ export function chooseDeliveryConfirmationNoResponseAction(params: {
         params.touchHistory.summary,
       ].join(": ");
     }
-  } else {
-    action = "SKIP_TOO_EARLY";
-    reason = `delivery_interval_day_${intervalDay}_outside_41_40_39_no_response_window`;
   }
 
   const expected = customerAction
@@ -2829,7 +2860,7 @@ export async function run42DayDeliveryConfirmationNoResponse(
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
   const allCandidates = await findNoResponseLifecycleCandidates({
     client,
-    deliveryDateFrom: addDays(runDate, 39),
+    deliveryDateFrom: dateFromKey(runDate),
     deliveryDateTo: addDays(runDate, 41),
   });
   const scopedCandidates = filterByDeliveryOrderScope(allCandidates, params.orderScope);

@@ -57,6 +57,10 @@ function assertEqual<T>(actual: T, expected: T, message: string, failures: Failu
   assert(Object.is(actual, expected), `${message}: expected ${String(expected)}, got ${String(actual)}`, failures);
 }
 
+function assertIncludes(source: string, pattern: string, message: string, failures: Failure[]) {
+  assert(source.includes(pattern), message, failures);
+}
+
 function asRecord(value: unknown): AnyRecord {
   return value && typeof value === "object" ? (value as AnyRecord) : {};
 }
@@ -555,10 +559,22 @@ async function validateTouchHistoryStateMachine(failures: Failure[]) {
     assertEqual(summary.reminderEventsCreatedByTouch.touch3, 0, "40-day reminder 1 does not create final", failures);
   }
 
-  for (const [label, options] of [
-    ["39 no initial", { initialTouchExists: false, confirmationFollowUpCount: 2 }],
-    ["39 only initial", { confirmationFollowUpCount: 0 }],
-    ["39 initial plus reminder 1", { confirmationFollowUpCount: 1 }],
+  for (const [label, options, expected] of [
+    [
+      "39 no initial",
+      { initialTouchExists: false, initialTouchCompleted: false, confirmationFollowUpCount: 0 },
+      NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+    ],
+    [
+      "39 only initial",
+      { confirmationFollowUpCount: 0 },
+      "touch_2",
+    ],
+    [
+      "39 initial plus reminder 1",
+      { confirmationFollowUpCount: 1 },
+      "touch_3",
+    ],
   ] as const) {
     const store = new FakeDeliveryStore();
     store.seed({
@@ -572,16 +588,23 @@ async function validateTouchHistoryStateMachine(failures: Failure[]) {
       prismaClient: store.client,
       currentStateRefresher: noopRefresh,
     });
-    const internal = store.internalNotificationEvents[0];
-    assertEqual(store.notificationEvents.length, 0, `${label} creates no customer touch at 39`, failures);
-    assertEqual(store.internalNotificationEvents.length, 1, `${label} creates internal escalation`, failures);
-    assert(
-      String(internal?.bodyPreview ?? "").includes(
-        DELIVERY_CONFIRMATION_NO_RESPONSE_SKIP_REASONS.incompleteTouchSequenceDueToCatchup
-      ),
-      `${label} uses incomplete-touch reason`,
-      failures
-    );
+    assertEqual(store.notificationEvents.length, 1, `${label} creates next customer touch at 39`, failures);
+    assertEqual(store.internalNotificationEvents.length, 0, `${label} does not escalate at 39`, failures);
+    if (expected === NotificationActionType.DELIVERY_CONFIRMATION_REQUEST) {
+      assertEqual(
+        store.notificationEvents[0]?.actionType,
+        NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+        `${label} sends initial catch-up`,
+        failures
+      );
+    } else {
+      assertIncludes(
+        String(store.notificationEvents[0]?.dedupeKey ?? ""),
+        String(expected),
+        `${label} sends ${expected}`,
+        failures
+      );
+    }
   }
 
   {
@@ -820,9 +843,9 @@ async function validateOrderScopedNoResponseCanary(failures: Failure[]) {
       currentStateRefresher: noopRefresh,
       orderScope: scope,
     });
-    assertEqual(store.notificationEvents.length, 0, "canary scope does not bypass 39-day touch-history decision", failures);
-    assertEqual(summary.internalEscalationsCreated, 1, "canary scope creates incomplete touch escalation at 39", failures);
-    assertEqual(summary.manualReviewMarked, 1, "canary scope marks manual review through state machine", failures);
+    assertEqual(store.notificationEvents.length, 1, "canary scope follows 39-day touch-history catch-up decision", failures);
+    assertEqual(summary.internalEscalationsCreated, 0, "canary scope does not escalate before missing customer touch", failures);
+    assertEqual(summary.manualReviewMarked, 0, "canary scope does not mark manual review before touch sequence completes", failures);
   }
 }
 
@@ -894,9 +917,167 @@ async function validateDateBumpsAndWeekend(failures: Failure[]) {
     prismaClient: deferredStore.client,
     currentStateRefresher: noopRefresh,
   });
-  assertEqual(deferredStore.notificationEvents.length, 0, "39-day incomplete weekend catch-up creates no customer touch", failures);
-  assertEqual(deferredStore.internalNotificationEvents.length, 1, "39-day incomplete weekend catch-up escalates internally", failures);
-  assertEqual(deferred.confirmationFollowUpCount, 0, "incomplete 39-day catch-up does not advance follow-up count", failures);
+  assertEqual(deferredStore.notificationEvents.length, 1, "39-day incomplete weekend catch-up creates next customer touch", failures);
+  assertIncludes(
+    String(deferredStore.notificationEvents[0]?.dedupeKey ?? ""),
+    "touch_2",
+    "39-day catch-up sends reminder 1",
+    failures
+  );
+  assertEqual(deferredStore.internalNotificationEvents.length, 0, "39-day incomplete weekend catch-up does not escalate internally", failures);
+  assertEqual(deferred.confirmationFollowUpCount, 1, "39-day catch-up advances follow-up count", failures);
+}
+
+async function validateBusinessDayCatchUpBeforeEscalation(failures: Failure[]) {
+  const mondayRun = "2026-07-27";
+  const tuesdayRun = "2026-07-28";
+  const wednesdayRun = "2026-07-29";
+
+  const caseAStore = new FakeDeliveryStore();
+  caseAStore.seed({
+    id: "case_a",
+    deliveryDate: addDays(mondayRun, 39),
+    confirmationFollowUpCount: 0,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: mondayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseAStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertIncludes(
+    String(caseAStore.notificationEvents[0]?.dedupeKey ?? ""),
+    "touch_2",
+    "case A Monday sends reminder 1",
+    failures
+  );
+  assertEqual(caseAStore.internalNotificationEvents.length, 0, "case A Monday does not escalate", failures);
+
+  const caseBStore = new FakeDeliveryStore();
+  caseBStore.seed({
+    id: "case_b",
+    deliveryDate: addDays(tuesdayRun, 38),
+    confirmationFollowUpCount: 1,
+    reminder1Completed: true,
+    reminder2Completed: false,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: tuesdayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseBStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertIncludes(
+    String(caseBStore.notificationEvents[0]?.dedupeKey ?? ""),
+    "touch_3",
+    "case B Tuesday sends final reminder",
+    failures
+  );
+  assertEqual(caseBStore.internalNotificationEvents.length, 0, "case B Tuesday does not escalate", failures);
+
+  const caseCStore = new FakeDeliveryStore();
+  caseCStore.seed({
+    id: "case_c",
+    deliveryDate: addDays(wednesdayRun, 37),
+    confirmationFollowUpCount: 2,
+    reminder1Completed: true,
+    reminder2Completed: true,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: wednesdayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseCStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertEqual(caseCStore.notificationEvents.length, 0, "case C Wednesday creates no customer touch", failures);
+  assertEqual(caseCStore.internalNotificationEvents.length, 1, "case C Wednesday escalates after all touches", failures);
+
+  const caseDStore = new FakeDeliveryStore();
+  caseDStore.seed({
+    id: "case_d",
+    deliveryDate: addDays(mondayRun, 39),
+    initialTouchExists: false,
+    initialTouchCompleted: false,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: mondayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseDStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertEqual(
+    caseDStore.notificationEvents[0]?.actionType,
+    NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+    "case D sends initial catch-up",
+    failures
+  );
+  assertEqual(caseDStore.internalNotificationEvents.length, 0, "case D does not escalate", failures);
+
+  const caseEStore = new FakeDeliveryStore();
+  caseEStore.seed({
+    id: "case_e",
+    deliveryDate: addDays(mondayRun, 39),
+    confirmationFollowUpCount: 0,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: mondayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseEStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertIncludes(
+    String(caseEStore.notificationEvents[0]?.dedupeKey ?? ""),
+    "touch_2",
+    "case E sends reminder 1",
+    failures
+  );
+  assertEqual(caseEStore.internalNotificationEvents.length, 0, "case E does not escalate", failures);
+
+  const caseFStore = new FakeDeliveryStore();
+  caseFStore.seed({
+    id: "case_f",
+    deliveryDate: addDays(mondayRun, 39),
+    confirmationFollowUpCount: 1,
+    reminder1Completed: true,
+    reminder2Completed: false,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: mondayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseFStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertIncludes(
+    String(caseFStore.notificationEvents[0]?.dedupeKey ?? ""),
+    "touch_3",
+    "case F sends final reminder",
+    failures
+  );
+  assertEqual(caseFStore.internalNotificationEvents.length, 0, "case F does not escalate", failures);
+
+  const caseGStore = new FakeDeliveryStore();
+  caseGStore.seed({
+    id: "case_g",
+    deliveryDate: addDays(mondayRun, 39),
+    confirmationFollowUpCount: 2,
+    reminder1Completed: true,
+    reminder2Completed: true,
+  });
+  await run42DayDeliveryConfirmationNoResponse({
+    runDate: mondayRun,
+    now: NOW,
+    dryRun: false,
+    prismaClient: caseGStore.client,
+    currentStateRefresher: noopRefresh,
+  });
+  assertEqual(caseGStore.notificationEvents.length, 0, "case G creates no customer touch", failures);
+  assertEqual(caseGStore.internalNotificationEvents.length, 1, "case G escalates after completed sequence", failures);
 }
 
 async function validateNoChannelAndDedupe(failures: Failure[]) {
@@ -1130,6 +1311,7 @@ async function main() {
   await validateOrderScopedNoResponseCanary(failures);
   await validateManualErpConfirmationStops(failures);
   await validateDateBumpsAndWeekend(failures);
+  await validateBusinessDayCatchUpBeforeEscalation(failures);
   await validateNoChannelAndDedupe(failures);
   await validateStaleWebAndSms(failures);
   validateStaticSafety(failures);

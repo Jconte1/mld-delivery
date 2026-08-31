@@ -6,6 +6,7 @@ import { dateKey } from "@/lib/notifications/helpers";
 
 export const DELIVERY_INTERVAL_IMPORT_REQUESTED_ON_TIME = "09:19:00.000Z";
 export const FRESH_IMPORT_FAILED_SKIP_REASON = "fresh_import_failed";
+export const FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON = "fresh_import_not_refreshed";
 
 export type DeliveryIntervalFreshImportLoader = typeof importSalesOrdersForLineRequestedOn;
 
@@ -29,6 +30,7 @@ export type DeliveryIntervalFreshImportResult = {
   importResult: ImportSalesOrdersResult | null;
   failedOrders: FreshImportFailedOrder[];
   failedOrderLookup: FreshImportFailedOrderLookup;
+  successfulOrderLookup: FreshImportFailedOrderLookup;
   globalFailed: boolean;
   perOrderFailed: boolean;
   errorMessage: string | null;
@@ -67,6 +69,16 @@ export function getFreshImportFailedOrders(
     }));
 }
 
+export function getFreshImportSuccessfulOrders(
+  importResult: ImportSalesOrdersResult | null | undefined
+): FreshImportFailedOrder[] {
+  return (importResult?.successfullyRefreshedOrders ?? []).map((order) => ({
+    orderType: normalizeOrderIdentifier(order.orderType),
+    orderNumber: normalizeOrderIdentifier(order.orderNumber),
+    reason: "successfully_refreshed",
+  }));
+}
+
 export function createFreshImportFailedOrderLookup(
   failedOrders: FreshImportFailedOrder[]
 ): FreshImportFailedOrderLookup {
@@ -103,9 +115,11 @@ export function isFreshImportFailedOrder(params: {
 
 function importFailureMetadata(importResult: ImportSalesOrdersResult | null | undefined) {
   const failedOrders = getFreshImportFailedOrders(importResult);
+  const successfulOrders = getFreshImportSuccessfulOrders(importResult);
   return {
     failedOrders,
     failedOrderLookup: createFreshImportFailedOrderLookup(failedOrders),
+    successfulOrderLookup: createFreshImportFailedOrderLookup(successfulOrders),
     perOrderFailed: failedOrders.length > 0,
   };
 }
@@ -130,10 +144,59 @@ function emptyFreshImportResult(params: {
     importResult: params.importResult ?? null,
     failedOrders: metadata.failedOrders,
     failedOrderLookup: metadata.failedOrderLookup,
+    successfulOrderLookup: metadata.successfulOrderLookup,
     globalFailed: params.globalFailed ?? false,
     perOrderFailed: metadata.perOrderFailed,
     errorMessage: params.errorMessage ?? null,
   };
+}
+
+export function freshImportRequiresSuccessfulOrder(
+  freshImport: DeliveryIntervalFreshImportResult | null | undefined
+) {
+  return Boolean(
+    freshImport?.required &&
+      freshImport.performed &&
+      freshImport.importResult &&
+      Array.isArray(freshImport.importResult.successfullyRefreshedOrders) &&
+      !freshImport.globalFailed
+  );
+}
+
+export function isFreshImportSuccessfulOrder(params: {
+  freshImport?: DeliveryIntervalFreshImportResult | null;
+  importResult?: ImportSalesOrdersResult | null;
+  orderType: string;
+  orderNumber: string;
+}) {
+  const lookup =
+    params.freshImport?.successfulOrderLookup ??
+    createFreshImportFailedOrderLookup(getFreshImportSuccessfulOrders(params.importResult));
+  const keys = new Set(lookup.keys);
+  const orderKey = freshImportFailedOrderKey(params);
+  const untypedKey = freshImportFailedOrderKey({
+    orderType: null,
+    orderNumber: params.orderNumber,
+  });
+  return keys.has(orderKey) || keys.has(untypedKey);
+}
+
+export function isFreshImportNotRefreshedOrder(params: {
+  freshImport?: DeliveryIntervalFreshImportResult | null;
+  importResult?: ImportSalesOrdersResult | null;
+  orderType: string;
+  orderNumber: string;
+}) {
+  if (params.freshImport) {
+    return (
+      freshImportRequiresSuccessfulOrder(params.freshImport) &&
+      !isFreshImportSuccessfulOrder(params)
+    );
+  }
+
+  if (!params.importResult) return false;
+  if (!Array.isArray(params.importResult.successfullyRefreshedOrders)) return false;
+  return !isFreshImportSuccessfulOrder(params);
 }
 
 function queueErpEnabled(env: NodeJS.ProcessEnv) {

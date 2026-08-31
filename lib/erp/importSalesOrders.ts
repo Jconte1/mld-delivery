@@ -24,6 +24,10 @@ export type ImportSalesOrdersResult = {
   requestedOn: string;
   qualifyingOrdersFetched: number;
   fullOrdersFetched: number;
+  successfullyRefreshedOrders?: Array<{
+    orderNumber: string;
+    orderType: string;
+  }>;
   contactsUpserted: number;
   ordersCreated: number;
   ordersUpdated: number;
@@ -128,6 +132,7 @@ function emptyResult(requestedOn: string): ImportSalesOrdersResult {
     requestedOn,
     qualifyingOrdersFetched: 0,
     fullOrdersFetched: 0,
+    successfullyRefreshedOrders: [],
     contactsUpserted: 0,
     ordersCreated: 0,
     ordersUpdated: 0,
@@ -1248,6 +1253,10 @@ export async function importSalesOrdersForLineRequestedOn(
 
         addDeltas(result, transactionResult.deltas);
         result.errors.push(...transactionResult.errors);
+        result.successfullyRefreshedOrders?.push({
+          orderNumber: identity.orderNumber,
+          orderType: identity.orderType,
+        });
       } catch (error) {
         result.failedOrders += 1;
         result.errors.push(

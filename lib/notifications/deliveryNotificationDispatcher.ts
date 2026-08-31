@@ -1,4 +1,5 @@
 import {
+  InternalOrderLifecycleStatus,
   NotificationAttemptStatus,
   NotificationChannel,
   NotificationEventStatus,
@@ -205,6 +206,9 @@ const notificationEventInclude = {
       id: true,
       orderType: true,
       orderNumber: true,
+      status: true,
+      internalLifecycleStatus: true,
+      confirmVia: true,
       acumaticaOneWeekConfirmed: true,
       buyerGroup: true,
       customerDescription: true,
@@ -225,11 +229,15 @@ const notificationEventInclude = {
     select: {
       id: true,
       deliveryDate: true,
+      status: true,
+      isActive: true,
       deliveryGroupLines: {
         where: { isActive: true },
         select: {
+          deliveryDate: true,
           orderLine: {
             select: {
+              requestedOn: true,
               inventoryId: true,
               lineDescription: true,
               itemType: true,
@@ -258,6 +266,7 @@ const notificationEventInclude = {
       id: true,
       linkToken: true,
       status: true,
+      deliveryDate: true,
     },
   },
   paymentEnforcementHoldActions: {
@@ -632,6 +641,133 @@ function channelMatchesFilter(
 ) {
   if (!filter || filter === "both") return true;
   return filter === "sms" ? channel === "SMS" : channel === "EMAIL";
+}
+
+function dateKey(value: Date | string | null | undefined) {
+  if (!value) return null;
+  const date = value instanceof Date ? value : new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date.toISOString().slice(0, 10);
+}
+
+function statusKey(value: string | null | undefined) {
+  return (value ?? "")
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "");
+}
+
+function orderOrGroupStatusIsInactive(value: string | null | undefined) {
+  const normalized = statusKey(value);
+  return (
+    normalized === "completed" ||
+    normalized === "complete" ||
+    normalized === "closed" ||
+    normalized === "cancelled" ||
+    normalized === "canceled" ||
+    normalized === "voided"
+  );
+}
+
+function intervalRequiresOpenOneWeekConfirmation(intervalType: NotificationIntervalType) {
+  return (
+    intervalType === NotificationIntervalType.DAY_14 ||
+    intervalType === NotificationIntervalType.DAY_12 ||
+    intervalType === NotificationIntervalType.DAY_10 ||
+    intervalType === NotificationIntervalType.DAY_8
+  );
+}
+
+function deliveryConfirmationIsResolved(status: string | null | undefined) {
+  const normalized = statusKey(status);
+  return (
+    normalized === "confirmed" ||
+    normalized === "change_requested" ||
+    normalized === "new_date_requested"
+  );
+}
+
+function activeDeliveryLineDateMismatch(event: DispatchNotificationEvent) {
+  const eventDateKey = dateKey(event.deliveryDate);
+  if (!eventDateKey) return "event_delivery_date_missing";
+  const groupDateKey = dateKey(event.orderDeliveryGroup.deliveryDate);
+  if (groupDateKey !== eventDateKey) return "delivery_group_date_changed";
+  if (event.orderDeliveryGroup.deliveryGroupLines.length === 0) {
+    return "active_delivery_group_lines_missing";
+  }
+  const hasMismatchedLine = event.orderDeliveryGroup.deliveryGroupLines.some((line) => {
+    const groupLineDateKey = dateKey(line.deliveryDate);
+    const orderLineRequestedOnKey = dateKey(line.orderLine?.requestedOn);
+    return groupLineDateKey !== eventDateKey || orderLineRequestedOnKey !== eventDateKey;
+  });
+  return hasMismatchedLine ? "active_line_delivery_date_changed" : null;
+}
+
+function currentDispatchSafetyBlockReason(params: {
+  event: DispatchNotificationEvent;
+  selectedChannel: HelperNotificationChannel;
+  optOuts: ReturnType<typeof optOutSnapshot>;
+  forceContactEligibility: boolean;
+}) {
+  const event = params.event;
+
+  if (orderOrGroupStatusIsInactive(event.order.status)) {
+    return "current_order_status_ineligible";
+  }
+  if (
+    event.order.internalLifecycleStatus !== InternalOrderLifecycleStatus.ACTIVE &&
+    event.order.internalLifecycleStatus !== InternalOrderLifecycleStatus.PAYMENT_PENDING
+  ) {
+    return "current_order_lifecycle_ineligible";
+  }
+  if (!event.orderDeliveryGroup.isActive) {
+    return "current_delivery_group_inactive";
+  }
+  if (orderOrGroupStatusIsInactive(event.orderDeliveryGroup.status)) {
+    return "current_delivery_group_status_ineligible";
+  }
+
+  const dateMismatchReason = activeDeliveryLineDateMismatch(event);
+  if (dateMismatchReason) return dateMismatchReason;
+
+  if (
+    intervalRequiresOpenOneWeekConfirmation(event.intervalType) &&
+    event.order.acumaticaOneWeekConfirmed === true
+  ) {
+    return "one_week_confirmation_already_true";
+  }
+
+  if (event.intervalType === NotificationIntervalType.DAY_42) {
+    const confirmation = event.deliveryConfirmations[0];
+    if (deliveryConfirmationIsResolved(String(confirmation?.status ?? ""))) {
+      return "delivery_confirmation_already_resolved";
+    }
+  }
+
+  if (!params.forceContactEligibility) {
+    if (params.selectedChannel === "SMS" && event.contact.smsOptIn !== true) {
+      return "current_sms_opt_in_false";
+    }
+    if (params.selectedChannel === "EMAIL" && event.contact.emailOptIn !== true) {
+      return "current_email_opt_in_false";
+    }
+  }
+
+  if (
+    params.selectedChannel === "SMS" &&
+    (params.optOuts.localSmsOptOutActive || params.optOuts.globalSmsOptOutActive)
+  ) {
+    return "current_sms_opt_out_active";
+  }
+  if (
+    params.selectedChannel === "EMAIL" &&
+    (params.optOuts.localEmailOptOutActive || params.optOuts.globalEmailOptOutActive)
+  ) {
+    return "current_email_opt_out_active";
+  }
+
+  return null;
 }
 
 function commonRenderParams(event: DispatchNotificationEvent) {
@@ -1286,6 +1422,33 @@ async function dispatchOne(params: {
     };
   }
 
+  const safetyBlockReason = currentDispatchSafetyBlockReason({
+    event: params.event,
+    selectedChannel: selected.selectedChannel,
+    optOuts,
+    forceContactEligibility: params.preflight.forceContactEligibilityForTest,
+  });
+  if (safetyBlockReason) {
+    if (params.preflight.send) {
+      await markEventSkipped({
+        client: params.client,
+        eventId: params.event.id,
+        reason: safetyBlockReason,
+      });
+    }
+    return {
+      ...base,
+      outcome: "skipped" as const,
+      reason: safetyBlockReason,
+      selectedChannel: selected.selectedChannel,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+
   let rendered: RenderedMessage;
   try {
     rendered = await renderForChannel({
@@ -1360,17 +1523,156 @@ async function dispatchOne(params: {
     };
   }
 
+  let dispatchEvent = params.event;
+  let dispatchSelected = selected;
+  let dispatchOptOuts = optOuts;
+  let dispatchRendered = rendered;
+  let dispatchRecipient = recipient;
+  let dispatchRecipientReport = selectedRecipientReport;
+
+  const currentEvent = await reloadEventDispatchState(params.client, params.event.id);
+  if (!currentEvent) {
+    await markEventFailed({
+      client: params.client,
+      eventId: params.event.id,
+      error: new Error("event_not_found_after_claim"),
+      now: params.now,
+    });
+    return {
+      ...base,
+      outcome: "failed" as const,
+      reason: "event_not_found_after_claim",
+      selectedChannel: selected.selectedChannel,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+
+  const currentOptOuts = optOutSnapshot(currentEvent, params.globalOptOuts);
+  const currentSelected = selectChannelForEvent({
+    event: currentEvent,
+    globalOptOuts: params.globalOptOuts,
+    forceContactEligibility: params.preflight.forceContactEligibilityForTest,
+  });
+  if (!currentSelected.selectedChannel) {
+    await markEventSkipped({
+      client: params.client,
+      eventId: currentEvent.id,
+      reason: currentSelected.channelReason,
+    });
+    return {
+      ...base,
+      outcome: "skipped" as const,
+      reason: currentSelected.channelReason,
+      selectedChannel: null,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+  if (!channelMatchesFilter(currentSelected.selectedChannel, params.options.channel)) {
+    await markEventSkipped({
+      client: params.client,
+      eventId: currentEvent.id,
+      reason: "channel_filter_mismatch_after_claim",
+    });
+    return {
+      ...base,
+      outcome: "skipped" as const,
+      reason: "channel_filter_mismatch_after_claim",
+      selectedChannel: currentSelected.selectedChannel,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+  const currentSafetyBlockReason = currentDispatchSafetyBlockReason({
+    event: currentEvent,
+    selectedChannel: currentSelected.selectedChannel,
+    optOuts: currentOptOuts,
+    forceContactEligibility: params.preflight.forceContactEligibilityForTest,
+  });
+  if (currentSafetyBlockReason) {
+    await markEventSkipped({
+      client: params.client,
+      eventId: currentEvent.id,
+      reason: currentSafetyBlockReason,
+    });
+    return {
+      ...base,
+      outcome: "skipped" as const,
+      reason: currentSafetyBlockReason,
+      selectedChannel: currentSelected.selectedChannel,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+  try {
+    dispatchRendered = await renderForChannel({
+      event: currentEvent,
+      channel: currentSelected.selectedChannel,
+      client: params.client,
+    });
+  } catch (error) {
+    await markEventSkipped({
+      client: params.client,
+      eventId: currentEvent.id,
+      reason: truncateError(error),
+    });
+    return {
+      ...base,
+      outcome: "skipped" as const,
+      reason: truncateError(error),
+      selectedChannel: currentSelected.selectedChannel,
+      attemptId: null,
+      fallbackAttemptId: null,
+      realRecipientSuppressed: false,
+      finalRecipientKind: null,
+      externalMessageIdPresent: false,
+    };
+  }
+
+  dispatchEvent = currentEvent;
+  dispatchSelected = currentSelected;
+  dispatchOptOuts = currentOptOuts;
+  const currentProductionRecipient =
+    currentSelected.selectedChannel === "SMS"
+      ? currentSelected.recipientPhone
+      : currentSelected.recipientEmail;
+  dispatchRecipient = resolveFinalRecipient({
+    channel: currentSelected.selectedChannel,
+    productionRecipient: currentProductionRecipient,
+    controlledRecipientMode: params.preflight.controlledRecipientMode,
+    env: params.options.env ?? process.env,
+  });
+  dispatchRecipientReport = recipientReport({
+    channel: currentSelected.selectedChannel,
+    finalRecipient: dispatchRecipient.finalRecipient,
+    suppressedRecipient: dispatchRecipient.suppressedRecipient,
+    env: params.options.env ?? process.env,
+  });
+
   let attempt: Awaited<ReturnType<typeof createAttempt>>;
   try {
     attempt = await createAttempt({
       client: params.client,
-      event: params.event,
-      channel: selected.selectedChannel,
-      finalRecipient: recipient.finalRecipient,
-      suppressedRecipient: recipient.suppressedRecipient,
+      event: dispatchEvent,
+      channel: dispatchSelected.selectedChannel,
+      finalRecipient: dispatchRecipient.finalRecipient,
+      suppressedRecipient: dispatchRecipient.suppressedRecipient,
       preflight: params.preflight,
-      optOuts,
-      channelReason: selected.channelReason,
+      optOuts: dispatchOptOuts,
+      channelReason: dispatchSelected.channelReason,
       testRunId: clean(params.options.testRunId),
     });
   } catch (error) {
@@ -1379,12 +1681,12 @@ async function dispatchOne(params: {
       ...base,
       outcome: "failed" as const,
       reason: `attempt_create_failed: ${truncateError(error)}`,
-      selectedChannel: selected.selectedChannel,
+      selectedChannel: dispatchSelected.selectedChannel,
       attemptId: null,
       fallbackAttemptId: null,
-      realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
-      finalRecipientKind: recipient.finalRecipientKind,
-      ...selectedRecipientReport,
+      realRecipientSuppressed: Boolean(dispatchRecipient.suppressedRecipient),
+      finalRecipientKind: dispatchRecipient.finalRecipientKind,
+      ...dispatchRecipientReport,
       externalMessageIdPresent: false,
     };
   }
@@ -1392,38 +1694,38 @@ async function dispatchOne(params: {
   try {
     const result = await callProvider({
       provider: params.provider,
-      channel: selected.selectedChannel,
-      recipient: recipient.finalRecipient,
-      rendered,
+      channel: dispatchSelected.selectedChannel,
+      recipient: dispatchRecipient.finalRecipient,
+      rendered: dispatchRendered,
       env: params.options.env ?? process.env,
     });
     await markAttemptSubmitted({ client: params.client, attemptId: attempt.id, result, now: params.now });
     await markEventSubmitted({
       client: params.client,
       eventId: params.event.id,
-      channel: selected.selectedChannel,
+      channel: dispatchSelected.selectedChannel,
       result,
       now: params.now,
     });
     return {
       ...base,
       outcome: "submitted" as const,
-      reason: selected.channelReason,
-      selectedChannel: selected.selectedChannel,
+      reason: dispatchSelected.channelReason,
+      selectedChannel: dispatchSelected.selectedChannel,
       attemptId: attempt.id,
       fallbackAttemptId: null,
-      realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
-      finalRecipientKind: recipient.finalRecipientKind,
-      ...selectedRecipientReport,
+      realRecipientSuppressed: Boolean(dispatchRecipient.suppressedRecipient),
+      finalRecipientKind: dispatchRecipient.finalRecipientKind,
+      ...dispatchRecipientReport,
       externalMessageIdPresent: Boolean(result.externalMessageId),
     };
   } catch (error) {
     await markAttemptFailed({ client: params.client, attemptId: attempt.id, error });
 
     const fallback =
-      selected.selectedChannel === "SMS" && channelMatchesFilter("EMAIL", params.options.channel)
+      dispatchSelected.selectedChannel === "SMS" && channelMatchesFilter("EMAIL", params.options.channel)
         ? selectEmailFallbackForEvent({
-            event: params.event,
+            event: dispatchEvent,
             globalOptOuts: params.globalOptOuts,
             forceContactEligibility: params.preflight.forceContactEligibilityForTest,
           })
@@ -1431,7 +1733,7 @@ async function dispatchOne(params: {
 
     if (fallback.selectedChannel === "EMAIL") {
       const fallbackRendered = await renderForChannel({
-        event: params.event,
+        event: dispatchEvent,
         channel: "EMAIL",
         client: params.client,
       });
@@ -1449,12 +1751,12 @@ async function dispatchOne(params: {
       });
       const fallbackAttempt = await createAttempt({
         client: params.client,
-        event: params.event,
+        event: dispatchEvent,
         channel: "EMAIL",
         finalRecipient: fallbackRecipient.finalRecipient,
         suppressedRecipient: fallbackRecipient.suppressedRecipient,
         preflight: params.preflight,
-        optOuts,
+        optOuts: dispatchOptOuts,
         channelReason: fallback.channelReason,
         testRunId: clean(params.options.testRunId),
         fallbackFromAttemptId: attempt.id,
@@ -1519,12 +1821,12 @@ async function dispatchOne(params: {
       ...base,
       outcome: "failed" as const,
       reason: truncateError(error),
-      selectedChannel: selected.selectedChannel,
+      selectedChannel: dispatchSelected.selectedChannel,
       attemptId: attempt.id,
       fallbackAttemptId: null,
-      realRecipientSuppressed: Boolean(recipient.suppressedRecipient),
-      finalRecipientKind: recipient.finalRecipientKind,
-      ...selectedRecipientReport,
+      realRecipientSuppressed: Boolean(dispatchRecipient.suppressedRecipient),
+      finalRecipientKind: dispatchRecipient.finalRecipientKind,
+      ...dispatchRecipientReport,
       externalMessageIdPresent: false,
     };
   }

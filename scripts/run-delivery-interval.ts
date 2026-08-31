@@ -38,6 +38,7 @@ import { dispatchDeliveryNotifications } from "../lib/notifications/deliveryNoti
 import {
   createFreshImportFailedOrderLookup,
   getFreshImportFailedOrders,
+  getFreshImportSuccessfulOrders,
   requestedOnForDeliveryIntervalTargetDate,
   type DeliveryIntervalFreshImportResult,
 } from "../lib/notifications/freshDeliveryIntervalImport";
@@ -578,6 +579,7 @@ function freshImportForSummary(
   if ("freshImport" in summary) return summary.freshImport;
 
   const failedOrders = getFreshImportFailedOrders(summary.importResult);
+  const successfulOrders = getFreshImportSuccessfulOrders(summary.importResult);
   return {
     required: true,
     performed: Boolean(summary.importResult),
@@ -589,6 +591,7 @@ function freshImportForSummary(
     importResult: summary.importResult,
     failedOrders,
     failedOrderLookup: createFreshImportFailedOrderLookup(failedOrders),
+    successfulOrderLookup: createFreshImportFailedOrderLookup(successfulOrders),
     globalFailed: false,
     perOrderFailed: failedOrders.length > 0,
     errorMessage: null,
@@ -773,8 +776,7 @@ async function run() {
   }
   if (
     config.abortOnPerOrderImportFailure &&
-    (freshImport.perOrderFailed ||
-      createSummary.deliveryGroupsSkippedFailedImport > 0)
+    freshImport.perOrderFailed
   ) {
     throw new Error(
       `One or more ${config.interval}-day candidates had fresh_import_failed; refusing to dispatch this run.`

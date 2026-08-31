@@ -21,7 +21,9 @@ import {
 } from "@/lib/notifications/helpers";
 import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
+  FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
   isFreshImportFailedOrder,
+  isFreshImportNotRefreshedOrder,
   prepareFreshDeliveryIntervalImport,
   type FreshImportFailedOrder,
   type DeliveryIntervalFreshImportLoader,
@@ -116,6 +118,7 @@ function emptySummary(params: {
       importResult: null,
       failedOrders: [],
       failedOrderLookup: { keys: [], orderNumbers: [] },
+      successfulOrderLookup: { keys: [], orderNumbers: [] },
       globalFailed: false,
       perOrderFailed: false,
       errorMessage: null,
@@ -303,6 +306,19 @@ export async function createDeliveryReminderEvents(
       summary.deliveryGroupsSkippedFailedImport += 1;
       summary.eventsSkipped += 1;
       addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
+      continue;
+    }
+
+    if (
+      isFreshImportNotRefreshedOrder({
+        freshImport: summary.freshImport,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON);
       continue;
     }
 

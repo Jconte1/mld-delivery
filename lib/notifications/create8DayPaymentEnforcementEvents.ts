@@ -57,8 +57,10 @@ import {
 } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
+  FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
   getFreshImportFailedOrders,
   isFreshImportFailedOrder,
+  isFreshImportNotRefreshedOrder,
 } from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
 import {
@@ -1246,6 +1248,27 @@ export async function create8DayPaymentEnforcementEvents(
         renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
       });
       report.customerEventSkippedReason = FRESH_IMPORT_FAILED_SKIP_REASON;
+      summary.eventReports.push(report);
+      continue;
+    }
+
+    if (
+      summary.importResult &&
+      isFreshImportNotRefreshedOrder({
+        importResult: summary.importResult,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      addSkippedReason(summary, FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON);
+      const report = baseReport({
+        deliveryGroup,
+        acumaticaConfirmVia: normalize8DayConfirmVia(order.confirmVia),
+        renderedMessagePreview:
+          "Order was not refreshed by the current target-date ERP import; stale DB data was not evaluated.",
+      });
+      report.customerEventSkippedReason = FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON;
       summary.eventReports.push(report);
       continue;
     }

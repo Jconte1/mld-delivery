@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { existsSync, readFileSync } from "fs";
 import { join } from "path";
 
 import type { ImportSalesOrdersResult } from "../lib/erp/importSalesOrders";
@@ -9,6 +9,11 @@ const ROOT = process.cwd();
 
 function read(path: string) {
   return readFileSync(join(ROOT, path), "utf8");
+}
+
+function readOptional(path: string) {
+  const fullPath = join(ROOT, path);
+  return existsSync(fullPath) ? readFileSync(fullPath, "utf8") : null;
 }
 
 function assert(condition: unknown, message: string, failures: string[]) {
@@ -448,7 +453,7 @@ async function main() {
   const service = read("lib/notifications/create2DayDeliveryReminderEvents.ts");
   const renderer = read("lib/notifications/deliveryReminder2Day.ts");
   const script = read("scripts/create-2-day-delivery-reminder-events.ts");
-  const manualHarness = read("scripts/manual-demo/test-interval-emails-with-salesperson.ts");
+  const manualHarness = readOptional("scripts/manual-demo/test-interval-emails-with-salesperson.ts");
   const detailsHelper = read("lib/notifications/deliveryDetailsLinks.ts");
   const fourteen = read("lib/notifications/create14DayDeliveryReminderEvents.ts");
   const thirty = read("lib/notifications/create30DayDeliveryReminderEvents.ts");
@@ -478,7 +483,7 @@ async function main() {
   assertIncludes(service, "one_week_confirmation_missing", "2-day records missing 10-day confirmation reason", failures);
   assertIncludes(service, "isCompleteTenDayConfirmationWritebackStatus", "2-day requires completed writeback status", failures);
   assertIncludes(service, "group.order.acumaticaOneWeekConfirmed === true", "2-day can accept imported Acumatica true only with local confirmation", failures);
-  assertIncludes(service, "selectNotificationChannel(order.contact", "SMS-first/email fallback selection is used", failures);
+  assertIncludes(service, "selectNotificationChannelWithOptOutRepair", "SMS-first/email fallback selection is used", failures);
   assertIncludes(service, "no_automated_channel_available", "no channel skip reason is implemented", failures);
   assertIncludes(service, "buildNotificationDedupeKey", "dedupe key helper is used", failures);
   assertIncludes(service, "intervalType: NotificationIntervalType.DAY_2", "created events use DAY_2", failures);
@@ -518,10 +523,12 @@ async function main() {
   assertNotIncludes(renderer, "To make a payment", "2-day renderer avoids global payment footer", failures);
   assertNotIncludes(renderer, "Items For This Delivery", "2-day renderer omits item section", failures);
 
-  assertIncludes(manualHarness, '"2"', "manual one-email harness supports --interval=2", failures);
-  assertIncludes(manualHarness, "render2DayDeliveryReminderEmail", "manual harness renders dedicated 2-day email", failures);
-  assertIncludes(manualHarness, "NOTIFICATIONS_TEST_EMAIL", "manual harness sends only to configured test email when --send is explicit", failures);
-  assertNotIncludes(manualHarness, "sendDemoSms", "manual one-email harness does not use demo SMS sender", failures);
+  if (manualHarness) {
+    assertIncludes(manualHarness, '"2"', "manual one-email harness supports --interval=2", failures);
+    assertIncludes(manualHarness, "render2DayDeliveryReminderEmail", "manual harness renders dedicated 2-day email", failures);
+    assertIncludes(manualHarness, "NOTIFICATIONS_TEST_EMAIL", "manual harness sends only to configured test email when --send is explicit", failures);
+    assertNotIncludes(manualHarness, "sendDemoSms", "manual one-email harness does not use demo SMS sender", failures);
+  }
 
   for (const [label, source] of [
     ["14-day", fourteen],

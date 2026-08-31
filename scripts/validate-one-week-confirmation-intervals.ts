@@ -19,6 +19,7 @@ function importResult(overrides: Partial<ImportSalesOrdersResult> = {}): ImportS
     requestedOn: "2026-08-03T09:19:00.000Z",
     qualifyingOrdersFetched: 1,
     fullOrdersFetched: 1,
+    successfullyRefreshedOrders: [{ orderType: "SO", orderNumber: "SO12" }],
     contactsUpserted: 0,
     ordersCreated: 0,
     ordersUpdated: 1,
@@ -233,7 +234,11 @@ async function main() {
     runDate: "2026-07-20",
     dryRun: true,
     prismaClient: fakeClient([group({ id: "group_10", orderNumber: "SO10", deliveryDate: "2026-07-30" })]) as never,
-    importSalesOrders: async () => importResult({ requestedOn: "2026-07-30T09:19:00.000Z" }),
+    importSalesOrders: async () =>
+      importResult({
+        requestedOn: "2026-07-30T09:19:00.000Z",
+        successfullyRefreshedOrders: [{ orderType: "SO", orderNumber: "SO10" }],
+      }),
     getPaymentEvaluation: async () =>
       payment({
         orderDeliveryGroupId: "group_10",
@@ -250,7 +255,11 @@ async function main() {
     runDate: "2026-07-21",
     dryRun: true,
     prismaClient: fakeClient([group({ id: "group_8", orderNumber: "SO8", deliveryDate: "2026-07-29" })]) as never,
-    importSalesOrders: async () => importResult({ requestedOn: "2026-07-29T09:19:00.000Z" }),
+    importSalesOrders: async () =>
+      importResult({
+        requestedOn: "2026-07-29T09:19:00.000Z",
+        successfullyRefreshedOrders: [{ orderType: "SO", orderNumber: "SO8" }],
+      }),
     getPaymentEvaluation: async () =>
       payment({
         orderDeliveryGroupId: "group_8",

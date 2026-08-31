@@ -6,7 +6,9 @@ import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
   createFreshImportFailedOrderLookup,
   getFreshImportFailedOrders,
+  getFreshImportSuccessfulOrders,
   isFreshImportFailedOrder,
+  isFreshImportNotRefreshedOrder,
   prepareFreshDeliveryIntervalImport,
 } from "../lib/notifications/freshDeliveryIntervalImport";
 
@@ -45,6 +47,7 @@ function importResult(errors: ImportSalesOrdersResult["errors"]): ImportSalesOrd
     requestedOn: "2026-11-17T09:19:00.000Z",
     qualifyingOrdersFetched: 3,
     fullOrdersFetched: 1,
+    successfullyRefreshedOrders: [{ orderType: "SO", orderNumber: "SOGOOD" }],
     contactsUpserted: 0,
     ordersCreated: 0,
     ordersUpdated: 1,
@@ -117,6 +120,56 @@ async function validateSharedHelper(failures: string[]) {
     "non-failed import errors do not exclude successful imported orders",
     failures
   );
+  const successfulLookup = createFreshImportFailedOrderLookup(getFreshImportSuccessfulOrders(result));
+  assert(
+    successfulLookup.keys.includes("SO:SOGOOD"),
+    "shared helper exposes successfully refreshed orders",
+    failures
+  );
+  assert(
+    !isFreshImportNotRefreshedOrder({
+      freshImport: {
+        required: true,
+        performed: true,
+        targetDate: "2026-11-17",
+        requestedOn: "2026-11-17T09:19:00.000Z",
+        skippedReason: null,
+        importResult: result,
+        failedOrders,
+        failedOrderLookup: lookup,
+        successfulOrderLookup: successfulLookup,
+        globalFailed: false,
+        perOrderFailed: false,
+        errorMessage: null,
+      },
+      orderType: "SO",
+      orderNumber: "SOGOOD",
+    }),
+    "successfully refreshed orders are allowed to evaluate",
+    failures
+  );
+  assert(
+    isFreshImportNotRefreshedOrder({
+      freshImport: {
+        required: true,
+        performed: true,
+        targetDate: "2026-11-17",
+        requestedOn: "2026-11-17T09:19:00.000Z",
+        skippedReason: null,
+        importResult: result,
+        failedOrders,
+        failedOrderLookup: lookup,
+        successfulOrderLookup: successfulLookup,
+        globalFailed: false,
+        perOrderFailed: false,
+        errorMessage: null,
+      },
+      orderType: "SO",
+      orderNumber: "STALE_LOCAL_ONLY",
+    }),
+    "local target-date orders absent from the current fresh import are excluded",
+    failures
+  );
 
   const globalFailure = await prepareFreshDeliveryIntervalImport({
     targetDeliveryDate: "2026-11-17",
@@ -172,6 +225,18 @@ function validateSource(failures: string[]) {
       source,
       "failedImportExclusions",
       `${label} exposes failed fresh-import order details in the summary/export shape`,
+      failures
+    );
+    assertIncludes(
+      source,
+      "FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON",
+      `${label} uses the standardized fresh_import_not_refreshed skip reason`,
+      failures
+    );
+    assertIncludes(
+      source,
+      "isFreshImportNotRefreshedOrder({",
+      `${label} excludes local target-date orders absent from the current ERP import`,
       failures
     );
   }

@@ -33,7 +33,9 @@ import {
 } from "@/lib/notifications/helpers";
 import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
+  FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
   isFreshImportFailedOrder,
+  isFreshImportNotRefreshedOrder,
   prepareFreshDeliveryIntervalImport,
   type FreshImportFailedOrder,
   type DeliveryIntervalFreshImportLoader,
@@ -200,6 +202,7 @@ function emptySummary(params: {
       importResult: null,
       failedOrders: [],
       failedOrderLookup: { keys: [], orderNumbers: [] },
+      successfulOrderLookup: { keys: [], orderNumbers: [] },
       globalFailed: false,
       perOrderFailed: false,
       errorMessage: null,
@@ -618,6 +621,63 @@ export async function create42DayDeliveryConfirmationEvents(
         acumaticaConfirmVia,
         subject: null,
         renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+        linkTokenPresent: false,
+        linkScopeKey: null,
+        confirmationState: null,
+        paymentTerms: paymentReport.paymentTerms,
+        unpaidBalance: paymentReport.unpaidBalance,
+        orderTotal: paymentReport.orderTotal,
+        paidToDate: paymentReport.paidToDate,
+        paymentApplicabilityStatus: paymentReport.paymentApplicabilityStatus,
+        paymentStatus: paymentReport.paymentStatus,
+        amountDueNow: paymentReport.amountDueNow,
+        amountDueNowRounded: paymentReport.amountDueNowRounded,
+        currentDeliveryGroupValue: paymentReport.currentDeliveryGroupValue,
+        currentDeliveryGroupMerchandiseValue: paymentReport.currentDeliveryGroupMerchandiseValue,
+        currentDeliveryGroupTaxAmount: paymentReport.currentDeliveryGroupTaxAmount,
+        remainingUndeliveredValueAfterCurrentDelivery:
+          paymentReport.remainingUndeliveredValueAfterCurrentDelivery,
+        requiredDownOnRemaining: paymentReport.requiredDownOnRemaining,
+        paymentReminderApplies: false,
+        emailPaymentReminderIncluded: false,
+        paymentCalculationWarnings: paymentReport.paymentCalculationWarnings,
+      });
+      continue;
+    }
+
+    if (
+      isFreshImportNotRefreshedOrder({
+        freshImport: summary.freshImport,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON);
+      const paymentReport = emptyPaymentReport();
+      const acumaticaConfirmVia = normalizeAcumaticaConfirmVia(order.confirmVia);
+
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: null,
+        dedupeKey: null,
+        intervalType: NotificationIntervalType.DAY_42,
+        actionType: NotificationActionType.DELIVERY_CONFIRMATION_REQUEST,
+        status: "IMPORT_NOT_REFRESHED_EXCLUDED",
+        selectedChannel: null,
+        recipientEmail: null,
+        recipientPhone: null,
+        reasonSkipped: FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
+        alreadyConfirmedForDeliveryDate: false,
+        alreadyConfirmedInAcumatica: isAlreadyConfirmedInAcumatica(acumaticaConfirmVia),
+        acumaticaConfirmVia,
+        subject: null,
+        renderedMessagePreview:
+          "Order was not refreshed by the current target-date ERP import; stale DB data was not evaluated.",
         linkTokenPresent: false,
         linkScopeKey: null,
         confirmationState: null,

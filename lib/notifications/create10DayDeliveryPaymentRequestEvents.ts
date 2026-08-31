@@ -51,8 +51,10 @@ import {
 } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
+  FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
   getFreshImportFailedOrders,
   isFreshImportFailedOrder,
+  isFreshImportNotRefreshedOrder,
 } from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
@@ -540,6 +542,49 @@ export async function create10DayDeliveryPaymentRequestEvents(
         detailsLinkUrl: null,
         subject: null,
         renderedMessagePreview: "Fresh import failed for this order; stale DB data was not evaluated.",
+        itemLineCount: 0,
+      });
+      continue;
+    }
+
+    if (
+      summary.importResult &&
+      isFreshImportNotRefreshedOrder({
+        importResult: summary.importResult,
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+      })
+    ) {
+      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.eventsSkipped += 1;
+      addSkippedReason(summary, FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON);
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: null,
+        dedupeKey: null,
+        status: "IMPORT_NOT_REFRESHED_EXCLUDED",
+        selectedChannel: null,
+        reasonSkipped: FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON,
+        acumaticaConfirmVia: normalize10DayConfirmVia(order.confirmVia),
+        paymentTerms: normalizeDeliveryPaymentTerms(order.total?.paymentTerms ?? null),
+        paymentStatus: null,
+        amountDueNowRounded: null,
+        paymentDeadlineDate: null,
+        tenDayConfirmationStatus: null,
+        tenDayConfirmationReason: null,
+        tenDayConfirmationJobId: null,
+        tenDayConfirmationMismatchReason: null,
+        tenDayConfirmationLocalConfirmed: false,
+        detailsLinkCreated: false,
+        detailsLinkReused: false,
+        detailsLinkTokenPresent: false,
+        detailsLinkUrl: null,
+        subject: null,
+        renderedMessagePreview:
+          "Order was not refreshed by the current target-date ERP import; stale DB data was not evaluated.",
         itemLineCount: 0,
       });
       continue;

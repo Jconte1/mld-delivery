@@ -638,7 +638,7 @@ async function main() {
       includes(productionIntervalRunner, "MLD_QUEUE_TOKEN") &&
     includes(productionIntervalRunner, "freshImportForSummary(createSummary)") &&
       includes(productionIntervalRunner, "freshImport.perOrderFailed") &&
-      includes(productionIntervalRunner, "deliveryGroupsSkippedFailedImport"),
+      includes(productionIntervalRunner, "Fresh import failed globally"),
     "production interval runner must require queue-backed import and fail closed on fresh-import failures",
     failures
   );
@@ -719,6 +719,20 @@ async function main() {
       includes(dispatcher, "status: NotificationEventStatus.SCHEDULED") &&
       includes(dispatcher, "status: NotificationEventStatus.PENDING"),
     "dispatcher must claim SCHEDULED events before provider calls",
+    failures
+  );
+  assert(
+    includes(dispatcher, "currentDispatchSafetyBlockReason") &&
+      includes(dispatcher, "reloadEventDispatchState(params.client, params.event.id)") &&
+      includes(dispatcher, "active_line_delivery_date_changed") &&
+      includes(dispatcher, "current_sms_opt_in_false") &&
+      includes(dispatcher, "current_email_opt_in_false") &&
+      includes(dispatcher, "current_sms_opt_out_active") &&
+      includes(dispatcher, "current_email_opt_out_active") &&
+      includes(dispatcher, "one_week_confirmation_already_true") &&
+      includes(dispatcher, "delivery_confirmation_already_resolved") &&
+      includes(dispatcher, "markEventSkipped({"),
+    "dispatcher must reload current state after claim and block stale date/contact/opt-out/one-week/42-confirmed events before attempts/provider calls",
     failures
   );
   assert(

@@ -105,6 +105,7 @@ export type Create30DayDeliveryReminderEventsSummary = {
   deliveryGroupsSkippedWeekendDeliveryDate: number;
   deliveryGroupsSkippedIneligible: number;
   deliveryGroupsSkippedFailedImport: number;
+  deliveryGroupsSkippedNotRefreshed: number;
   deliveryGroupsSkippedNotConfirmedInAcumatica: number;
   deliveryGroupsSkippedNoChannel: number;
   eventsCreated: number;
@@ -159,6 +160,7 @@ function emptySummary(params: {
     deliveryGroupsSkippedWeekendDeliveryDate: 0,
     deliveryGroupsSkippedIneligible: 0,
     deliveryGroupsSkippedFailedImport: 0,
+    deliveryGroupsSkippedNotRefreshed: 0,
     deliveryGroupsSkippedNotConfirmedInAcumatica: 0,
     deliveryGroupsSkippedNoChannel: 0,
     eventsCreated: 0,
@@ -500,7 +502,7 @@ export async function createConfirmedDeliveryReminderEvents(
         orderNumber: order.orderNumber,
       })
     ) {
-      summary.deliveryGroupsSkippedFailedImport += 1;
+      summary.deliveryGroupsSkippedNotRefreshed += 1;
       summary.eventsSkipped += 1;
       addSkippedReason(summary, FRESH_IMPORT_NOT_REFRESHED_SKIP_REASON);
       summary.eventReports.push({
@@ -543,6 +545,9 @@ export async function createConfirmedDeliveryReminderEvents(
     });
     if (existingEvent) {
       summary.eventsDeduped += 1;
+      const alreadyOneWeekConfirmed =
+        options.intervalType === NotificationIntervalType.DAY_14 &&
+        order.acumaticaOneWeekConfirmed === true;
       if (deliveryDateSkipReason) {
         summary.deliveryGroupsSkippedWeekendDeliveryDate += 1;
         summary.eventsSkipped += 1;
@@ -571,17 +576,34 @@ export async function createConfirmedDeliveryReminderEvents(
         deliveryDate: dateKey(deliveryGroup.deliveryDate),
         eventId: existingEvent.id,
         dedupeKey: existingEvent.dedupeKey,
-        status: deliveryDateSkipReason ? NotificationEventStatus.SKIPPED : existingEvent.status,
-        selectedChannel: deliveryDateSkipReason ? null : existingEvent.selectedChannel,
-        reasonSkipped: deliveryDateSkipReason ?? existingEvent.reasonSkipped,
+        status:
+          deliveryDateSkipReason || alreadyOneWeekConfirmed
+            ? NotificationEventStatus.SKIPPED
+            : existingEvent.status,
+        selectedChannel:
+          deliveryDateSkipReason || alreadyOneWeekConfirmed
+            ? null
+            : existingEvent.selectedChannel,
+        reasonSkipped:
+          deliveryDateSkipReason ??
+          (alreadyOneWeekConfirmed ? "one_week_confirmation_already_true" : existingEvent.reasonSkipped),
         acumaticaConfirmVia: normalize30DayConfirmVia(order.confirmVia),
         detailsLinkCreated: false,
-        detailsLinkReused: deliveryDateSkipReason ? false : Boolean(existingEvent.detailsLinkId),
-        detailsLinkTokenPresent: deliveryDateSkipReason ? false : Boolean(existingEvent.detailsLinkId),
+        detailsLinkReused:
+          deliveryDateSkipReason || alreadyOneWeekConfirmed
+            ? false
+            : Boolean(existingEvent.detailsLinkId),
+        detailsLinkTokenPresent:
+          deliveryDateSkipReason || alreadyOneWeekConfirmed
+            ? false
+            : Boolean(existingEvent.detailsLinkId),
         detailsLinkUrl: null,
         subject: null,
         renderedMessagePreview:
-          deliveryDateSkipReason ?? existingEvent.reasonSkipped ?? "Existing event deduped.",
+          deliveryDateSkipReason ??
+          (alreadyOneWeekConfirmed
+            ? "one_week_confirmation_already_true"
+            : existingEvent.reasonSkipped ?? "Existing event deduped."),
         itemLineCount: 0,
         paymentStatus: null,
         amountDueNowRounded: null,

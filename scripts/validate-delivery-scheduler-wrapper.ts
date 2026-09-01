@@ -231,6 +231,85 @@ async function validateLockRetryBehavior(scheduler: SchedulerModule) {
   }
 }
 
+async function validateQueueEnqueueMode(scheduler: SchedulerModule) {
+  const previousGate = process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "true";
+  try {
+    let enqueuedPayload: unknown = null;
+    let markEnqueuedCalled = false;
+    let childCalled = false;
+    const result = await scheduler.runScheduledDeliveryInterval({
+      interval: "90",
+      send: true,
+      manualRun: true,
+      requestedBy: "manual",
+      forceLocalTimeCheckBypass: true,
+      now: new Date("2026-09-01T15:10:00.000Z"),
+      acquireLock: async () => ({
+        acquired: true,
+        phase: "lock_reacquired",
+        previousLockStatus: "failed",
+        row: {
+          id: "scheduler_run_90",
+          lockKey: "delivery_interval_cron:90:2026-09-01",
+          status: "running",
+          retryCount: 2,
+        },
+      }),
+      enqueueJob: async (payload) => {
+        enqueuedPayload = payload;
+        return {
+          jobId: "queue_job_90",
+          payload,
+        };
+      },
+      markEnqueued: async () => {
+        markEnqueuedCalled = true;
+      },
+      runChildProcess: () => {
+        childCalled = true;
+        throw new Error("enqueue mode must not spawn child process");
+      },
+    });
+
+    assert(result.phase === "enqueued", "Scheduler enqueue mode should return enqueued phase.");
+    assert(result.queueJobId === "queue_job_90", "Scheduler enqueue mode should return queue job id.");
+    assert(result.schedulerRunId === "scheduler_run_90", "Scheduler enqueue mode should return scheduler run id.");
+    assert(result.previousLockStatus === "failed", "Scheduler enqueue mode should preserve previous lock status.");
+    assert(result.retryCount === 2, "Scheduler enqueue mode should expose retry count.");
+    assert(markEnqueuedCalled, "Scheduler enqueue mode should record queue job metadata on scheduler row.");
+    assert(!childCalled, "Scheduler enqueue mode must not spawn child process.");
+
+    const payload = enqueuedPayload as {
+      interval?: string;
+      runDate?: string;
+      schedulerRunId?: string;
+      lockKey?: string;
+      confirmationPhrase?: string;
+      send?: boolean;
+      manualRun?: boolean;
+      requestedBy?: string;
+    } | null;
+    assert(payload?.interval === "90", "Queue payload should include interval.");
+    assert(payload?.runDate === result.todayInDenver, "Queue payload should use Denver run date.");
+    assert(payload?.schedulerRunId === "scheduler_run_90", "Queue payload should include scheduler run id.");
+    assert(payload?.lockKey === "delivery_interval_cron:90:2026-09-01", "Queue payload should include lock key.");
+    assert(
+      payload?.confirmationPhrase === "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS",
+      "Queue payload should include exact interval confirmation phrase."
+    );
+    assert(payload?.send === true, "Queue payload should request live send path.");
+    assert(payload?.manualRun === true, "Queue payload should preserve manualRun.");
+    assert(payload?.requestedBy === "manual", "Queue payload should preserve requestedBy.");
+  } finally {
+    if (previousGate === undefined) {
+      delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+    } else {
+      process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = previousGate;
+    }
+  }
+}
+
 function validateVercelCronConfig() {
   const vercelConfig = JSON.parse(readFileSync("vercel.json", "utf8")) as {
     crons?: Array<{ path?: string; schedule?: string }>;
@@ -515,6 +594,7 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   const route = readFileSync("app/api/cron/delivery-interval/[interval]/route.ts", "utf8");
   assert(route.includes("CRON_SECRET"), "Cron route should require CRON_SECRET.");
   assert(route.includes("runScheduledDeliveryInterval"), "Cron route should call scheduler wrapper logic.");
+  assert(route.includes("enqueueDeliveryScheduledInterval"), "Cron route should enqueue queue-backed scheduler job.");
   assert(route.includes("interval_8_not_schedule_ready"), "Cron route should fail closed for interval 8.");
   assert(route.includes("send: true"), "Cron route should request scheduled live-send behavior.");
   assert(route.includes("manualRun"), "Cron route should support authenticated manual run bypass.");
@@ -529,6 +609,8 @@ function validateStaticFiles(scheduler: SchedulerModule) {
     route.includes("delivery_interval_cron") === false,
     "Cron route should not duplicate scheduler lock implementation."
   );
+  assert(!route.includes("child_process"), "Cron route must not import child_process.");
+  assert(!route.includes("spawnSync"), "Cron route must not spawn npm.");
 
   const manualRoute = readFileSync("app/api/cron/delivery-interval/[interval]/manual/route.ts", "utf8");
   assert(
@@ -545,6 +627,7 @@ async function main() {
   validateArgumentHandling(scheduler);
   validateDelegation(scheduler);
   await validateLockRetryBehavior(scheduler);
+  await validateQueueEnqueueMode(scheduler);
   validateStaticFiles(scheduler);
   validateVercelCronConfig();
   await validateCronRouteBehavior(scheduler, route, manualRoute);

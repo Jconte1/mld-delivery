@@ -109,6 +109,28 @@ type SchedulerChildResult = {
   summary: unknown;
 };
 
+export type DeliveryScheduledIntervalQueuePayload = {
+  interval: DeliveryScheduledInterval;
+  runDate: string;
+  timezone: string;
+  expectedLocalTime: string;
+  manualRun: boolean;
+  schedulerRunId: string;
+  lockKey: string;
+  send: true;
+  confirmationPhrase: string;
+  requestedBy: "vercel-cron" | "manual";
+  orderScope?: {
+    orderType: string;
+    orderNumber: string;
+  };
+};
+
+export type DeliveryScheduledIntervalQueueResult = {
+  jobId: string;
+  payload?: DeliveryScheduledIntervalQueuePayload;
+};
+
 export type RunScheduledDeliveryIntervalParams = {
   interval: DeliveryScheduledInterval;
   expectedLocalTime?: string | null;
@@ -120,6 +142,15 @@ export type RunScheduledDeliveryIntervalParams = {
   orderType?: string | null;
   orderNumber?: string | null;
   now?: Date;
+  manualRun?: boolean;
+  requestedBy?: "vercel-cron" | "manual";
+  enqueueJob?: (
+    payload: DeliveryScheduledIntervalQueuePayload
+  ) => Promise<DeliveryScheduledIntervalQueueResult>;
+  markEnqueued?: (params: {
+    id: string;
+    resultSummary: unknown;
+  }) => Promise<void>;
   acquireLock?: (params: {
     lockKey: string;
     interval: string;
@@ -153,6 +184,8 @@ export type ScheduledDeliveryIntervalResult = {
   schedulerRunId?: string;
   retryCount?: number;
   delegatedArgs: string[];
+  queueJobId?: string;
+  queuePayload?: DeliveryScheduledIntervalQueuePayload;
   childExitStatus?: number | null;
   childResultSummary: unknown;
   sensitiveValuesPrinted: false;
@@ -461,6 +494,16 @@ async function markSchedulerRun(params: {
   `;
 }
 
+async function markSchedulerRunEnqueued(params: { id: string; resultSummary: unknown }) {
+  await prisma.$executeRaw`
+    UPDATE "delivery_interval_scheduler_runs"
+    SET
+      "resultSummary" = ${JSON.stringify(params.resultSummary)}::jsonb,
+      "updatedAt" = now()
+    WHERE "id" = ${params.id}
+  `;
+}
+
 function runChild(args: string[]): SchedulerChildResult {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, args, {
@@ -548,6 +591,60 @@ export async function runScheduledDeliveryInterval(
       retryCount: lock.row.retryCount,
       delegatedArgs,
       childResultSummary: null,
+      sensitiveValuesPrinted: false,
+    };
+  }
+
+  if (params.enqueueJob) {
+    const queuePayload: DeliveryScheduledIntervalQueuePayload = {
+      interval,
+      runDate: local.date,
+      timezone,
+      expectedLocalTime,
+      manualRun: params.manualRun === true,
+      schedulerRunId: lock.row.id,
+      lockKey,
+      send: true,
+      confirmationPhrase: schedule.confirmPhrase,
+      requestedBy: params.requestedBy ?? (params.manualRun === true ? "manual" : "vercel-cron"),
+      ...(orderScope
+        ? {
+            orderScope: {
+              orderType: orderScope.orderType,
+              orderNumber: orderScope.orderNumber,
+            },
+          }
+        : {}),
+    };
+    const queued = await params.enqueueJob(queuePayload);
+    const resultSummary = {
+      phase: "enqueued",
+      queueJobId: queued.jobId,
+      interval,
+      runDate: local.date,
+      requestedBy: queuePayload.requestedBy,
+    };
+    await (params.markEnqueued ?? markSchedulerRunEnqueued)({
+      id: lock.row.id,
+      resultSummary,
+    });
+
+    return {
+      ok: true,
+      phase: "enqueued",
+      interval,
+      timezone,
+      expectedLocalTime,
+      actualDenverLocalTime: local.time,
+      todayInDenver: local.date,
+      lockKey,
+      previousLockStatus: lock.previousLockStatus,
+      schedulerRunId: lock.row.id,
+      retryCount: lock.row.retryCount,
+      delegatedArgs,
+      queueJobId: queued.jobId,
+      queuePayload: queued.payload ?? queuePayload,
+      childResultSummary: resultSummary,
       sensitiveValuesPrinted: false,
     };
   }

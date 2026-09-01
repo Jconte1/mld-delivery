@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 
+import { enqueueDeliveryScheduledInterval } from "@/lib/notifications/deliveryScheduledIntervalQueue";
 import {
   DELIVERY_INTERVAL_SCHEDULE,
   type DeliveryScheduledInterval,
@@ -151,6 +152,9 @@ export async function handleDeliveryIntervalCronRequest(
       forceLocalTimeCheckBypass: manualRun,
       allowFailedRetry: retryFailed,
       allowCompletedRerun: allowRerun,
+      manualRun,
+      requestedBy: manualRun ? "manual" : "vercel-cron",
+      enqueueJob: enqueueDeliveryScheduledInterval,
     });
 
     return jsonResponse(

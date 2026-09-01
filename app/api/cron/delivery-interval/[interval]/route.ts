@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 
-import { enqueueDeliveryScheduledInterval } from "@/lib/notifications/deliveryScheduledIntervalQueue";
+import { addDays, dateKey } from "@/lib/notifications/helpers";
 import {
   DELIVERY_INTERVAL_SCHEDULE,
   type DeliveryScheduledInterval,
@@ -9,6 +9,8 @@ import {
   isScheduledInterval,
   runScheduledDeliveryInterval,
 } from "@/scripts/run-scheduled-delivery-interval";
+import { runDeliveryInterval } from "@/scripts/run-delivery-interval";
+import { run42DayNoResponseCommand } from "@/scripts/run-42-day-confirmation-no-response";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -48,6 +50,31 @@ function cronManualRetryFailedRequested(request: Request) {
 
 function cronManualAllowRerunRequested(request: Request) {
   return requestFlagIsTrue(request, "allowRerun", "x-delivery-allow-rerun");
+}
+
+function queryValue(request: Request, name: string) {
+  return new URL(request.url).searchParams.get(name)?.trim() || null;
+}
+
+function manualChannel(request: Request) {
+  const value = queryValue(request, "channel")?.toLowerCase();
+  if (!value) return "both" as const;
+  if (value === "sms" || value === "email" || value === "both") return value;
+  throw new Error("channel must be email, sms, or both.");
+}
+
+function intervalDays(interval: DeliveryScheduledInterval) {
+  const parsed = Number(interval);
+  if (!Number.isFinite(parsed)) throw new Error(`Interval ${interval} does not map to a target date.`);
+  return parsed;
+}
+
+function manualRunDate(request: Request, interval: DeliveryScheduledInterval, todayInDenver: string) {
+  const requestedRunDate = queryValue(request, "runDate");
+  if (requestedRunDate) return dateKey(requestedRunDate);
+  const deliveryDate = queryValue(request, "deliveryDate");
+  if (deliveryDate) return dateKey(addDays(dateKey(deliveryDate), -intervalDays(interval)));
+  return todayInDenver;
 }
 
 export function cronManualRunRequested(request: Request, forcedManualRun = false) {
@@ -112,7 +139,7 @@ export async function handleDeliveryIntervalCronRequest(
   const params = await context.params;
   const interval = params.interval?.trim() ?? "";
 
-  if (interval === "8") {
+  if (interval === "8" && !manualRun) {
     return jsonResponse(
       {
         ok: false,
@@ -146,15 +173,55 @@ export async function handleDeliveryIntervalCronRequest(
   }
 
   try {
+    const local = denverDateTimeParts(new Date(), DEFAULT_DELIVERY_SCHEDULER_TIMEZONE);
+    const channel = manualRun ? manualChannel(request) : "both";
+    const orderType = manualRun ? queryValue(request, "orderType") : null;
+    const orderNumber = manualRun ? queryValue(request, "orderNumber") : null;
+    const runDate = manualRun
+      ? manualRunDate(request, interval as DeliveryScheduledInterval, local.date)
+      : local.date;
+    const lockScopeParts =
+      manualRun && (orderType || orderNumber || channel !== "both")
+        ? [orderType, orderNumber, channel]
+        : [];
     const result = await runScheduledDeliveryInterval({
       interval: interval as DeliveryScheduledInterval,
       send: true,
       forceLocalTimeCheckBypass: manualRun,
       allowFailedRetry: retryFailed,
       allowCompletedRerun: allowRerun,
+      runDateOverride: runDate,
+      lockScopeParts,
+      orderType,
+      orderNumber,
+      channel,
       manualRun,
       requestedBy: manualRun ? "manual" : "vercel-cron",
-      enqueueJob: enqueueDeliveryScheduledInterval,
+      runTask: async (payload) => {
+        if (payload.interval === "39") {
+          return run42DayNoResponseCommand({
+            runDate: payload.runDate,
+            mode: "send",
+            confirmPhrase: payload.confirmationPhrase,
+            testRunId: `${payload.requestedBy}_${payload.runDate.replace(/-/g, "")}_39`,
+            orderType: payload.orderScope?.orderType ?? null,
+            orderNumber: payload.orderScope?.orderNumber ?? null,
+            orderScope: payload.orderScope ?? null,
+          });
+        }
+        return runDeliveryInterval({
+          interval: payload.interval,
+          runDate: payload.runDate,
+          send: true,
+          confirmPhrase: payload.confirmationPhrase,
+          runId: `${payload.requestedBy}_${payload.runDate.replace(/-/g, "")}_${payload.interval}`,
+          orderType: payload.orderScope?.orderType ?? null,
+          orderNumber: payload.orderScope?.orderNumber ?? null,
+          orderScope: payload.orderScope ?? null,
+          channel: payload.channel,
+          verifyPackageAndMigrations: false,
+        });
+      },
     });
 
     return jsonResponse(
@@ -163,6 +230,9 @@ export async function handleDeliveryIntervalCronRequest(
         manualRun,
         retryFailed,
         allowRerun,
+        requestedChannel: channel,
+        scopedOrderType: orderType,
+        scopedOrderNumber: orderNumber,
         localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },

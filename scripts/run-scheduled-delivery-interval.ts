@@ -1,7 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 
-import { dateFromKey } from "../lib/notifications/helpers";
+import { dateFromKey, dateKey } from "../lib/notifications/helpers";
 import { normalizeDeliveryOrderScope } from "../lib/notifications/orderScope";
 import { prisma } from "../lib/prisma";
 
@@ -14,10 +14,12 @@ export const DELIVERY_SCHEDULER_INTERVALS = [
   "90",
   "60",
   "42",
+  "39",
   "30",
   "14",
   "12",
   "10",
+  "8",
   "2",
 ] as const;
 
@@ -44,6 +46,10 @@ export const DELIVERY_INTERVAL_SCHEDULE: Record<
     expectedLocalTime: "15:30",
     confirmPhrase: "RUN REAL 42 DAY CUSTOMER CONFIRMATION NOTIFICATIONS",
   },
+  "39": {
+    expectedLocalTime: "15:35",
+    confirmPhrase: "RUN REAL 42 DAY NO RESPONSE FOLLOW UPS",
+  },
   "30": {
     expectedLocalTime: "15:40",
     confirmPhrase: "RUN REAL 30 DAY CUSTOMER NOTIFICATIONS",
@@ -59,6 +65,10 @@ export const DELIVERY_INTERVAL_SCHEDULE: Record<
   "10": {
     expectedLocalTime: "16:10",
     confirmPhrase: "RUN REAL 10 DAY CUSTOMER NOTIFICATIONS",
+  },
+  "8": {
+    expectedLocalTime: "16:20",
+    confirmPhrase: "RUN REAL 8 DAY CUSTOMER NOTIFICATIONS",
   },
   "2": {
     expectedLocalTime: "16:30",
@@ -76,6 +86,7 @@ type CliOptions = {
   allowCompletedRerun: boolean;
   orderType: string | null;
   orderNumber: string | null;
+  channel: "sms" | "email" | "both";
   now: Date;
 };
 
@@ -109,7 +120,7 @@ type SchedulerChildResult = {
   summary: unknown;
 };
 
-export type DeliveryScheduledIntervalQueuePayload = {
+export type DeliveryScheduledIntervalTaskPayload = {
   interval: DeliveryScheduledInterval;
   runDate: string;
   timezone: string;
@@ -120,15 +131,11 @@ export type DeliveryScheduledIntervalQueuePayload = {
   send: true;
   confirmationPhrase: string;
   requestedBy: "vercel-cron" | "manual";
+  channel: "sms" | "email" | "both";
   orderScope?: {
     orderType: string;
     orderNumber: string;
   };
-};
-
-export type DeliveryScheduledIntervalQueueResult = {
-  jobId: string;
-  payload?: DeliveryScheduledIntervalQueuePayload;
 };
 
 export type RunScheduledDeliveryIntervalParams = {
@@ -141,16 +148,13 @@ export type RunScheduledDeliveryIntervalParams = {
   allowCompletedRerun?: boolean;
   orderType?: string | null;
   orderNumber?: string | null;
+  channel?: "sms" | "email" | "both" | null;
+  runDateOverride?: string | null;
+  lockScopeParts?: Array<string | null | undefined>;
   now?: Date;
   manualRun?: boolean;
   requestedBy?: "vercel-cron" | "manual";
-  enqueueJob?: (
-    payload: DeliveryScheduledIntervalQueuePayload
-  ) => Promise<DeliveryScheduledIntervalQueueResult>;
-  markEnqueued?: (params: {
-    id: string;
-    resultSummary: unknown;
-  }) => Promise<void>;
+  runTask?: (payload: DeliveryScheduledIntervalTaskPayload) => Promise<unknown>;
   acquireLock?: (params: {
     lockKey: string;
     interval: string;
@@ -168,7 +172,7 @@ export type RunScheduledDeliveryIntervalParams = {
     resultSummary: unknown;
     errorMessage?: string | null;
   }) => Promise<void>;
-  runChildProcess?: (args: string[]) => SchedulerChildResult;
+  runChildProcess?: (args: string[]) => SchedulerChildResult | Promise<SchedulerChildResult>;
 };
 
 export type ScheduledDeliveryIntervalResult = {
@@ -184,8 +188,6 @@ export type ScheduledDeliveryIntervalResult = {
   schedulerRunId?: string;
   retryCount?: number;
   delegatedArgs: string[];
-  queueJobId?: string;
-  queuePayload?: DeliveryScheduledIntervalQueuePayload;
   childExitStatus?: number | null;
   childResultSummary: unknown;
   sensitiveValuesPrinted: false;
@@ -239,8 +241,16 @@ export function denverDateTimeParts(
   };
 }
 
-export function schedulerLockKey(interval: string, runDate: string) {
-  return `delivery_interval_cron:${interval}:${runDate}`;
+export function schedulerLockKey(
+  interval: string,
+  runDate: string,
+  scopeParts: Array<string | null | undefined> = []
+) {
+  const normalizedScope = scopeParts
+    .map((part) => part?.trim())
+    .filter((part): part is string => Boolean(part))
+    .map((part) => part.replace(/[^A-Za-z0-9_.-]/g, "_"));
+  return [`delivery_interval_cron:${interval}:${runDate}`, ...normalizedScope].join(":");
 }
 
 export function delegatedRunnerArgs(params: {
@@ -250,6 +260,7 @@ export function delegatedRunnerArgs(params: {
   confirmPhrase: string;
   orderType?: string | null;
   orderNumber?: string | null;
+  channel?: "sms" | "email" | "both" | null;
 }): string[] {
   const args = [
     "run",
@@ -262,6 +273,9 @@ export function delegatedRunnerArgs(params: {
   ];
   if (params.orderType && params.orderNumber) {
     args.push("--order-type", params.orderType, "--order-number", params.orderNumber);
+  }
+  if (params.channel && params.channel !== "both") {
+    args.push("--channel", params.channel);
   }
   if (params.send) {
     args.push("--send", "--confirm", params.confirmPhrase);
@@ -280,6 +294,7 @@ export function parseSchedulerArgs(args: string[]): CliOptions {
     allowCompletedRerun: false,
     orderType: null,
     orderNumber: null,
+    channel: "both",
     now: new Date(),
   };
 
@@ -333,6 +348,16 @@ export function parseSchedulerArgs(args: string[]): CliOptions {
     if (arg === "--order-number" || arg.startsWith("--order-number=")) {
       const parsed = readOption(args, index, "--order-number");
       options.orderNumber = parsed.value;
+      index = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--channel" || arg.startsWith("--channel=")) {
+      const parsed = readOption(args, index, "--channel");
+      const channel = parsed.value.trim().toLowerCase();
+      if (channel !== "sms" && channel !== "email" && channel !== "both") {
+        throw new Error("--channel must be sms, email, or both.");
+      }
+      options.channel = channel;
       index = parsed.nextIndex;
       continue;
     }
@@ -494,16 +519,6 @@ async function markSchedulerRun(params: {
   `;
 }
 
-async function markSchedulerRunEnqueued(params: { id: string; resultSummary: unknown }) {
-  await prisma.$executeRaw`
-    UPDATE "delivery_interval_scheduler_runs"
-    SET
-      "resultSummary" = ${JSON.stringify(params.resultSummary)}::jsonb,
-      "updatedAt" = now()
-    WHERE "id" = ${params.id}
-  `;
-}
-
 function runChild(args: string[]): SchedulerChildResult {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, args, {
@@ -533,14 +548,17 @@ export async function runScheduledDeliveryInterval(
     : schedule.expectedLocalTime;
   const timezone = params.timezone?.trim() || DEFAULT_DELIVERY_SCHEDULER_TIMEZONE;
   const local = denverDateTimeParts(params.now ?? new Date(), timezone);
-  const lockKey = schedulerLockKey(interval, local.date);
+  const runDate = params.runDateOverride ? dateKey(params.runDateOverride) : local.date;
+  const channel = params.channel ?? "both";
+  const lockKey = schedulerLockKey(interval, runDate, params.lockScopeParts ?? []);
   const delegatedArgs = delegatedRunnerArgs({
     interval,
-    runDate: local.date,
+    runDate,
     send: params.send === true,
     confirmPhrase: schedule.confirmPhrase,
     orderType: orderScope?.orderType ?? null,
     orderNumber: orderScope?.orderNumber ?? null,
+    channel,
   });
 
   if (params.forceLocalTimeCheckBypass !== true && local.time !== expectedLocalTime) {
@@ -551,7 +569,7 @@ export async function runScheduledDeliveryInterval(
       timezone,
       expectedLocalTime,
       actualDenverLocalTime: local.time,
-      todayInDenver: local.date,
+      todayInDenver: runDate,
       delegatedArgs,
       childResultSummary: null,
       sensitiveValuesPrinted: false,
@@ -568,7 +586,7 @@ export async function runScheduledDeliveryInterval(
   const lock = await (params.acquireLock ?? acquireSchedulerRunLock)({
     lockKey,
     interval,
-    runDate: local.date,
+    runDate,
     timezone,
     expectedLocalTime,
     actualLocalTime: local.time,
@@ -585,7 +603,7 @@ export async function runScheduledDeliveryInterval(
       timezone,
       expectedLocalTime,
       actualDenverLocalTime: local.time,
-      todayInDenver: local.date,
+      todayInDenver: runDate,
       lockKey,
       previousLockStatus: lock.previousLockStatus,
       retryCount: lock.row.retryCount,
@@ -595,10 +613,10 @@ export async function runScheduledDeliveryInterval(
     };
   }
 
-  if (params.enqueueJob) {
-    const queuePayload: DeliveryScheduledIntervalQueuePayload = {
+  if (params.runTask) {
+    const taskPayload: DeliveryScheduledIntervalTaskPayload = {
       interval,
-      runDate: local.date,
+      runDate,
       timezone,
       expectedLocalTime,
       manualRun: params.manualRun === true,
@@ -607,6 +625,7 @@ export async function runScheduledDeliveryInterval(
       send: true,
       confirmationPhrase: schedule.confirmPhrase,
       requestedBy: params.requestedBy ?? (params.manualRun === true ? "manual" : "vercel-cron"),
+      channel,
       ...(orderScope
         ? {
             orderScope: {
@@ -616,40 +635,43 @@ export async function runScheduledDeliveryInterval(
           }
         : {}),
     };
-    const queued = await params.enqueueJob(queuePayload);
-    const resultSummary = {
-      phase: "enqueued",
-      queueJobId: queued.jobId,
-      interval,
-      runDate: local.date,
-      requestedBy: queuePayload.requestedBy,
-    };
-    await (params.markEnqueued ?? markSchedulerRunEnqueued)({
-      id: lock.row.id,
-      resultSummary,
-    });
-
-    return {
-      ok: true,
-      phase: "enqueued",
-      interval,
-      timezone,
-      expectedLocalTime,
-      actualDenverLocalTime: local.time,
-      todayInDenver: local.date,
-      lockKey,
-      previousLockStatus: lock.previousLockStatus,
-      schedulerRunId: lock.row.id,
-      retryCount: lock.row.retryCount,
-      delegatedArgs,
-      queueJobId: queued.jobId,
-      queuePayload: queued.payload ?? queuePayload,
-      childResultSummary: resultSummary,
-      sensitiveValuesPrinted: false,
-    };
+    try {
+      const resultSummary = await params.runTask(taskPayload);
+      await (params.markRun ?? markSchedulerRun)({
+        id: lock.row.id,
+        status: "success",
+        resultSummary,
+      });
+      return {
+        ok: true,
+        phase: "completed",
+        interval,
+        timezone,
+        expectedLocalTime,
+        actualDenverLocalTime: local.time,
+        todayInDenver: runDate,
+        lockKey,
+        previousLockStatus: lock.previousLockStatus,
+        schedulerRunId: lock.row.id,
+        retryCount: lock.row.retryCount,
+        delegatedArgs,
+        childExitStatus: 0,
+        childResultSummary: resultSummary,
+        sensitiveValuesPrinted: false,
+      };
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      await (params.markRun ?? markSchedulerRun)({
+        id: lock.row.id,
+        status: "failed",
+        resultSummary: { ok: false, error: redactSensitiveText(message) },
+        errorMessage: message,
+      });
+      throw error;
+    }
   }
 
-  const child = (params.runChildProcess ?? runChild)(delegatedArgs);
+  const child = await (params.runChildProcess ?? runChild)(delegatedArgs);
   const ok = child.status === 0 && !child.error;
   await (params.markRun ?? markSchedulerRun)({
     id: lock.row.id,
@@ -665,7 +687,7 @@ export async function runScheduledDeliveryInterval(
     timezone,
     expectedLocalTime,
     actualDenverLocalTime: local.time,
-    todayInDenver: local.date,
+    todayInDenver: runDate,
     lockKey,
     previousLockStatus: lock.previousLockStatus,
     schedulerRunId: lock.row.id,

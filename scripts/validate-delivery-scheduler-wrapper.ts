@@ -231,12 +231,12 @@ async function validateLockRetryBehavior(scheduler: SchedulerModule) {
   }
 }
 
-async function validateQueueEnqueueMode(scheduler: SchedulerModule) {
+async function validateDirectManualRunMode(scheduler: SchedulerModule) {
   const previousGate = process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
   process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "true";
   try {
-    let enqueuedPayload: unknown = null;
-    let markEnqueuedCalled = false;
+    let taskPayload: unknown = null;
+    let markRunCalled = false;
     let childCalled = false;
     const result = await scheduler.runScheduledDeliveryInterval({
       interval: "90",
@@ -244,6 +244,11 @@ async function validateQueueEnqueueMode(scheduler: SchedulerModule) {
       manualRun: true,
       requestedBy: "manual",
       forceLocalTimeCheckBypass: true,
+      runDateOverride: "2026-09-01",
+      orderType: "SO",
+      orderNumber: "SO38056",
+      channel: "sms",
+      lockScopeParts: ["SO", "SO38056", "sms"],
       now: new Date("2026-09-01T15:10:00.000Z"),
       acquireLock: async () => ({
         acquired: true,
@@ -256,31 +261,27 @@ async function validateQueueEnqueueMode(scheduler: SchedulerModule) {
           retryCount: 2,
         },
       }),
-      enqueueJob: async (payload) => {
-        enqueuedPayload = payload;
-        return {
-          jobId: "queue_job_90",
-          payload,
-        };
+      runTask: async (payload) => {
+        taskPayload = payload;
+        return { ok: true, providerCalls: 0 };
       },
-      markEnqueued: async () => {
-        markEnqueuedCalled = true;
+      markRun: async () => {
+        markRunCalled = true;
       },
       runChildProcess: () => {
         childCalled = true;
-        throw new Error("enqueue mode must not spawn child process");
+        throw new Error("direct task mode must not spawn child process");
       },
     });
 
-    assert(result.phase === "enqueued", "Scheduler enqueue mode should return enqueued phase.");
-    assert(result.queueJobId === "queue_job_90", "Scheduler enqueue mode should return queue job id.");
-    assert(result.schedulerRunId === "scheduler_run_90", "Scheduler enqueue mode should return scheduler run id.");
-    assert(result.previousLockStatus === "failed", "Scheduler enqueue mode should preserve previous lock status.");
-    assert(result.retryCount === 2, "Scheduler enqueue mode should expose retry count.");
-    assert(markEnqueuedCalled, "Scheduler enqueue mode should record queue job metadata on scheduler row.");
-    assert(!childCalled, "Scheduler enqueue mode must not spawn child process.");
+    assert(result.phase === "completed", "Scheduler direct task mode should return completed phase.");
+    assert(result.schedulerRunId === "scheduler_run_90", "Scheduler direct task mode should return scheduler run id.");
+    assert(result.previousLockStatus === "failed", "Scheduler direct task mode should preserve previous lock status.");
+    assert(result.retryCount === 2, "Scheduler direct task mode should expose retry count.");
+    assert(markRunCalled, "Direct task mode should mark scheduler run completion.");
+    assert(!childCalled, "Scheduler direct task mode must not spawn child process.");
 
-    const payload = enqueuedPayload as {
+    const payload = taskPayload as {
       interval?: string;
       runDate?: string;
       schedulerRunId?: string;
@@ -289,18 +290,20 @@ async function validateQueueEnqueueMode(scheduler: SchedulerModule) {
       send?: boolean;
       manualRun?: boolean;
       requestedBy?: string;
+      channel?: string;
     } | null;
-    assert(payload?.interval === "90", "Queue payload should include interval.");
-    assert(payload?.runDate === result.todayInDenver, "Queue payload should use Denver run date.");
-    assert(payload?.schedulerRunId === "scheduler_run_90", "Queue payload should include scheduler run id.");
-    assert(payload?.lockKey === "delivery_interval_cron:90:2026-09-01", "Queue payload should include lock key.");
+    assert(payload?.interval === "90", "Direct task payload should include interval.");
+    assert(payload?.runDate === result.todayInDenver, "Direct task payload should use Denver run date.");
+    assert(payload?.schedulerRunId === "scheduler_run_90", "Direct task payload should include scheduler run id.");
+    assert(payload?.lockKey === "delivery_interval_cron:90:2026-09-01:SO:SO38056:sms", "Direct task payload should include scoped lock key.");
     assert(
       payload?.confirmationPhrase === "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS",
-      "Queue payload should include exact interval confirmation phrase."
+      "Direct task payload should include exact interval confirmation phrase."
     );
-    assert(payload?.send === true, "Queue payload should request live send path.");
-    assert(payload?.manualRun === true, "Queue payload should preserve manualRun.");
-    assert(payload?.requestedBy === "manual", "Queue payload should preserve requestedBy.");
+    assert(payload?.send === true, "Direct task payload should request live send path.");
+    assert(payload?.manualRun === true, "Direct task payload should preserve manualRun.");
+    assert(payload?.requestedBy === "manual", "Direct task payload should preserve requestedBy.");
+    assert(payload?.channel === "sms", "Direct task payload should preserve channel filter.");
   } finally {
     if (previousGate === undefined) {
       delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
@@ -594,7 +597,11 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   const route = readFileSync("app/api/cron/delivery-interval/[interval]/route.ts", "utf8");
   assert(route.includes("CRON_SECRET"), "Cron route should require CRON_SECRET.");
   assert(route.includes("runScheduledDeliveryInterval"), "Cron route should call scheduler wrapper logic.");
-  assert(route.includes("enqueueDeliveryScheduledInterval"), "Cron route should enqueue queue-backed scheduler job.");
+  assert(route.includes("runDeliveryInterval"), "Cron route should execute the delivery interval runner in process.");
+  assert(
+    !route.includes("enqueueDeliveryScheduledInterval"),
+    "Cron route must not enqueue the worker-only scheduled interval job."
+  );
   assert(route.includes("interval_8_not_schedule_ready"), "Cron route should fail closed for interval 8.");
   assert(route.includes("send: true"), "Cron route should request scheduled live-send behavior.");
   assert(route.includes("manualRun"), "Cron route should support authenticated manual run bypass.");
@@ -627,7 +634,7 @@ async function main() {
   validateArgumentHandling(scheduler);
   validateDelegation(scheduler);
   await validateLockRetryBehavior(scheduler);
-  await validateQueueEnqueueMode(scheduler);
+  await validateDirectManualRunMode(scheduler);
   validateStaticFiles(scheduler);
   validateVercelCronConfig();
   await validateCronRouteBehavior(scheduler, route, manualRoute);

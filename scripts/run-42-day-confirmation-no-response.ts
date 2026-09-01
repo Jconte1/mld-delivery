@@ -26,7 +26,7 @@ const REAL_NO_RESPONSE_CONFIRM_PHRASE = "RUN REAL 42 DAY NO RESPONSE FOLLOW UPS"
 
 type CliMode = "dry-run" | "apply" | "send";
 
-type CliOptions = {
+export type NoResponseCliOptions = {
   runDate: string | null;
   mode: CliMode;
   confirmPhrase: string | null;
@@ -48,8 +48,8 @@ function readOption(args: string[], index: number, name: string) {
   return { value, nextIndex: index + 1 };
 }
 
-function parseArgs(argv: string[]): CliOptions {
-  const options: CliOptions = {
+function parseArgs(argv: string[]): NoResponseCliOptions {
+  const options: NoResponseCliOptions = {
     runDate: null,
     mode: "dry-run",
     confirmPhrase: null,
@@ -200,7 +200,7 @@ function redactSensitiveText(value: string | null | undefined) {
     .slice(0, 1000);
 }
 
-function preflight(options: CliOptions) {
+function preflight(options: NoResponseCliOptions) {
   const failures: string[] = [];
 
   if (!options.runDate) {
@@ -616,8 +616,7 @@ function plannedReport(summary: DeliveryConfirmationNoResponseRunSummary) {
   };
 }
 
-async function main() {
-  const options = parseArgs(process.argv.slice(2));
+export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
   if (options.runDate) dateFromKey(options.runDate);
   const runDate = options.runDate;
   const testRunId = options.testRunId ?? (runDate ? defaultRunId(runDate) : null);
@@ -663,9 +662,7 @@ async function main() {
     (attempt) => attempt.status === NotificationAttemptStatus.FAILED || attempt.success === false
   ).length;
 
-  console.log(
-    JSON.stringify(
-      {
+  return {
         ok:
           options.mode !== "send" ||
           dispatchReports.every((report) => report.outcome === "submitted"),
@@ -823,28 +820,31 @@ async function main() {
             before.contactOptInWritebackActions === after.contactOptInWritebackActions,
         },
         sensitiveValuesPrinted: false,
-      },
-      null,
-      2
-    )
-  );
+      };
 }
 
-main()
-  .catch((error) => {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
-          sensitiveValuesPrinted: false,
-        },
-        null,
-        2
-      )
-    );
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+async function main() {
+  const result = await run42DayNoResponseCommand(parseArgs(process.argv.slice(2)));
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (typeof require !== "undefined" && require.main === module) {
+  main()
+    .catch((error) => {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
+            sensitiveValuesPrinted: false,
+          },
+          null,
+          2
+        )
+      );
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

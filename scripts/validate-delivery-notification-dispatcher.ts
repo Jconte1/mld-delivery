@@ -601,7 +601,7 @@ async function main() {
     failures
   );
   assert(
-    includes(productionIntervalRunner, "SUPPORTED_INTERVALS = [\"180\", \"90\", \"60\", \"42\", \"30\", \"14\", \"12\", \"10\", \"2\"]") &&
+    includes(productionIntervalRunner, "SUPPORTED_INTERVALS = [\"180\", \"90\", \"60\", \"42\", \"30\", \"14\", \"12\", \"10\", \"8\", \"2\"]") &&
       includes(productionIntervalRunner, "RUN REAL 180 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 60 DAY CUSTOMER NOTIFICATIONS") &&
@@ -610,6 +610,7 @@ async function main() {
       includes(productionIntervalRunner, "RUN REAL 14 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 12 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 10 DAY CUSTOMER NOTIFICATIONS") &&
+      includes(productionIntervalRunner, "RUN REAL 8 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "RUN REAL 2 DAY CUSTOMER NOTIFICATIONS") &&
       includes(productionIntervalRunner, "options.confirmPhrase !== config.confirmPhrase") &&
       includes(productionIntervalRunner, "create180DayDeliveryReminderEvents") &&
@@ -620,6 +621,7 @@ async function main() {
       includes(productionIntervalRunner, "create14DayDeliveryReminderEvents") &&
       includes(productionIntervalRunner, "create12DayDeliveryPaymentRequestEvents") &&
       includes(productionIntervalRunner, "create10DayDeliveryPaymentRequestEvents") &&
+      includes(productionIntervalRunner, "create8DayPaymentEnforcementEvents") &&
       includes(productionIntervalRunner, "create2DayDeliveryReminderEvents") &&
       includes(productionIntervalRunner, "dispatchDeliveryNotifications") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_180") &&
@@ -630,12 +632,13 @@ async function main() {
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_14") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_12") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_10") &&
+      includes(productionIntervalRunner, "NotificationIntervalType.DAY_8") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_2") &&
       includes(productionIntervalRunner, "NotificationActionType.DELIVERY_REMINDER") &&
       includes(productionIntervalRunner, "NotificationActionType.DELIVERY_CONFIRMATION_REQUEST") &&
       includes(productionIntervalRunner, "NotificationActionType.PAYMENT_REQUEST") &&
-      !includes(productionIntervalRunner, "NotificationIntervalType.DAY_8"),
-    "production interval runner must support 180/90/60/42/30/14/12/10/2 with interval-specific confirmations, keep 8-day live runner blocked, and use production create/dispatch paths",
+      includes(productionIntervalRunner, "NotificationActionType.PAYMENT_ENFORCEMENT"),
+    "production interval runner must support 180/90/60/42/30/14/12/10/8/2 with interval-specific confirmations and production create/dispatch paths",
     failures
   );
   assert(

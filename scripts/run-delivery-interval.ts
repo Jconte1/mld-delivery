@@ -41,7 +41,14 @@ import {
   create2DayDeliveryReminderEvents,
   type Create2DayDeliveryReminderEventsSummary,
 } from "../lib/notifications/create2DayDeliveryReminderEvents";
-import { dispatchDeliveryNotifications } from "../lib/notifications/deliveryNotificationDispatcher";
+import {
+  create8DayPaymentEnforcementEvents,
+  type Create8DayPaymentEnforcementEventsSummary,
+} from "../lib/notifications/create8DayPaymentEnforcementEvents";
+import {
+  dispatchDeliveryNotifications,
+  type DispatcherChannelFilter,
+} from "../lib/notifications/deliveryNotificationDispatcher";
 import {
   createFreshImportFailedOrderLookup,
   getFreshImportFailedOrders,
@@ -51,7 +58,7 @@ import {
 } from "../lib/notifications/freshDeliveryIntervalImport";
 import { prisma } from "../lib/prisma";
 
-const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "30", "14", "12", "10", "2"] as const;
+const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "30", "14", "12", "10", "8", "2"] as const;
 
 type SupportedInterval = (typeof SUPPORTED_INTERVALS)[number];
 type CreateDeliveryIntervalEventsSummary =
@@ -60,6 +67,7 @@ type CreateDeliveryIntervalEventsSummary =
   | Create42DayDeliveryConfirmationEventsSummary
   | Create12DayDeliveryPaymentRequestEventsSummary
   | Create10DayDeliveryPaymentRequestEventsSummary
+  | Create8DayPaymentEnforcementEventsSummary
   | Create2DayDeliveryReminderEventsSummary;
 type CreateDeliveryIntervalEvents = (options: {
   runDate?: Date | string;
@@ -174,6 +182,18 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
+  "8": {
+    interval: "8",
+    days: 8,
+    intervalType: NotificationIntervalType.DAY_8,
+    actionType: NotificationActionType.PAYMENT_ENFORCEMENT,
+    confirmPhrase: "RUN REAL 8 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create8DayPaymentEnforcementEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
+    abortOnPerOrderImportFailure: true,
+  },
   "2": {
     interval: "2",
     days: 2,
@@ -188,7 +208,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
   },
 };
 
-type CliOptions = {
+export type DeliveryIntervalRunOptions = {
   interval: SupportedInterval | null;
   runDate: string | null;
   send: boolean;
@@ -197,6 +217,8 @@ type CliOptions = {
   orderType: string | null;
   orderNumber: string | null;
   orderScope: DeliveryOrderScope | null;
+  channel: DispatcherChannelFilter;
+  verifyPackageAndMigrations: boolean;
 };
 
 function isSupportedInterval(value: string): value is SupportedInterval {
@@ -215,8 +237,8 @@ function readOption(args: string[], index: number, name: string) {
   return { value, nextIndex: index + 1 };
 }
 
-function parseArgs(args: string[]): CliOptions {
-  const options: CliOptions = {
+function parseArgs(args: string[]): DeliveryIntervalRunOptions {
+  const options: DeliveryIntervalRunOptions = {
     interval: null,
     runDate: null,
     send: false,
@@ -225,6 +247,8 @@ function parseArgs(args: string[]): CliOptions {
     orderType: null,
     orderNumber: null,
     orderScope: null,
+    channel: "both",
+    verifyPackageAndMigrations: true,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -273,6 +297,16 @@ function parseArgs(args: string[]): CliOptions {
     if (arg === "--order-number" || arg.startsWith("--order-number=")) {
       const parsed = readOption(args, index, "--order-number");
       options.orderNumber = parsed.value;
+      index = parsed.nextIndex;
+      continue;
+    }
+    if (arg === "--channel" || arg.startsWith("--channel=")) {
+      const parsed = readOption(args, index, "--channel");
+      const channel = parsed.value.trim().toLowerCase();
+      if (channel !== "sms" && channel !== "email" && channel !== "both") {
+        throw new Error("--channel must be sms, email, or both.");
+      }
+      options.channel = channel;
       index = parsed.nextIndex;
       continue;
     }
@@ -409,7 +443,7 @@ function requireFlagValue(
   }
 }
 
-function preflight(options: CliOptions, env: NodeJS.ProcessEnv = process.env) {
+function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv = process.env) {
   const failures: string[] = [];
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
 
@@ -427,15 +461,6 @@ function preflight(options: CliOptions, env: NodeJS.ProcessEnv = process.env) {
   } else if (!config && !options.confirmPhrase) {
     failures.push("--confirm is required.");
   }
-  if (
-    options.orderScope &&
-    config?.interval !== "42" &&
-    config?.interval !== "30" &&
-    config?.interval !== "2"
-  ) {
-    failures.push("--order-type/--order-number scope is currently supported only for intervals 42, 30, and 2.");
-  }
-
   addMissingEnvFailure(failures, "DATABASE_URL", "database access", env);
   addMissingEnvFailure(failures, "MLD_QUEUE_BASE_URL", "queue-backed ERP import", env);
   addMissingEnvFailure(failures, "MLD_QUEUE_TOKEN", "queue-backed ERP import", env);
@@ -594,8 +619,12 @@ function createdEventIdsForCurrentRun(summary: CreateDeliveryIntervalEventsSumma
     return summary.createdEventIds;
   }
   return eventReportsForSummary(summary)
-    .filter((report) => report.eventId && report.status === NotificationEventStatus.SCHEDULED)
-    .map((report) => report.eventId as string);
+    .filter(
+      (report) =>
+        (report.eventId && report.status === NotificationEventStatus.SCHEDULED) ||
+        (report.customerEventId && report.customerEventStatus === NotificationEventStatus.SCHEDULED)
+    )
+    .map((report) => (report.eventId ?? report.customerEventId) as string);
 }
 
 function eventReportsForSummary(summary: CreateDeliveryIntervalEventsSummary) {
@@ -607,8 +636,11 @@ function eventReportsForSummary(summary: CreateDeliveryIntervalEventsSummary) {
       deliveryDate?: string | null;
       eventId?: string | null;
       status?: string | null;
+      customerEventId?: string | null;
+      customerEventStatus?: string | null;
       selectedChannel?: string | null;
       reasonSkipped?: string | null;
+      customerEventSkippedReason?: string | null;
     }>;
   }
   return [];
@@ -620,11 +652,17 @@ function summarizeCreateEventReports(summary: CreateDeliveryIntervalEventsSummar
     orderNumber: report.orderNumber ?? null,
     deliveryGroupId: report.deliveryGroupId ?? null,
     deliveryDate: report.deliveryDate ?? null,
-    eventId: report.eventId ?? null,
-    status: report.status ?? null,
+    eventId: report.eventId ?? report.customerEventId ?? null,
+    status: report.status ?? report.customerEventStatus ?? null,
     selectedChannel: report.selectedChannel ?? null,
-    reasonSkipped: report.reasonSkipped ?? null,
+    reasonSkipped: report.reasonSkipped ?? report.customerEventSkippedReason ?? null,
   }));
+}
+
+function dedupedEventCountForSummary(summary: CreateDeliveryIntervalEventsSummary) {
+  if ("eventsDeduped" in summary) return summary.eventsDeduped;
+  if ("customerEventsDeduped" in summary) return summary.customerEventsDeduped;
+  return 0;
 }
 
 function summaryOrderScope(summary: CreateDeliveryIntervalEventsSummary) {
@@ -717,7 +755,11 @@ function assertPreviewSafe(
   }
 }
 
-async function dispatchPreviewForEvents(eventIds: string[], runId: string) {
+async function dispatchPreviewForEvents(
+  eventIds: string[],
+  runId: string,
+  channel: DispatcherChannelFilter
+) {
   const attemptsBefore = await prisma.notificationAttempt.count();
   const reports = [];
   for (const eventId of eventIds) {
@@ -728,6 +770,7 @@ async function dispatchPreviewForEvents(eventIds: string[], runId: string) {
       testRunId: `${runId}_preview`,
       eventId,
       limit: 1,
+      channel,
     });
     reports.push(...summary.reports);
   }
@@ -739,7 +782,11 @@ async function dispatchPreviewForEvents(eventIds: string[], runId: string) {
   return reports;
 }
 
-async function dispatchSendForEvents(eventIds: string[], runId: string) {
+async function dispatchSendForEvents(
+  eventIds: string[],
+  runId: string,
+  channel: DispatcherChannelFilter
+) {
   const summaries = [];
   for (const eventId of eventIds) {
     summaries.push(
@@ -750,6 +797,7 @@ async function dispatchSendForEvents(eventIds: string[], runId: string) {
         testRunId: runId,
         eventId,
         limit: 1,
+        channel,
       })
     );
   }
@@ -803,8 +851,7 @@ function summarizeAttempts(attempts: Awaited<ReturnType<typeof attemptsForReport
   }));
 }
 
-async function run() {
-  const options = parseArgs(process.argv.slice(2));
+export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
   if (options.runDate) dateFromKey(options.runDate);
   const runDate = options.runDate;
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
@@ -813,8 +860,11 @@ async function run() {
 
   preflight(options);
   if (!runDate || !runId || !config) throw new Error("Internal preflight error: missing run date, run id, or interval.");
-  verifyPackageScript();
-  const migrationStatus = verifyMigrationStatus();
+  let migrationStatus = "not checked by in-process API runner";
+  if (options.verifyPackageAndMigrations) {
+    verifyPackageScript();
+    migrationStatus = verifyMigrationStatus();
+  }
 
   const targetDate = dateKey(getNotificationTargetDate(runDate, config.days));
   const before = await runtimeCounts();
@@ -868,9 +918,7 @@ async function run() {
 
   if (scheduledEvents.length === 0) {
     const afterNoSend = await runtimeCounts();
-    console.log(
-      JSON.stringify(
-        {
+    return {
           ok: true,
           phase: "complete_no_dispatchable_events",
           interval: config.interval,
@@ -889,6 +937,7 @@ async function run() {
           },
           candidateCount: createSummary.targetDeliveryGroups,
           productionQualifiedCount: 0,
+          requestedChannel: options.channel,
           skippedCountByReason: summarizeSkippedReasons(createSummary.skippedReasons),
           createEventReports: summarizeCreateEventReports(createSummary),
           failedImportExclusions: createSummary.failedImportExclusions,
@@ -906,22 +955,19 @@ async function run() {
           providerFailedCount: 0,
           exactNextOperationalAction: `Review skipped reasons; no ${config.interval}-day scheduled events were dispatchable.`,
           sensitiveValuesPrinted: false,
-        },
-        null,
-        2
-      )
-    );
-    return;
+        };
   }
 
   const previewReports = await dispatchPreviewForEvents(
     scheduledEvents.map((event) => event.id),
-    runId
+    runId,
+    options.channel
   );
 
   const dispatchSummaries = await dispatchSendForEvents(
     scheduledEvents.map((event) => event.id),
-    runId
+    runId,
+    options.channel
   );
   const dispatchReports = dispatchSummaries.flatMap((summary) => summary.reports);
   const attempts = await attemptsForReports(dispatchReports);
@@ -933,9 +979,7 @@ async function run() {
     (attempt) => attempt.status === NotificationAttemptStatus.FAILED || attempt.success === false
   ).length;
 
-  console.log(
-    JSON.stringify(
-      {
+  return {
         ok: dispatchReports.every((report) => report.outcome === "submitted"),
         phase: "complete",
         interval: config.interval,
@@ -952,6 +996,7 @@ async function run() {
           config.tenDayConfirmationWritebackDryRunRequired,
         tenDayConfirmationWritebackLivePayloadsEnabled:
           !config.tenDayConfirmationWritebackDryRunRequired,
+        requestedChannel: options.channel,
         importSummary: freshImport.importResult,
         successfullyRefreshedOrders: freshImport.importResult?.successfullyRefreshedOrders ?? [],
         orderScope: {
@@ -998,7 +1043,7 @@ async function run() {
               report.globalSmsOptOutActive ||
               report.globalEmailOptOutActive)
         ).length,
-        dedupeSkippedCount: createSummary.eventsDeduped,
+        dedupeSkippedCount: dedupedEventCountForSummary(createSummary),
         previewReports: previewReports.map((report) => ({
           eventId: report.eventId,
           orderType: report.orderType,
@@ -1042,28 +1087,31 @@ async function run() {
         exactNextOperationalAction:
           "Review NotificationAttempt statuses and provider callbacks before enabling another interval.",
         sensitiveValuesPrinted: false,
-      },
-      null,
-      2
-    )
-  );
+      };
 }
 
-run()
-  .catch((error) => {
-    console.error(
-      JSON.stringify(
-        {
-          ok: false,
-          error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
-          sensitiveValuesPrinted: false,
-        },
-        null,
-        2
-      )
-    );
-    process.exitCode = 1;
-  })
-  .finally(async () => {
-    await prisma.$disconnect();
-  });
+async function run() {
+  const result = await runDeliveryInterval(parseArgs(process.argv.slice(2)));
+  console.log(JSON.stringify(result, null, 2));
+}
+
+if (typeof require !== "undefined" && require.main === module) {
+  run()
+    .catch((error) => {
+      console.error(
+        JSON.stringify(
+          {
+            ok: false,
+            error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
+            sensitiveValuesPrinted: false,
+          },
+          null,
+          2
+        )
+      );
+      process.exitCode = 1;
+    })
+    .finally(async () => {
+      await prisma.$disconnect();
+    });
+}

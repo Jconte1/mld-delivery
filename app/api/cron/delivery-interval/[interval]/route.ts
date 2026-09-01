@@ -3,6 +3,8 @@ import { NextResponse } from "next/server";
 import {
   DELIVERY_INTERVAL_SCHEDULE,
   type DeliveryScheduledInterval,
+  DEFAULT_DELIVERY_SCHEDULER_TIMEZONE,
+  denverDateTimeParts,
   isScheduledInterval,
   runScheduledDeliveryInterval,
 } from "@/scripts/run-scheduled-delivery-interval";
@@ -30,6 +32,17 @@ function redactSensitiveText(value: string | null | undefined) {
     .replace(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi, "<redacted-email>")
     .replace(/\+?\d[\d\s().-]{7,}\d/g, "<redacted-phone>")
     .slice(0, 1000);
+}
+
+function requestFlagIsTrue(request: Request, queryName: string, headerName: string) {
+  const url = new URL(request.url);
+  const queryValue = url.searchParams.get(queryName)?.trim().toLowerCase();
+  const headerValue = request.headers.get(headerName)?.trim().toLowerCase();
+  return queryValue === "true" || headerValue === "true";
+}
+
+export function cronManualRunRequested(request: Request, forcedManualRun = false) {
+  return forcedManualRun || requestFlagIsTrue(request, "manualRun", "x-delivery-manual-run");
 }
 
 export function validateCronAuthorization(
@@ -62,16 +75,21 @@ export function validateCronAuthorization(
   return { ok: true, vercelCronUserAgent };
 }
 
-export async function GET(
+export async function handleDeliveryIntervalCronRequest(
   request: Request,
-  context: { params: Promise<{ interval?: string }> }
+  context: { params: Promise<{ interval?: string }> },
+  options: { manualRun?: boolean } = {}
 ) {
   const authorization = validateCronAuthorization(request);
+  const manualRun = cronManualRunRequested(request, options.manualRun === true);
+  const localTimeGateBypassed = manualRun;
   if (!authorization.ok) {
     return jsonResponse(
       {
         ok: false,
         phase: authorization.reason,
+        manualRun,
+        localTimeGateBypassed: false,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
       authorization.status
@@ -87,6 +105,8 @@ export async function GET(
         ok: false,
         phase: "interval_8_not_schedule_ready",
         interval,
+        manualRun,
+        localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
       400
@@ -100,6 +120,8 @@ export async function GET(
         phase: "unsupported_interval",
         interval,
         supportedIntervals: Object.keys(DELIVERY_INTERVAL_SCHEDULE),
+        manualRun,
+        localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
       400
@@ -110,25 +132,46 @@ export async function GET(
     const result = await runScheduledDeliveryInterval({
       interval: interval as DeliveryScheduledInterval,
       send: true,
+      forceLocalTimeCheckBypass: manualRun,
+      allowCompletedRerun: manualRun && requestFlagIsTrue(request, "allowRerun", "x-delivery-allow-rerun"),
     });
 
     return jsonResponse(
       {
         ...result,
+        manualRun,
+        localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
       result.ok ? 200 : 500
     );
   } catch (error) {
+    const schedule = DELIVERY_INTERVAL_SCHEDULE[interval as DeliveryScheduledInterval];
+    const local = schedule
+      ? denverDateTimeParts(new Date(), DEFAULT_DELIVERY_SCHEDULER_TIMEZONE)
+      : null;
     return jsonResponse(
       {
         ok: false,
         phase: "failed",
         interval,
+        manualRun,
+        localTimeGateBypassed,
+        timezone: DEFAULT_DELIVERY_SCHEDULER_TIMEZONE,
+        expectedLocalTime: schedule?.expectedLocalTime ?? null,
+        actualDenverLocalTime: local?.time ?? null,
+        todayInDenver: local?.date ?? null,
         error: redactSensitiveText(error instanceof Error ? error.message : String(error)),
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
       500
     );
   }
+}
+
+export async function GET(
+  request: Request,
+  context: { params: Promise<{ interval?: string }> }
+) {
+  return handleDeliveryIntervalCronRequest(request, context);
 }

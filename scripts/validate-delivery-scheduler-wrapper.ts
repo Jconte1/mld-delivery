@@ -4,6 +4,7 @@ process.env.DATABASE_URL ??= "postgresql://validation:validation@localhost:5432/
 
 type SchedulerModule = typeof import("./run-scheduled-delivery-interval");
 type CronRouteModule = typeof import("../app/api/cron/delivery-interval/[interval]/route");
+type ManualCronRouteModule = typeof import("../app/api/cron/delivery-interval/[interval]/manual/route");
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -129,7 +130,11 @@ function validateVercelCronConfig() {
   );
 }
 
-async function validateCronRouteBehavior(scheduler: SchedulerModule, route: CronRouteModule) {
+async function validateCronRouteBehavior(
+  scheduler: SchedulerModule,
+  route: CronRouteModule,
+  manualRoute: ManualCronRouteModule
+) {
   const unauthenticated = route.validateCronAuthorization(
     new Request("https://example.com/api/cron/delivery-interval/90", {
       headers: { "user-agent": "vercel-cron/1.0" },
@@ -178,6 +183,31 @@ async function validateCronRouteBehavior(scheduler: SchedulerModule, route: Cron
   const interval8Body = await interval8Response.json();
   assert(interval8Response.status === 400, "Cron route should reject interval 8.");
   assert(interval8Body.phase === "interval_8_not_schedule_ready", "Interval 8 rejection should use the expected phase.");
+  assert(interval8Body.manualRun === false, "Scheduled interval 8 rejection should report manualRun false.");
+
+  process.env.CRON_SECRET = "secret";
+  const scheduledWrongTimeResponse = await route.GET(
+    new Request("https://example.com/api/cron/delivery-interval/90", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { params: Promise.resolve({ interval: "90" }) }
+  );
+  if (previousCronSecret === undefined) {
+    delete process.env.CRON_SECRET;
+  } else {
+    process.env.CRON_SECRET = previousCronSecret;
+  }
+  const scheduledWrongTimeBody = await scheduledWrongTimeResponse.json();
+  assert(scheduledWrongTimeResponse.status === 200, "Scheduled wrong-time route should exit successfully.");
+  assert(
+    scheduledWrongTimeBody.phase === "skipped_wrong_local_time",
+    "Scheduled wrong-time route should preserve local-time gate."
+  );
+  assert(scheduledWrongTimeBody.manualRun === false, "Scheduled wrong-time route should report manualRun false.");
+  assert(
+    scheduledWrongTimeBody.localTimeGateBypassed === false,
+    "Scheduled wrong-time route should not bypass local-time gate."
+  );
 
   const wrongTime = await scheduler.runScheduledDeliveryInterval({
     interval: "90",
@@ -213,6 +243,53 @@ async function validateCronRouteBehavior(scheduler: SchedulerModule, route: Cron
     }
     throw new Error("Expected live-send gate to block scheduled send.");
   })();
+
+  process.env.CRON_SECRET = "secret";
+  const manualWrongTimeResponse = await route.GET(
+    new Request("https://example.com/api/cron/delivery-interval/90?manualRun=true", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { params: Promise.resolve({ interval: "90" }) }
+  );
+  const manualWrongTimeBody = await manualWrongTimeResponse.json();
+  assert(manualWrongTimeResponse.status === 500, "Manual route should fail closed when live scheduler gate is off.");
+  assert(manualWrongTimeBody.phase === "failed", "Manual route should fail at the live scheduler gate.");
+  assert(manualWrongTimeBody.manualRun === true, "Manual query route should report manualRun true.");
+  assert(
+    manualWrongTimeBody.localTimeGateBypassed === true,
+    "Manual query route should report local-time gate bypass."
+  );
+  assert(
+    String(manualWrongTimeBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
+    "Manual query route should still require scheduler live-send gate."
+  );
+  assert(
+    manualWrongTimeBody.todayInDenver,
+    "Manual query route should report the Denver run date even when blocked."
+  );
+
+  const manualEndpointResponse = await manualRoute.GET(
+    new Request("https://example.com/api/cron/delivery-interval/90/manual", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { params: Promise.resolve({ interval: "90" }) }
+  );
+  if (previousCronSecret === undefined) {
+    delete process.env.CRON_SECRET;
+  } else {
+    process.env.CRON_SECRET = previousCronSecret;
+  }
+  const manualEndpointBody = await manualEndpointResponse.json();
+  assert(manualEndpointResponse.status === 500, "Manual endpoint should fail closed when live scheduler gate is off.");
+  assert(manualEndpointBody.manualRun === true, "Manual endpoint should report manualRun true.");
+  assert(
+    manualEndpointBody.localTimeGateBypassed === true,
+    "Manual endpoint should report local-time gate bypass."
+  );
+  assert(
+    String(manualEndpointBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
+    "Manual endpoint should still require scheduler live-send gate."
+  );
 }
 
 function validateStaticFiles(scheduler: SchedulerModule) {
@@ -284,17 +361,34 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   assert(route.includes("runScheduledDeliveryInterval"), "Cron route should call scheduler wrapper logic.");
   assert(route.includes("interval_8_not_schedule_ready"), "Cron route should fail closed for interval 8.");
   assert(route.includes("send: true"), "Cron route should request scheduled live-send behavior.");
+  assert(route.includes("manualRun"), "Cron route should support authenticated manual run bypass.");
+  assert(route.includes("forceLocalTimeCheckBypass: manualRun"), "Manual run should use scheduler bypass behavior.");
+  assert(
+    route.includes("allowRerun") && route.includes("allowCompletedRerun"),
+    "Manual rerun should be explicit and protected."
+  );
+  assert(
+    route.includes("delivery_interval_cron") === false,
+    "Cron route should not duplicate scheduler lock implementation."
+  );
+
+  const manualRoute = readFileSync("app/api/cron/delivery-interval/[interval]/manual/route.ts", "utf8");
+  assert(
+    manualRoute.includes("handleDeliveryIntervalCronRequest"),
+    "Manual endpoint should share the scheduled route handler."
+  );
 }
 
 async function main() {
   const scheduler = await import("./run-scheduled-delivery-interval");
   const route = await import("../app/api/cron/delivery-interval/[interval]/route");
+  const manualRoute = await import("../app/api/cron/delivery-interval/[interval]/manual/route");
   validateTimeZoneHandling(scheduler);
   validateArgumentHandling(scheduler);
   validateDelegation(scheduler);
   validateStaticFiles(scheduler);
   validateVercelCronConfig();
-  await validateCronRouteBehavior(scheduler, route);
+  await validateCronRouteBehavior(scheduler, route, manualRoute);
 
   console.log(
     "Delivery scheduler wrapper validation passed. No cron jobs, SMS/email, provider calls, Acumatica writes, queue writebacks, holds, deploys, or production data mutations were performed."

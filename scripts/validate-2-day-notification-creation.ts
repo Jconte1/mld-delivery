@@ -463,7 +463,8 @@ async function main() {
   const fortyTwo = read("lib/notifications/create42DayDeliveryConfirmationEvents.ts");
 
   const importIndex = service.indexOf("summary.importResult = await importSalesOrders(importRequestedOn)");
-  const queryIndex = service.indexOf("const deliveryGroups = await find2DayDeliveryReminderTargetGroups");
+  const queryIndex = service.indexOf("const unscopedDeliveryGroups = await find2DayDeliveryReminderTargetGroups");
+  const scopeFilterIndex = service.indexOf("const deliveryGroups = filterByDeliveryOrderScope(");
 
   assertIncludes(service, "DELIVERY_REMINDER_2_DAY_INTERVAL_DAYS = 2", "2-day interval is exactly 2 days", failures);
   assertIncludes(service, "NotificationIntervalType.DAY_2", "2-day service uses DAY_2", failures);
@@ -471,6 +472,7 @@ async function main() {
   assertNotIncludes(service, "NotificationActionType.PAYMENT_REQUEST", "2-day service must not use PAYMENT_REQUEST", failures);
   assertNotIncludes(service, "NotificationActionType.PAYMENT_ENFORCEMENT", "2-day service must not use PAYMENT_ENFORCEMENT", failures);
   assert(importIndex >= 0 && importIndex < queryIndex, "fresh import runs before qualification query", failures);
+  assert(scopeFilterIndex > queryIndex, "2-day creator applies order scope after target query", failures);
   assertIncludes(service, "isActive: true", "target query filters to active delivery groups only", failures);
   assertIncludes(service, "shouldSkipNotificationRunForWeekend(runDate)", "weekend run dates are skipped", failures);
   assertIncludes(service, "getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate)", "weekend delivery dates are checked", failures);

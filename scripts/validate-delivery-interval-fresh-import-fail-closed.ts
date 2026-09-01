@@ -300,7 +300,7 @@ function validateSource(failures: string[]) {
   assertBefore(
     reminder30,
     "summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn)",
-    "const deliveryGroups = await find30DayDeliveryReminderTargetGroups",
+    "const unscopedDeliveryGroups = await find30DayDeliveryReminderTargetGroups",
     "30/14 import before target evaluation",
     failures
   );

@@ -129,6 +129,12 @@ enum SharePointStockSyncRunStatus {
   FAILED  @map("failed")
 }
 
+enum DeliveryIntervalSchedulerRunStatus {
+  RUNNING @map("running")
+  SUCCESS @map("success")
+  FAILED  @map("failed")
+}
+
 model Contact {
   id             String    @id @default(cuid())
   contactId      String    @unique @db.VarChar(64)
@@ -251,6 +257,32 @@ model SharePointStockSyncRun {
 
   @@index([status, completedAt])
   @@map("sharepoint_stock_sync_runs")
+}
+
+model DeliveryIntervalSchedulerRun {
+  id                String                             @id @default(cuid())
+  lockKey           String                             @unique @db.VarChar(256)
+  interval          String                             @db.VarChar(16)
+  runDate           DateTime                           @db.Date
+  timezone          String                             @db.VarChar(64)
+  expectedLocalTime String                             @db.VarChar(5)
+  actualLocalTime   String                             @db.VarChar(5)
+  status            DeliveryIntervalSchedulerRunStatus @default(RUNNING)
+  retryCount        Int                                @default(0)
+  startedAt         DateTime                           @default(now())
+  completedAt       DateTime?
+  failedAt          DateTime?
+  delegatedArgs     Json?
+  resultSummary     Json?
+  errorMessage      String?                            @db.VarChar(1024)
+  createdAt         DateTime                           @default(now())
+  updatedAt         DateTime                           @updatedAt
+
+  @@index([interval])
+  @@index([runDate])
+  @@index([status])
+  @@index([startedAt])
+  @@map("delivery_interval_scheduler_runs")
 }
 
 model ExternalStockItem {

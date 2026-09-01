@@ -40,8 +40,9 @@ function main() {
     "summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn)"
   );
   const targetQueryIndex = source.indexOf(
-    "const deliveryGroups = await find30DayDeliveryReminderTargetGroups"
+    "const unscopedDeliveryGroups = await find30DayDeliveryReminderTargetGroups"
   );
+  const scopeFilterIndex = source.indexOf("const deliveryGroups = filterByDeliveryOrderScope(");
 
   assert(weekendIndex >= 0, "30-day creator checks global weekend skip", failures);
   assert(
@@ -51,6 +52,7 @@ function main() {
   );
   assert(importIndex >= 0, "30-day creator imports fresh target-date data", failures);
   assert(targetQueryIndex >= 0, "30-day creator queries target delivery groups", failures);
+  assert(scopeFilterIndex > targetQueryIndex, "30-day creator applies order scope after target query", failures);
   assert(
     importIndex > deliveryDateWeekendIndex && importIndex < targetQueryIndex,
     "fresh Acumatica import occurs only after weekend delivery-date eligibility check",

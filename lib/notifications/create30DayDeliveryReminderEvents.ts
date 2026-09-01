@@ -50,6 +50,12 @@ import {
   type FreshImportFailedOrder,
 } from "@/lib/notifications/freshDeliveryIntervalImport";
 import { getActiveSalespersonContactMap } from "@/lib/notifications/salespersonContactCache";
+import {
+  deliveryOrderScopeReport,
+  filterByDeliveryOrderScope,
+  type DeliveryOrderScope,
+  type DeliveryOrderScopeReport,
+} from "@/lib/notifications/orderScope";
 import { prisma } from "@/lib/prisma";
 
 export const DELIVERY_REMINDER_30_DAY_INTERVAL_DAYS = 30;
@@ -122,6 +128,7 @@ export type Create30DayDeliveryReminderEventsSummary = {
   paymentDueCount: number;
   weekendSkipped: boolean;
   dryRun: boolean;
+  orderScope: DeliveryOrderScopeReport;
   skippedReasons: Record<string, number>;
   failedImportExclusions: FreshImportFailedOrder[];
   eventReports: DeliveryReminder30DayEventReport[];
@@ -132,6 +139,7 @@ export type Create30DayDeliveryReminderEventsOptions = {
   dryRun?: boolean;
   now?: Date;
   prismaClient?: DeliveryReminder30DayClient;
+  orderScope?: DeliveryOrderScope | null;
 };
 
 export type CreateConfirmedDeliveryReminderEventsOptions =
@@ -177,6 +185,11 @@ function emptySummary(params: {
     paymentDueCount: 0,
     weekendSkipped: false,
     dryRun: params.dryRun,
+    orderScope: deliveryOrderScopeReport({
+      scope: null,
+      unscopedCount: 0,
+      scopedCount: 0,
+    }),
     skippedReasons: {},
     failedImportExclusions: [],
     eventReports: [],
@@ -440,7 +453,16 @@ export async function createConfirmedDeliveryReminderEvents(
     summary.failedImportExclusions = getFreshImportFailedOrders(summary.importResult);
   }
 
-  const deliveryGroups = await find30DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
+  const unscopedDeliveryGroups = await find30DayDeliveryReminderTargetGroups(targetDeliveryDate, client);
+  const deliveryGroups = filterByDeliveryOrderScope(
+    unscopedDeliveryGroups,
+    options.orderScope
+  );
+  summary.orderScope = deliveryOrderScopeReport({
+    scope: options.orderScope,
+    unscopedCount: unscopedDeliveryGroups.length,
+    scopedCount: deliveryGroups.length,
+  });
   summary.targetDeliveryGroups = deliveryGroups.length;
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 

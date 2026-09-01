@@ -19,8 +19,11 @@ import {
 import { create180DayDeliveryReminderEvents } from "../lib/notifications/create180DayDeliveryReminderEvents";
 import { create90DayDeliveryReminderEvents } from "../lib/notifications/create90DayDeliveryReminderEvents";
 import { create60DayDeliveryReminderEvents } from "../lib/notifications/create60DayDeliveryReminderEvents";
+import {
+  create30DayDeliveryReminderEvents,
+  type Create30DayDeliveryReminderEventsSummary,
+} from "../lib/notifications/create30DayDeliveryReminderEvents";
 import { create14DayDeliveryReminderEvents } from "../lib/notifications/create14DayDeliveryReminderEvents";
-import type { Create30DayDeliveryReminderEventsSummary } from "../lib/notifications/create30DayDeliveryReminderEvents";
 import type { CreateDeliveryReminderEventsSummary } from "../lib/notifications/createDeliveryReminderEvents";
 import {
   create42DayDeliveryConfirmationEvents,
@@ -34,6 +37,10 @@ import {
   create10DayDeliveryPaymentRequestEvents,
   type Create10DayDeliveryPaymentRequestEventsSummary,
 } from "../lib/notifications/create10DayDeliveryPaymentRequestEvents";
+import {
+  create2DayDeliveryReminderEvents,
+  type Create2DayDeliveryReminderEventsSummary,
+} from "../lib/notifications/create2DayDeliveryReminderEvents";
 import { dispatchDeliveryNotifications } from "../lib/notifications/deliveryNotificationDispatcher";
 import {
   createFreshImportFailedOrderLookup,
@@ -44,7 +51,7 @@ import {
 } from "../lib/notifications/freshDeliveryIntervalImport";
 import { prisma } from "../lib/prisma";
 
-const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "14", "12", "10"] as const;
+const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "30", "14", "12", "10", "2"] as const;
 
 type SupportedInterval = (typeof SUPPORTED_INTERVALS)[number];
 type CreateDeliveryIntervalEventsSummary =
@@ -52,7 +59,8 @@ type CreateDeliveryIntervalEventsSummary =
   | Create30DayDeliveryReminderEventsSummary
   | Create42DayDeliveryConfirmationEventsSummary
   | Create12DayDeliveryPaymentRequestEventsSummary
-  | Create10DayDeliveryPaymentRequestEventsSummary;
+  | Create10DayDeliveryPaymentRequestEventsSummary
+  | Create2DayDeliveryReminderEventsSummary;
 type CreateDeliveryIntervalEvents = (options: {
   runDate?: Date | string;
   dryRun?: boolean;
@@ -68,6 +76,7 @@ type IntervalConfig = {
   createEvents: CreateDeliveryIntervalEvents;
   dispatchOnlyCurrentRunCreatedEvents?: boolean;
   confirmationWritebackDryRunRequired: boolean;
+  tenDayConfirmationWritebackDryRunRequired: boolean;
   abortOnPerOrderImportFailure: boolean;
 };
 
@@ -80,6 +89,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 180 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create180DayDeliveryReminderEvents,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
   "90": {
@@ -90,6 +100,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create90DayDeliveryReminderEvents,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
   "60": {
@@ -100,6 +111,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 60 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create60DayDeliveryReminderEvents,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
   "42": {
@@ -111,7 +123,20 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     createEvents: create42DayDeliveryConfirmationEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
     confirmationWritebackDryRunRequired: false,
+    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: false,
+  },
+  "30": {
+    interval: "30",
+    days: 30,
+    intervalType: NotificationIntervalType.DAY_30,
+    actionType: NotificationActionType.DELIVERY_REMINDER,
+    confirmPhrase: "RUN REAL 30 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create30DayDeliveryReminderEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
+    abortOnPerOrderImportFailure: true,
   },
   "14": {
     interval: "14",
@@ -122,6 +147,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     createEvents: create14DayDeliveryReminderEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
   "12": {
@@ -133,6 +159,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     createEvents: create12DayDeliveryPaymentRequestEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
   "10": {
@@ -144,6 +171,19 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     createEvents: create10DayDeliveryPaymentRequestEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
     confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: false,
+    abortOnPerOrderImportFailure: true,
+  },
+  "2": {
+    interval: "2",
+    days: 2,
+    intervalType: NotificationIntervalType.DAY_2,
+    actionType: NotificationActionType.DELIVERY_REMINDER,
+    confirmPhrase: "RUN REAL 2 DAY CUSTOMER NOTIFICATIONS",
+    createEvents: create2DayDeliveryReminderEvents,
+    dispatchOnlyCurrentRunCreatedEvents: true,
+    confirmationWritebackDryRunRequired: true,
+    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
 };
@@ -387,8 +427,13 @@ function preflight(options: CliOptions, env: NodeJS.ProcessEnv = process.env) {
   } else if (!config && !options.confirmPhrase) {
     failures.push("--confirm is required.");
   }
-  if (options.orderScope && config?.interval !== "42") {
-    failures.push("--order-type/--order-number canary scope is currently supported only for interval 42.");
+  if (
+    options.orderScope &&
+    config?.interval !== "42" &&
+    config?.interval !== "30" &&
+    config?.interval !== "2"
+  ) {
+    failures.push("--order-type/--order-number scope is currently supported only for intervals 42, 30, and 2.");
   }
 
   addMissingEnvFailure(failures, "DATABASE_URL", "database access", env);
@@ -444,9 +489,23 @@ function preflight(options: CliOptions, env: NodeJS.ProcessEnv = process.env) {
     addMissingEnvFailure(failures, "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN", "confirmation writeback posture", env);
   }
 
+  requireFlagValue(failures, "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN", true, env);
+  if (config) {
+    requireFlagValue(
+      failures,
+      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
+      config.tenDayConfirmationWritebackDryRunRequired,
+      env
+    );
+  } else {
+    addMissingEnvFailure(
+      failures,
+      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
+      "10-day confirmation writeback posture",
+      env
+    );
+  }
   for (const name of [
-    "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN",
-    "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
     "DELIVERY_PREPAYMENT_HOLD_DRY_RUN",
   ]) {
     requireFlagValue(failures, name, true, env);
@@ -819,6 +878,7 @@ async function run() {
           targetDeliveryDate: targetDate,
           migrationStatus,
           importSummary: freshImport.importResult,
+          successfullyRefreshedOrders: freshImport.importResult?.successfullyRefreshedOrders ?? [],
           orderScope: {
             requested: options.orderScope,
             summary: summaryOrderScope(createSummary),
@@ -888,7 +948,12 @@ async function run() {
         realCustomerRecipientsUsed: true,
         confirmationWritebackDryRunRequired: config.confirmationWritebackDryRunRequired,
         confirmationWritebackLivePayloadsEnabled: !config.confirmationWritebackDryRunRequired,
+        tenDayConfirmationWritebackDryRunRequired:
+          config.tenDayConfirmationWritebackDryRunRequired,
+        tenDayConfirmationWritebackLivePayloadsEnabled:
+          !config.tenDayConfirmationWritebackDryRunRequired,
         importSummary: freshImport.importResult,
+        successfullyRefreshedOrders: freshImport.importResult?.successfullyRefreshedOrders ?? [],
         orderScope: {
           requested: options.orderScope,
           summary: summaryOrderScope(createSummary),

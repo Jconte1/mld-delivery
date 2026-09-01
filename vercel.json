@@ -1,0 +1,40 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/delivery-interval/180",
+      "schedule": "0 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/90",
+      "schedule": "10 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/60",
+      "schedule": "20 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/42",
+      "schedule": "30 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/30",
+      "schedule": "40 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/14",
+      "schedule": "50 21,22 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/12",
+      "schedule": "0 22,23 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/10",
+      "schedule": "10 22,23 * * 1-5"
+    },
+    {
+      "path": "/api/cron/delivery-interval/2",
+      "schedule": "30 22,23 * * 1-5"
+    }
+  ]
+}

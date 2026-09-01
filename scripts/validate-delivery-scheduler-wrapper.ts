@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 process.env.DATABASE_URL ??= "postgresql://validation:validation@localhost:5432/validation";
 
 type SchedulerModule = typeof import("./run-scheduled-delivery-interval");
+type CronRouteModule = typeof import("../app/api/cron/delivery-interval/[interval]/route");
 
 function assert(condition: unknown, message: string) {
   if (!condition) throw new Error(message);
@@ -98,6 +99,122 @@ function validateDelegation(scheduler: SchedulerModule) {
   );
 }
 
+function validateVercelCronConfig() {
+  const vercelConfig = JSON.parse(readFileSync("vercel.json", "utf8")) as {
+    crons?: Array<{ path?: string; schedule?: string }>;
+  };
+  const expected = new Map([
+    ["/api/cron/delivery-interval/180", "0 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/90", "10 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/60", "20 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/42", "30 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/30", "40 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/14", "50 21,22 * * 1-5"],
+    ["/api/cron/delivery-interval/12", "0 22,23 * * 1-5"],
+    ["/api/cron/delivery-interval/10", "10 22,23 * * 1-5"],
+    ["/api/cron/delivery-interval/2", "30 22,23 * * 1-5"],
+  ]);
+  if (!Array.isArray(vercelConfig.crons)) {
+    throw new Error("vercel.json should define crons.");
+  }
+  const crons = vercelConfig.crons;
+  assert(crons.length === expected.size, "vercel.json should contain exactly the schedule-ready intervals.");
+  for (const [path, schedule] of expected) {
+    const actual = crons.find((cron) => cron.path === path);
+    assert(actual?.schedule === schedule, `${path} should use schedule ${schedule}.`);
+  }
+  assert(
+    !crons.some((cron) => cron.path === "/api/cron/delivery-interval/8"),
+    "vercel.json must not schedule interval 8."
+  );
+}
+
+async function validateCronRouteBehavior(scheduler: SchedulerModule, route: CronRouteModule) {
+  const unauthenticated = route.validateCronAuthorization(
+    new Request("https://example.com/api/cron/delivery-interval/90", {
+      headers: { "user-agent": "vercel-cron/1.0" },
+    }),
+    {}
+  );
+  assert(!unauthenticated.ok, "Cron route should fail closed when CRON_SECRET is missing.");
+  if (!unauthenticated.ok) {
+    assert(
+      unauthenticated.reason === "cron_secret_not_configured",
+      "Missing CRON_SECRET should report cron_secret_not_configured."
+    );
+  }
+
+  const unauthorized = route.validateCronAuthorization(
+    new Request("https://example.com/api/cron/delivery-interval/90", {
+      headers: { authorization: "Bearer wrong", "user-agent": "vercel-cron/1.0" },
+    }),
+    { CRON_SECRET: "secret" }
+  );
+  assert(!unauthorized.ok, "Cron route should reject bad bearer token.");
+  if (!unauthorized.ok) assert(unauthorized.reason === "unauthorized", "Bad bearer token should be unauthorized.");
+
+  const authorized = route.validateCronAuthorization(
+    new Request("https://example.com/api/cron/delivery-interval/90", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { CRON_SECRET: "secret" }
+  );
+  assert(authorized.ok, "Cron route should accept matching bearer token.");
+  assert(authorized.vercelCronUserAgent === true, "Cron route should recognize Vercel cron user agent.");
+
+  const previousCronSecret = process.env.CRON_SECRET;
+  process.env.CRON_SECRET = "secret";
+  const interval8Response = await route.GET(
+    new Request("https://example.com/api/cron/delivery-interval/8", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { params: Promise.resolve({ interval: "8" }) }
+  );
+  if (previousCronSecret === undefined) {
+    delete process.env.CRON_SECRET;
+  } else {
+    process.env.CRON_SECRET = previousCronSecret;
+  }
+  const interval8Body = await interval8Response.json();
+  assert(interval8Response.status === 400, "Cron route should reject interval 8.");
+  assert(interval8Body.phase === "interval_8_not_schedule_ready", "Interval 8 rejection should use the expected phase.");
+
+  const wrongTime = await scheduler.runScheduledDeliveryInterval({
+    interval: "90",
+    send: true,
+    now: new Date("2026-08-25T20:10:00.000Z"),
+  });
+  assert(wrongTime.ok === true, "Wrong-time scheduler call should exit successfully.");
+  assert(wrongTime.phase === "skipped_wrong_local_time", "Wrong-time scheduler call should not delegate.");
+  assert(wrongTime.childResultSummary === null, "Wrong-time scheduler call should not run child process.");
+
+  const previousGate = process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  await (async () => {
+    try {
+      await scheduler.runScheduledDeliveryInterval({
+        interval: "90",
+        send: true,
+        now: new Date("2026-08-25T21:10:00.000Z"),
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      assert(
+        message.includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
+        "Live-send gate should block scheduled send before delegation."
+      );
+      return;
+    } finally {
+      if (previousGate === undefined) {
+        delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+      } else {
+        process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = previousGate;
+      }
+    }
+    throw new Error("Expected live-send gate to block scheduled send.");
+  })();
+}
+
 function validateStaticFiles(scheduler: SchedulerModule) {
   const packageJson = JSON.parse(readFileSync("package.json", "utf8"));
   assert(
@@ -161,14 +278,23 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   assert(docs.includes("scheduler wrapper foundation"), "Scheduler docs should describe the wrapper.");
   assert(docs.includes("0 21,22"), "Scheduler docs should include DST-safe UTC candidate cron examples.");
   assert(docs.includes("interval 8"), "Scheduler docs should explain that interval 8 is not schedule-ready.");
+
+  const route = readFileSync("app/api/cron/delivery-interval/[interval]/route.ts", "utf8");
+  assert(route.includes("CRON_SECRET"), "Cron route should require CRON_SECRET.");
+  assert(route.includes("runScheduledDeliveryInterval"), "Cron route should call scheduler wrapper logic.");
+  assert(route.includes("interval_8_not_schedule_ready"), "Cron route should fail closed for interval 8.");
+  assert(route.includes("send: true"), "Cron route should request scheduled live-send behavior.");
 }
 
 async function main() {
   const scheduler = await import("./run-scheduled-delivery-interval");
+  const route = await import("../app/api/cron/delivery-interval/[interval]/route");
   validateTimeZoneHandling(scheduler);
   validateArgumentHandling(scheduler);
   validateDelegation(scheduler);
   validateStaticFiles(scheduler);
+  validateVercelCronConfig();
+  await validateCronRouteBehavior(scheduler, route);
 
   console.log(
     "Delivery scheduler wrapper validation passed. No cron jobs, SMS/email, provider calls, Acumatica writes, queue writebacks, holds, deploys, or production data mutations were performed."

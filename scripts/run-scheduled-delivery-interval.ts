@@ -86,6 +86,36 @@ type SchedulerRunRow = {
   retryCount: number;
 };
 
+export type RunScheduledDeliveryIntervalParams = {
+  interval: DeliveryScheduledInterval;
+  expectedLocalTime?: string | null;
+  timezone?: string | null;
+  send?: boolean;
+  forceLocalTimeCheckBypass?: boolean;
+  allowFailedRetry?: boolean;
+  allowCompletedRerun?: boolean;
+  orderType?: string | null;
+  orderNumber?: string | null;
+  now?: Date;
+};
+
+export type ScheduledDeliveryIntervalResult = {
+  ok: boolean;
+  phase: string;
+  interval: DeliveryScheduledInterval;
+  timezone: string;
+  expectedLocalTime: string;
+  actualDenverLocalTime: string;
+  todayInDenver: string;
+  lockKey?: string;
+  schedulerRunId?: string;
+  retryCount?: number;
+  delegatedArgs: string[];
+  childExitStatus?: number | null;
+  childResultSummary: unknown;
+  sensitiveValuesPrinted: false;
+};
+
 function readOption(args: string[], index: number, name: string) {
   const arg = args[index];
   const prefix = `${name}=`;
@@ -377,46 +407,47 @@ function runChild(args: string[]) {
   };
 }
 
-async function run() {
-  const options = parseSchedulerArgs(process.argv.slice(2));
-  const interval = options.interval as DeliveryScheduledInterval;
+export async function runScheduledDeliveryInterval(
+  params: RunScheduledDeliveryIntervalParams
+): Promise<ScheduledDeliveryIntervalResult> {
+  const orderScope = normalizeDeliveryOrderScope({
+    orderType: params.orderType ?? null,
+    orderNumber: params.orderNumber ?? null,
+  });
+  const interval = params.interval;
   const schedule = DELIVERY_INTERVAL_SCHEDULE[interval];
-  const expectedLocalTime = options.expectedLocalTime ?? schedule.expectedLocalTime;
-  const local = denverDateTimeParts(options.now, options.timezone);
+  const expectedLocalTime = params.expectedLocalTime
+    ? normalizeLocalTime(params.expectedLocalTime)
+    : schedule.expectedLocalTime;
+  const timezone = params.timezone?.trim() || DEFAULT_DELIVERY_SCHEDULER_TIMEZONE;
+  const local = denverDateTimeParts(params.now ?? new Date(), timezone);
   const lockKey = schedulerLockKey(interval, local.date);
   const delegatedArgs = delegatedRunnerArgs({
     interval,
     runDate: local.date,
-    send: options.send,
+    send: params.send === true,
     confirmPhrase: schedule.confirmPhrase,
-    orderType: options.orderType,
-    orderNumber: options.orderNumber,
+    orderType: orderScope?.orderType ?? null,
+    orderNumber: orderScope?.orderNumber ?? null,
   });
 
-  if (!options.forceLocalTimeCheckBypass && local.time !== expectedLocalTime) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          phase: "skipped_wrong_local_time",
-          interval,
-          timezone: options.timezone,
-          expectedLocalTime,
-          actualDenverLocalTime: local.time,
-          todayInDenver: local.date,
-          delegatedArgs,
-          childResultSummary: null,
-          sensitiveValuesPrinted: false,
-        },
-        null,
-        2
-      )
-    );
-    return;
+  if (params.forceLocalTimeCheckBypass !== true && local.time !== expectedLocalTime) {
+    return {
+      ok: true,
+      phase: "skipped_wrong_local_time",
+      interval,
+      timezone,
+      expectedLocalTime,
+      actualDenverLocalTime: local.time,
+      todayInDenver: local.date,
+      delegatedArgs,
+      childResultSummary: null,
+      sensitiveValuesPrinted: false,
+    };
   }
 
   if (
-    options.send &&
+    params.send === true &&
     process.env[DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV]?.trim().toLowerCase() !== "true"
   ) {
     throw new Error(`${DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV} must be exactly true for scheduled sends.`);
@@ -426,36 +457,29 @@ async function run() {
     lockKey,
     interval,
     runDate: local.date,
-    timezone: options.timezone,
+    timezone,
     expectedLocalTime,
     actualLocalTime: local.time,
     delegatedArgs,
-    allowFailedRetry: options.allowFailedRetry,
-    allowCompletedRerun: options.allowCompletedRerun,
+    allowFailedRetry: params.allowFailedRetry === true,
+    allowCompletedRerun: params.allowCompletedRerun === true,
   });
 
   if (!lock.acquired) {
-    console.log(
-      JSON.stringify(
-        {
-          ok: true,
-          phase: lock.phase,
-          interval,
-          timezone: options.timezone,
-          expectedLocalTime,
-          actualDenverLocalTime: local.time,
-          todayInDenver: local.date,
-          lockKey,
-          retryCount: lock.row.retryCount,
-          delegatedArgs,
-          childResultSummary: null,
-          sensitiveValuesPrinted: false,
-        },
-        null,
-        2
-      )
-    );
-    return;
+    return {
+      ok: true,
+      phase: lock.phase,
+      interval,
+      timezone,
+      expectedLocalTime,
+      actualDenverLocalTime: local.time,
+      todayInDenver: local.date,
+      lockKey,
+      retryCount: lock.row.retryCount,
+      delegatedArgs,
+      childResultSummary: null,
+      sensitiveValuesPrinted: false,
+    };
   }
 
   const child = runChild(delegatedArgs);
@@ -467,33 +491,43 @@ async function run() {
     errorMessage: child.error,
   });
 
-  console.log(
-    JSON.stringify(
-      {
-        ok,
-        phase: ok ? "completed" : "failed",
-        interval,
-        timezone: options.timezone,
-        expectedLocalTime,
-        actualDenverLocalTime: local.time,
-        todayInDenver: local.date,
-        lockKey,
-        schedulerRunId: lock.row.id,
-        retryCount: lock.row.retryCount,
-        delegatedArgs,
-        childExitStatus: child.status,
-        childResultSummary: child.summary,
-        sensitiveValuesPrinted: false,
-      },
-      null,
-      2
-    )
-  );
-
-  if (!ok) process.exitCode = 1;
+  return {
+    ok,
+    phase: ok ? "completed" : "failed",
+    interval,
+    timezone,
+    expectedLocalTime,
+    actualDenverLocalTime: local.time,
+    todayInDenver: local.date,
+    lockKey,
+    schedulerRunId: lock.row.id,
+    retryCount: lock.row.retryCount,
+    delegatedArgs,
+    childExitStatus: child.status,
+    childResultSummary: child.summary,
+    sensitiveValuesPrinted: false,
+  };
 }
 
-if (require.main === module) {
+async function run() {
+  const options = parseSchedulerArgs(process.argv.slice(2));
+  const result = await runScheduledDeliveryInterval({
+    interval: options.interval as DeliveryScheduledInterval,
+    expectedLocalTime: options.expectedLocalTime,
+    timezone: options.timezone,
+    send: options.send,
+    forceLocalTimeCheckBypass: options.forceLocalTimeCheckBypass,
+    allowFailedRetry: options.allowFailedRetry,
+    allowCompletedRerun: options.allowCompletedRerun,
+    orderType: options.orderType,
+    orderNumber: options.orderNumber,
+    now: options.now,
+  });
+  console.log(JSON.stringify(result, null, 2));
+  if (!result.ok) process.exitCode = 1;
+}
+
+if (typeof require !== "undefined" && require.main === module) {
   run()
     .catch((error) => {
       console.error(

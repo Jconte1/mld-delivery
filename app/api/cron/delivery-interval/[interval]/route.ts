@@ -220,6 +220,7 @@ export async function handleDeliveryIntervalCronRequest(
           orderScope: payload.orderScope ?? null,
           channel: payload.channel,
           verifyPackageAndMigrations: false,
+          manualPresentationRun: payload.manualRun,
         });
       },
     });

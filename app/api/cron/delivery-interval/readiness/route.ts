@@ -23,6 +23,17 @@ function present(name: string) {
   return Boolean(envValue(name));
 }
 
+function liveWritebackReadiness(dryRunEnv: string, enabledEnv: string) {
+  const dryRun = boolState(dryRunEnv);
+  const enabled = boolState(enabledEnv);
+  return {
+    dryRun,
+    enabled,
+    readyForPresentation: dryRun === "true" || (dryRun === "false" && enabled === "true"),
+    liveWriteback: dryRun === "false" && enabled === "true",
+  };
+}
+
 export async function GET(request: Request) {
   const authorization = validateCronAuthorization(request);
   if (!authorization.ok) {
@@ -52,8 +63,23 @@ export async function GET(request: Request) {
     },
     writebacks: {
       confirmationDryRun: boolState("DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"),
+      confirmationEnabled: boolState("ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED"),
+      confirmationPresentationReady: liveWritebackReadiness(
+        "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
+        "ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED"
+      ),
       requestedDateDryRun: boolState("DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN"),
+      requestedDateEnabled: boolState("ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED"),
+      requestedDatePresentationReady: liveWritebackReadiness(
+        "DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN",
+        "ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED"
+      ),
       tenDayConfirmationDryRun: boolState("DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"),
+      tenDayConfirmationEnabled: boolState("ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED"),
+      tenDayConfirmationPresentationReady: liveWritebackReadiness(
+        "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
+        "ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED"
+      ),
       contactOptInDryRun: boolState("DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN"),
       prepaymentHoldDryRun: boolState("DELIVERY_PREPAYMENT_HOLD_DRY_RUN"),
     },

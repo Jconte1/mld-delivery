@@ -219,6 +219,7 @@ export type DeliveryIntervalRunOptions = {
   orderScope: DeliveryOrderScope | null;
   channel: DispatcherChannelFilter;
   verifyPackageAndMigrations: boolean;
+  manualPresentationRun: boolean;
 };
 
 function isSupportedInterval(value: string): value is SupportedInterval {
@@ -249,6 +250,7 @@ function parseArgs(args: string[]): DeliveryIntervalRunOptions {
     orderScope: null,
     channel: "both",
     verifyPackageAndMigrations: true,
+    manualPresentationRun: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -443,6 +445,24 @@ function requireFlagValue(
   }
 }
 
+function requireLiveWritebackReadyForManualPresentation(
+  failures: string[],
+  dryRunEnv: string,
+  enabledEnv: string,
+  purpose: string,
+  env: NodeJS.ProcessEnv = process.env
+) {
+  const dryRunValue = envValue(dryRunEnv, env).toLowerCase();
+  if (dryRunValue === "true") return;
+  if (dryRunValue !== "false") {
+    failures.push(`${dryRunEnv} must be exactly true or false for ${purpose}.`);
+    return;
+  }
+  if (!flagIsTrue(enabledEnv, env)) {
+    failures.push(`${enabledEnv} must be exactly true when ${dryRunEnv}=false for ${purpose}.`);
+  }
+}
+
 function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv = process.env) {
   const failures: string[] = [];
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
@@ -503,7 +523,22 @@ function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv =
     failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES must be exactly true.");
   }
 
-  if (config) {
+  if (config && options.manualPresentationRun) {
+    requireLiveWritebackReadyForManualPresentation(
+      failures,
+      "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
+      "ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED",
+      "manual presentation confirmation writeback",
+      env
+    );
+    requireLiveWritebackReadyForManualPresentation(
+      failures,
+      "DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN",
+      "ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED",
+      "manual presentation requested-date writeback",
+      env
+    );
+  } else if (config) {
     requireFlagValue(
       failures,
       "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
@@ -515,7 +550,15 @@ function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv =
   }
 
   requireFlagValue(failures, "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN", true, env);
-  if (config) {
+  if (config && options.manualPresentationRun) {
+    requireLiveWritebackReadyForManualPresentation(
+      failures,
+      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
+      "ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED",
+      "manual presentation 10-day confirmation writeback",
+      env
+    );
+  } else if (config) {
     requireFlagValue(
       failures,
       "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",

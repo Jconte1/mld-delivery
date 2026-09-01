@@ -86,6 +86,29 @@ type SchedulerRunRow = {
   retryCount: number;
 };
 
+type SchedulerLockResult =
+  | {
+      acquired: true;
+      row: SchedulerRunRow;
+      phase: "lock_acquired" | "lock_reacquired";
+      previousLockStatus: SchedulerLockStatus | null;
+    }
+  | {
+      acquired: false;
+      row: SchedulerRunRow;
+      phase:
+        | "skipped_lock_active"
+        | "skipped_already_completed"
+        | "skipped_failed_requires_retry_flag";
+      previousLockStatus: SchedulerLockStatus;
+    };
+
+type SchedulerChildResult = {
+  status: number | null;
+  error: string | null;
+  summary: unknown;
+};
+
 export type RunScheduledDeliveryIntervalParams = {
   interval: DeliveryScheduledInterval;
   expectedLocalTime?: string | null;
@@ -97,6 +120,24 @@ export type RunScheduledDeliveryIntervalParams = {
   orderType?: string | null;
   orderNumber?: string | null;
   now?: Date;
+  acquireLock?: (params: {
+    lockKey: string;
+    interval: string;
+    runDate: string;
+    timezone: string;
+    expectedLocalTime: string;
+    actualLocalTime: string;
+    delegatedArgs: string[];
+    allowFailedRetry: boolean;
+    allowCompletedRerun: boolean;
+  }) => Promise<SchedulerLockResult>;
+  markRun?: (params: {
+    id: string;
+    status: "success" | "failed";
+    resultSummary: unknown;
+    errorMessage?: string | null;
+  }) => Promise<void>;
+  runChildProcess?: (args: string[]) => SchedulerChildResult;
 };
 
 export type ScheduledDeliveryIntervalResult = {
@@ -108,6 +149,7 @@ export type ScheduledDeliveryIntervalResult = {
   actualDenverLocalTime: string;
   todayInDenver: string;
   lockKey?: string;
+  previousLockStatus?: SchedulerLockStatus | null;
   schedulerRunId?: string;
   retryCount?: number;
   delegatedArgs: string[];
@@ -175,7 +217,7 @@ export function delegatedRunnerArgs(params: {
   confirmPhrase: string;
   orderType?: string | null;
   orderNumber?: string | null;
-}) {
+}): string[] {
   const args = [
     "run",
     "run:delivery-interval",
@@ -324,7 +366,14 @@ async function acquireSchedulerRunLock(params: {
     ON CONFLICT ("lockKey") DO NOTHING
     RETURNING "id", "lockKey", "status"::text AS "status", "retryCount"
   `;
-  if (inserted[0]) return { acquired: true, row: inserted[0], phase: "lock_acquired" };
+  if (inserted[0]) {
+    return {
+      acquired: true,
+      row: inserted[0],
+      phase: "lock_acquired",
+      previousLockStatus: null,
+    };
+  }
 
   const existing = (
     await prisma.$queryRaw<SchedulerRunRow[]>`
@@ -337,13 +386,28 @@ async function acquireSchedulerRunLock(params: {
   if (!existing) throw new Error("scheduler_lock_missing_after_conflict");
 
   if (existing.status === "running") {
-    return { acquired: false, row: existing, phase: "skipped_lock_active" };
+    return {
+      acquired: false,
+      row: existing,
+      phase: "skipped_lock_active",
+      previousLockStatus: existing.status,
+    };
   }
   if (existing.status === "success" && !params.allowCompletedRerun) {
-    return { acquired: false, row: existing, phase: "skipped_already_completed" };
+    return {
+      acquired: false,
+      row: existing,
+      phase: "skipped_already_completed",
+      previousLockStatus: existing.status,
+    };
   }
   if (existing.status === "failed" && !params.allowFailedRetry) {
-    return { acquired: false, row: existing, phase: "skipped_failed_requires_retry_flag" };
+    return {
+      acquired: false,
+      row: existing,
+      phase: "skipped_failed_requires_retry_flag",
+      previousLockStatus: existing.status,
+    };
   }
 
   const updated = (
@@ -367,7 +431,12 @@ async function acquireSchedulerRunLock(params: {
     `
   )[0];
 
-  return { acquired: true, row: updated, phase: "lock_reacquired" };
+  return {
+    acquired: true,
+    row: updated,
+    phase: "lock_reacquired",
+    previousLockStatus: existing.status,
+  };
 }
 
 async function markSchedulerRun(params: {
@@ -392,7 +461,7 @@ async function markSchedulerRun(params: {
   `;
 }
 
-function runChild(args: string[]) {
+function runChild(args: string[]): SchedulerChildResult {
   const npmCommand = process.platform === "win32" ? "npm.cmd" : "npm";
   const result = spawnSync(npmCommand, args, {
     cwd: process.cwd(),
@@ -453,7 +522,7 @@ export async function runScheduledDeliveryInterval(
     throw new Error(`${DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV} must be exactly true for scheduled sends.`);
   }
 
-  const lock = await acquireSchedulerRunLock({
+  const lock = await (params.acquireLock ?? acquireSchedulerRunLock)({
     lockKey,
     interval,
     runDate: local.date,
@@ -475,6 +544,7 @@ export async function runScheduledDeliveryInterval(
       actualDenverLocalTime: local.time,
       todayInDenver: local.date,
       lockKey,
+      previousLockStatus: lock.previousLockStatus,
       retryCount: lock.row.retryCount,
       delegatedArgs,
       childResultSummary: null,
@@ -482,9 +552,9 @@ export async function runScheduledDeliveryInterval(
     };
   }
 
-  const child = runChild(delegatedArgs);
+  const child = (params.runChildProcess ?? runChild)(delegatedArgs);
   const ok = child.status === 0 && !child.error;
-  await markSchedulerRun({
+  await (params.markRun ?? markSchedulerRun)({
     id: lock.row.id,
     status: ok ? "success" : "failed",
     resultSummary: child.summary,
@@ -500,6 +570,7 @@ export async function runScheduledDeliveryInterval(
     actualDenverLocalTime: local.time,
     todayInDenver: local.date,
     lockKey,
+    previousLockStatus: lock.previousLockStatus,
     schedulerRunId: lock.row.id,
     retryCount: lock.row.retryCount,
     delegatedArgs,

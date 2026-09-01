@@ -100,6 +100,137 @@ function validateDelegation(scheduler: SchedulerModule) {
   );
 }
 
+async function validateLockRetryBehavior(scheduler: SchedulerModule) {
+  const previousGate = process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "true";
+  try {
+    const failedWithoutRetry = await scheduler.runScheduledDeliveryInterval({
+      interval: "90",
+      send: true,
+      forceLocalTimeCheckBypass: true,
+      now: new Date("2026-08-25T20:00:00.000Z"),
+      acquireLock: async () => ({
+        acquired: false,
+        phase: "skipped_failed_requires_retry_flag",
+        previousLockStatus: "failed",
+        row: {
+          id: "failed-lock",
+          lockKey: "delivery_interval_cron:90:2026-08-25",
+          status: "failed",
+          retryCount: 0,
+        },
+      }),
+      runChildProcess: () => {
+        throw new Error("Failed lock without retry must not delegate.");
+      },
+    });
+    assert(
+      failedWithoutRetry.phase === "skipped_failed_requires_retry_flag",
+      "Failed lock without retry should skip."
+    );
+    assert(failedWithoutRetry.previousLockStatus === "failed", "Failed skip should report prior lock status.");
+    assert(failedWithoutRetry.childResultSummary === null, "Failed skip should not delegate.");
+
+    let retriedDelegated = false;
+    let markedRetried = false;
+    const failedWithRetry = await scheduler.runScheduledDeliveryInterval({
+      interval: "90",
+      send: true,
+      forceLocalTimeCheckBypass: true,
+      allowFailedRetry: true,
+      now: new Date("2026-08-25T20:00:00.000Z"),
+      acquireLock: async () => ({
+        acquired: true,
+        phase: "lock_reacquired",
+        previousLockStatus: "failed",
+        row: {
+          id: "failed-lock",
+          lockKey: "delivery_interval_cron:90:2026-08-25",
+          status: "running",
+          retryCount: 1,
+        },
+      }),
+      markRun: async () => {
+        markedRetried = true;
+      },
+      runChildProcess: () => {
+        retriedDelegated = true;
+        return {
+          status: 0,
+          error: null,
+          summary: { ok: true, providerCalls: 0 },
+        };
+      },
+    });
+    assert(failedWithRetry.phase === "completed", "Failed lock with retry should delegate and complete.");
+    assert(failedWithRetry.previousLockStatus === "failed", "Retry should report prior failed lock.");
+    assert(failedWithRetry.retryCount === 1, "Retry should expose incremented retry count.");
+    assert(retriedDelegated, "retryFailed=true equivalent should delegate.");
+    assert(markedRetried, "Retried run should mark scheduler run completion.");
+
+    const completedWithoutRerun = await scheduler.runScheduledDeliveryInterval({
+      interval: "90",
+      send: true,
+      forceLocalTimeCheckBypass: true,
+      now: new Date("2026-08-25T20:00:00.000Z"),
+      acquireLock: async () => ({
+        acquired: false,
+        phase: "skipped_already_completed",
+        previousLockStatus: "success",
+        row: {
+          id: "success-lock",
+          lockKey: "delivery_interval_cron:90:2026-08-25",
+          status: "success",
+          retryCount: 0,
+        },
+      }),
+      runChildProcess: () => {
+        throw new Error("Completed lock without rerun must not delegate.");
+      },
+    });
+    assert(completedWithoutRerun.phase === "skipped_already_completed", "Completed lock should skip by default.");
+    assert(completedWithoutRerun.previousLockStatus === "success", "Completed skip should report prior lock status.");
+
+    let rerunDelegated = false;
+    const completedWithRerun = await scheduler.runScheduledDeliveryInterval({
+      interval: "90",
+      send: true,
+      forceLocalTimeCheckBypass: true,
+      allowCompletedRerun: true,
+      now: new Date("2026-08-25T20:00:00.000Z"),
+      acquireLock: async () => ({
+        acquired: true,
+        phase: "lock_reacquired",
+        previousLockStatus: "success",
+        row: {
+          id: "success-lock",
+          lockKey: "delivery_interval_cron:90:2026-08-25",
+          status: "running",
+          retryCount: 1,
+        },
+      }),
+      markRun: async () => undefined,
+      runChildProcess: () => {
+        rerunDelegated = true;
+        return {
+          status: 0,
+          error: null,
+          summary: { ok: true, providerCalls: 0 },
+        };
+      },
+    });
+    assert(completedWithRerun.phase === "completed", "Completed lock with allowRerun should delegate.");
+    assert(completedWithRerun.previousLockStatus === "success", "Rerun should report prior success lock.");
+    assert(rerunDelegated, "allowRerun=true equivalent should delegate.");
+  } finally {
+    if (previousGate === undefined) {
+      delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+    } else {
+      process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = previousGate;
+    }
+  }
+}
+
 function validateVercelCronConfig() {
   const vercelConfig = JSON.parse(readFileSync("vercel.json", "utf8")) as {
     crons?: Array<{ path?: string; schedule?: string }>;
@@ -290,6 +421,31 @@ async function validateCronRouteBehavior(
     String(manualEndpointBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
     "Manual endpoint should still require scheduler live-send gate."
   );
+
+  process.env.CRON_SECRET = "secret";
+  const retryFailedResponse = await manualRoute.GET(
+    new Request("https://example.com/api/cron/delivery-interval/90/manual?retryFailed=true", {
+      headers: { authorization: "Bearer secret", "user-agent": "vercel-cron/1.0" },
+    }),
+    { params: Promise.resolve({ interval: "90" }) }
+  );
+  if (previousCronSecret === undefined) {
+    delete process.env.CRON_SECRET;
+  } else {
+    process.env.CRON_SECRET = previousCronSecret;
+  }
+  const retryFailedBody = await retryFailedResponse.json();
+  assert(retryFailedBody.manualRun === true, "Manual retry endpoint should report manualRun true.");
+  assert(retryFailedBody.retryFailed === true, "Manual retry endpoint should recognize retryFailed=true.");
+  assert(retryFailedBody.allowRerun === false, "Manual retry endpoint should not imply allowRerun.");
+  assert(
+    retryFailedBody.localTimeGateBypassed === true,
+    "Manual retry endpoint should bypass the local-time gate."
+  );
+  assert(
+    String(retryFailedBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
+    "Manual retry endpoint should still require live-send gate before touching lock/delegate."
+  );
 }
 
 function validateStaticFiles(scheduler: SchedulerModule) {
@@ -363,6 +519,8 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   assert(route.includes("send: true"), "Cron route should request scheduled live-send behavior.");
   assert(route.includes("manualRun"), "Cron route should support authenticated manual run bypass.");
   assert(route.includes("forceLocalTimeCheckBypass: manualRun"), "Manual run should use scheduler bypass behavior.");
+  assert(route.includes("retryFailed"), "Cron route should pass retryFailed into scheduler retry handling.");
+  assert(route.includes("allowFailedRetry: retryFailed"), "Cron route should map retryFailed to allowFailedRetry.");
   assert(
     route.includes("allowRerun") && route.includes("allowCompletedRerun"),
     "Manual rerun should be explicit and protected."
@@ -386,6 +544,7 @@ async function main() {
   validateTimeZoneHandling(scheduler);
   validateArgumentHandling(scheduler);
   validateDelegation(scheduler);
+  await validateLockRetryBehavior(scheduler);
   validateStaticFiles(scheduler);
   validateVercelCronConfig();
   await validateCronRouteBehavior(scheduler, route, manualRoute);

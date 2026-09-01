@@ -41,6 +41,14 @@ function requestFlagIsTrue(request: Request, queryName: string, headerName: stri
   return queryValue === "true" || headerValue === "true";
 }
 
+function cronManualRetryFailedRequested(request: Request) {
+  return requestFlagIsTrue(request, "retryFailed", "x-delivery-retry-failed");
+}
+
+function cronManualAllowRerunRequested(request: Request) {
+  return requestFlagIsTrue(request, "allowRerun", "x-delivery-allow-rerun");
+}
+
 export function cronManualRunRequested(request: Request, forcedManualRun = false) {
   return forcedManualRun || requestFlagIsTrue(request, "manualRun", "x-delivery-manual-run");
 }
@@ -83,12 +91,16 @@ export async function handleDeliveryIntervalCronRequest(
   const authorization = validateCronAuthorization(request);
   const manualRun = cronManualRunRequested(request, options.manualRun === true);
   const localTimeGateBypassed = manualRun;
+  const retryFailed = manualRun && cronManualRetryFailedRequested(request);
+  const allowRerun = manualRun && cronManualAllowRerunRequested(request);
   if (!authorization.ok) {
     return jsonResponse(
       {
         ok: false,
         phase: authorization.reason,
         manualRun,
+        retryFailed,
+        allowRerun,
         localTimeGateBypassed: false,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
@@ -106,6 +118,8 @@ export async function handleDeliveryIntervalCronRequest(
         phase: "interval_8_not_schedule_ready",
         interval,
         manualRun,
+        retryFailed,
+        allowRerun,
         localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
@@ -121,6 +135,8 @@ export async function handleDeliveryIntervalCronRequest(
         interval,
         supportedIntervals: Object.keys(DELIVERY_INTERVAL_SCHEDULE),
         manualRun,
+        retryFailed,
+        allowRerun,
         localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
@@ -133,13 +149,16 @@ export async function handleDeliveryIntervalCronRequest(
       interval: interval as DeliveryScheduledInterval,
       send: true,
       forceLocalTimeCheckBypass: manualRun,
-      allowCompletedRerun: manualRun && requestFlagIsTrue(request, "allowRerun", "x-delivery-allow-rerun"),
+      allowFailedRetry: retryFailed,
+      allowCompletedRerun: allowRerun,
     });
 
     return jsonResponse(
       {
         ...result,
         manualRun,
+        retryFailed,
+        allowRerun,
         localTimeGateBypassed,
         vercelCronUserAgent: authorization.vercelCronUserAgent,
       },
@@ -156,6 +175,8 @@ export async function handleDeliveryIntervalCronRequest(
         phase: "failed",
         interval,
         manualRun,
+        retryFailed,
+        allowRerun,
         localTimeGateBypassed,
         timezone: DEFAULT_DELIVERY_SCHEDULER_TIMEZONE,
         expectedLocalTime: schedule?.expectedLocalTime ?? null,

@@ -31,6 +31,12 @@ import {
 } from "@/lib/notifications/freshDeliveryIntervalImport";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
+  deliveryOrderMatchesScope,
+  deliveryOrderScopeReport,
+  type DeliveryOrderScope,
+  type DeliveryOrderScopeReport,
+} from "@/lib/notifications/orderScope";
+import {
   loadActiveNotificationOptOutAddresses,
   mergeNotificationOptOutAddresses,
 } from "@/lib/notifications/notificationOptOutLookup";
@@ -75,6 +81,18 @@ export type CreateDeliveryReminderEventsSummary = {
   failedImportExclusions: FreshImportFailedOrder[];
   eventsWouldCreate: number;
   messagePreviews: MessagePreview[];
+  createdEventIds: string[];
+  eventReports: Array<{
+    orderType: string;
+    orderNumber: string;
+    deliveryGroupId: string;
+    deliveryDate: string;
+    eventId: string | null;
+    status: string | null;
+    selectedChannel: string | null;
+    reasonSkipped: string | null;
+  }>;
+  orderScope: DeliveryOrderScopeReport;
 };
 
 export type CreateDeliveryReminderEventsOptions = {
@@ -87,6 +105,7 @@ export type CreateDeliveryReminderEventsOptions = {
   requireQueueBackedImport?: boolean;
   importSalesOrders?: DeliveryIntervalFreshImportLoader;
   prismaClient?: DeliveryReminderEventsClient;
+  orderScope?: DeliveryOrderScope | null;
 };
 
 function emptySummary(params: {
@@ -126,6 +145,13 @@ function emptySummary(params: {
     failedImportExclusions: [],
     eventsWouldCreate: 0,
     messagePreviews: [],
+    createdEventIds: [],
+    eventReports: [],
+    orderScope: deliveryOrderScopeReport({
+      scope: null,
+      unscopedCount: 0,
+      scopedCount: 0,
+    }),
   };
 }
 
@@ -278,14 +304,24 @@ export async function createDeliveryReminderEvents(
       },
     },
   });
-  summary.targetDeliveryGroups = deliveryGroups.length;
+  summary.orderScope = deliveryOrderScopeReport({
+    scope: options.orderScope,
+    unscopedCount: deliveryGroups.length,
+    scopedCount: deliveryGroups.filter((deliveryGroup) =>
+      deliveryOrderMatchesScope(deliveryGroup, options.orderScope)
+    ).length,
+  });
+  const scopedDeliveryGroups = deliveryGroups.filter((deliveryGroup) =>
+    deliveryOrderMatchesScope(deliveryGroup, options.orderScope)
+  );
+  summary.targetDeliveryGroups = scopedDeliveryGroups.length;
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
   const salespersonContactsByNumber = await getActiveSalespersonContactMap(
-    deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
+    scopedDeliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
     client
   );
 
-  for (const deliveryGroup of deliveryGroups) {
+  for (const deliveryGroup of scopedDeliveryGroups) {
     const order = deliveryGroup.order;
     if (
       isCompletedOrCancelledStatus(order.status) ||
@@ -468,7 +504,7 @@ export async function createDeliveryReminderEvents(
     }
 
     try {
-      await client.notificationEvent.create({
+      const event = await client.notificationEvent.create({
         data: {
           orderId: order.id,
           deliveryGroupId: deliveryGroup.id,
@@ -497,7 +533,20 @@ export async function createDeliveryReminderEvents(
         summary.eventsSkipped += 1;
       } else {
         summary.eventsCreated += 1;
+        summary.createdEventIds.push(event.id);
       }
+      summary.eventReports.push({
+        orderType: order.orderType,
+        orderNumber: order.orderNumber,
+        deliveryGroupId: deliveryGroup.id,
+        deliveryDate: dateKey(deliveryGroup.deliveryDate),
+        eventId: event.id,
+        status: shouldSkipForNoChannel
+          ? NotificationEventStatus.SKIPPED
+          : NotificationEventStatus.SCHEDULED,
+        selectedChannel: channel.selectedChannel,
+        reasonSkipped: shouldSkipForNoChannel ? channel.channelReason : null,
+      });
     } catch (error) {
       if (!isUniqueConstraintError(error)) {
         throw error;

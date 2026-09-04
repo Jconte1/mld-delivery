@@ -30,11 +30,20 @@ async function main() {
   const previousDryRun = process.env[DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN_ENV];
   try {
     delete process.env[DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN_ENV];
-    addCheck("default requested-date writeback is dry-run", shouldDryRunDeliveryRequestedDateWriteback());
+    addCheck(
+      "default requested-date writeback is live",
+      shouldDryRunDeliveryRequestedDateWriteback() === false
+    );
+
+    process.env[DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN_ENV] = "true";
+    addCheck(
+      "requested-date writeback can be temporarily disabled with explicit true",
+      shouldDryRunDeliveryRequestedDateWriteback() === true
+    );
 
     process.env[DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN_ENV] = "false";
     addCheck(
-      "requested-date writeback can be made live only with explicit false",
+      "requested-date writeback remains live with explicit false",
       shouldDryRunDeliveryRequestedDateWriteback() === false
     );
   } finally {

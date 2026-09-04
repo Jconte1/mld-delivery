@@ -80,7 +80,7 @@ function shouldDryRunContactOptInWriteback() {
     ?.trim()
     .toLowerCase();
 
-  return dryRunOverride !== "false";
+  return dryRunOverride === "true";
 }
 
 export function buildContactOptInWritebackPayload(

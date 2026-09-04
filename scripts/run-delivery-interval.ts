@@ -83,8 +83,6 @@ type IntervalConfig = {
   confirmPhrase: string;
   createEvents: CreateDeliveryIntervalEvents;
   dispatchOnlyCurrentRunCreatedEvents?: boolean;
-  confirmationWritebackDryRunRequired: boolean;
-  tenDayConfirmationWritebackDryRunRequired: boolean;
   abortOnPerOrderImportFailure: boolean;
 };
 
@@ -96,8 +94,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     actionType: NotificationActionType.DELIVERY_REMINDER,
     confirmPhrase: "RUN REAL 180 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create180DayDeliveryReminderEvents,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
+    dispatchOnlyCurrentRunCreatedEvents: true,
     abortOnPerOrderImportFailure: true,
   },
   "90": {
@@ -107,8 +104,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     actionType: NotificationActionType.DELIVERY_REMINDER,
     confirmPhrase: "RUN REAL 90 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create90DayDeliveryReminderEvents,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
+    dispatchOnlyCurrentRunCreatedEvents: true,
     abortOnPerOrderImportFailure: true,
   },
   "60": {
@@ -118,8 +114,7 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     actionType: NotificationActionType.DELIVERY_REMINDER,
     confirmPhrase: "RUN REAL 60 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create60DayDeliveryReminderEvents,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
+    dispatchOnlyCurrentRunCreatedEvents: true,
     abortOnPerOrderImportFailure: true,
   },
   "42": {
@@ -130,8 +125,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 42 DAY CUSTOMER CONFIRMATION NOTIFICATIONS",
     createEvents: create42DayDeliveryConfirmationEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: false,
-    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: false,
   },
   "30": {
@@ -142,8 +135,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 30 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create30DayDeliveryReminderEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
   "14": {
@@ -154,8 +145,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 14 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create14DayDeliveryReminderEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
   "12": {
@@ -166,8 +155,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 12 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create12DayDeliveryPaymentRequestEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
   "10": {
@@ -178,8 +165,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 10 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create10DayDeliveryPaymentRequestEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: false,
     abortOnPerOrderImportFailure: true,
   },
   "8": {
@@ -190,8 +175,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 8 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create8DayPaymentEnforcementEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
   "2": {
@@ -202,8 +185,6 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
     confirmPhrase: "RUN REAL 2 DAY CUSTOMER NOTIFICATIONS",
     createEvents: create2DayDeliveryReminderEvents,
     dispatchOnlyCurrentRunCreatedEvents: true,
-    confirmationWritebackDryRunRequired: true,
-    tenDayConfirmationWritebackDryRunRequired: true,
     abortOnPerOrderImportFailure: true,
   },
 };
@@ -332,6 +313,14 @@ function flagIsTrue(name: string, env: NodeJS.ProcessEnv = process.env) {
   return envValue(name, env).toLowerCase() === "true";
 }
 
+function flagIsExplicitFalse(name: string, env: NodeJS.ProcessEnv = process.env) {
+  return envValue(name, env).toLowerCase() === "false";
+}
+
+function dryRunOverrideEnabled(name: string, env: NodeJS.ProcessEnv = process.env) {
+  return envValue(name, env).toLowerCase() === "true";
+}
+
 function flagIsFalseOrUnset(name: string, env: NodeJS.ProcessEnv = process.env) {
   const value = envValue(name, env).toLowerCase();
   return !value || value === "false";
@@ -433,36 +422,6 @@ function verifyPackageScript() {
   }
 }
 
-function requireFlagValue(
-  failures: string[],
-  name: string,
-  expected: boolean,
-  env: NodeJS.ProcessEnv = process.env
-) {
-  const expectedText = expected ? "true" : "false";
-  if (envValue(name, env).toLowerCase() !== expectedText) {
-    failures.push(`${name} must be exactly ${expectedText}.`);
-  }
-}
-
-function requireLiveWritebackReadyForManualPresentation(
-  failures: string[],
-  dryRunEnv: string,
-  enabledEnv: string,
-  purpose: string,
-  env: NodeJS.ProcessEnv = process.env
-) {
-  const dryRunValue = envValue(dryRunEnv, env).toLowerCase();
-  if (dryRunValue === "true") return;
-  if (dryRunValue !== "false") {
-    failures.push(`${dryRunEnv} must be exactly true or false for ${purpose}.`);
-    return;
-  }
-  if (!flagIsTrue(enabledEnv, env)) {
-    failures.push(`${enabledEnv} must be exactly true when ${dryRunEnv}=false for ${purpose}.`);
-  }
-}
-
 function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv = process.env) {
   const failures: string[] = [];
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
@@ -507,8 +466,8 @@ function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv =
   if (!flagIsTrue("USE_QUEUE_ERP", env)) {
     failures.push("USE_QUEUE_ERP must be exactly true.");
   }
-  if (!flagIsTrue("DELIVERY_REAL_CUSTOMER_SEND_ENABLED", env)) {
-    failures.push("DELIVERY_REAL_CUSTOMER_SEND_ENABLED must be exactly true.");
+  if (flagIsExplicitFalse("DELIVERY_REAL_CUSTOMER_SEND_ENABLED", env)) {
+    failures.push("DELIVERY_REAL_CUSTOMER_SEND_ENABLED is explicitly false.");
   }
   if (!flagIsFalseOrUnset("DELIVERY_CONTROLLED_RECIPIENT_MODE", env)) {
     failures.push("DELIVERY_CONTROLLED_RECIPIENT_MODE must be false or unset.");
@@ -519,64 +478,8 @@ function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv =
   if (!flagIsFalseOrUnset("DEMO_NOTIFICATION_SEND_ENABLED", env)) {
     failures.push("DEMO_NOTIFICATION_SEND_ENABLED must be false or unset.");
   }
-  if (!flagIsTrue("TWILIO_WEBHOOK_VALIDATE_SIGNATURES", env)) {
-    failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES must be exactly true.");
-  }
-
-  if (config && options.manualPresentationRun) {
-    requireLiveWritebackReadyForManualPresentation(
-      failures,
-      "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      "ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED",
-      "manual presentation confirmation writeback",
-      env
-    );
-    requireLiveWritebackReadyForManualPresentation(
-      failures,
-      "DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN",
-      "ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED",
-      "manual presentation requested-date writeback",
-      env
-    );
-  } else if (config) {
-    requireFlagValue(
-      failures,
-      "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      config.confirmationWritebackDryRunRequired,
-      env
-    );
-  } else {
-    addMissingEnvFailure(failures, "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN", "confirmation writeback posture", env);
-  }
-
-  requireFlagValue(failures, "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN", true, env);
-  if (config && options.manualPresentationRun) {
-    requireLiveWritebackReadyForManualPresentation(
-      failures,
-      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      "ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED",
-      "manual presentation 10-day confirmation writeback",
-      env
-    );
-  } else if (config) {
-    requireFlagValue(
-      failures,
-      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      config.tenDayConfirmationWritebackDryRunRequired,
-      env
-    );
-  } else {
-    addMissingEnvFailure(
-      failures,
-      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      "10-day confirmation writeback posture",
-      env
-    );
-  }
-  for (const name of [
-    "DELIVERY_PREPAYMENT_HOLD_DRY_RUN",
-  ]) {
-    requireFlagValue(failures, name, true, env);
+  if (flagIsExplicitFalse("TWILIO_WEBHOOK_VALIDATE_SIGNATURES", env)) {
+    failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES is explicitly false.");
   }
 
   const appBaseUrl = envValue("DELIVERY_APP_BASE_URL", env);
@@ -1033,12 +936,18 @@ export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
         forcedContactEligibility: false,
         realCustomerSendGateRequired: true,
         realCustomerRecipientsUsed: true,
-        confirmationWritebackDryRunRequired: config.confirmationWritebackDryRunRequired,
-        confirmationWritebackLivePayloadsEnabled: !config.confirmationWritebackDryRunRequired,
-        tenDayConfirmationWritebackDryRunRequired:
-          config.tenDayConfirmationWritebackDryRunRequired,
-        tenDayConfirmationWritebackLivePayloadsEnabled:
-          !config.tenDayConfirmationWritebackDryRunRequired,
+        confirmationWritebackDryRun: dryRunOverrideEnabled(
+          "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"
+        ),
+        confirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled(
+          "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"
+        ),
+        tenDayConfirmationWritebackDryRun: dryRunOverrideEnabled(
+          "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"
+        ),
+        tenDayConfirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled(
+          "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"
+        ),
         requestedChannel: options.channel,
         importSummary: freshImport.importResult,
         successfullyRefreshedOrders: freshImport.importResult?.successfullyRefreshedOrders ?? [],

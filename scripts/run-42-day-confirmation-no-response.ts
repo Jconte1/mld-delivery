@@ -136,6 +136,10 @@ function flagIsTrue(name: string, env: NodeJS.ProcessEnv = process.env) {
   return envValue(name, env).toLowerCase() === "true";
 }
 
+function flagIsExplicitFalse(name: string, env: NodeJS.ProcessEnv = process.env) {
+  return envValue(name, env).toLowerCase() === "false";
+}
+
 function flagIsFalseOrUnset(name: string, env: NodeJS.ProcessEnv = process.env) {
   const value = envValue(name, env).toLowerCase();
   return !value || value === "false";
@@ -147,6 +151,10 @@ function requireEnv(failures: string[], name: string, purpose: string) {
 
 function requireFlagTrue(failures: string[], name: string) {
   if (!flagIsTrue(name)) failures.push(`${name} must be exactly true.`);
+}
+
+function requireNotExplicitFalse(failures: string[], name: string) {
+  if (flagIsExplicitFalse(name)) failures.push(`${name} is explicitly false.`);
 }
 
 function requireFlagFalseOrUnset(failures: string[], name: string) {
@@ -245,19 +253,11 @@ function preflight(options: NoResponseCliOptions) {
     }
 
     requireFlagTrue(failures, "USE_QUEUE_ERP");
-    requireFlagTrue(failures, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED");
-    requireFlagTrue(failures, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES");
+    requireNotExplicitFalse(failures, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED");
+    requireNotExplicitFalse(failures, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES");
     requireFlagFalseOrUnset(failures, "DELIVERY_CONTROLLED_RECIPIENT_MODE");
     requireFlagFalseOrUnset(failures, "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST");
     requireFlagFalseOrUnset(failures, "DEMO_NOTIFICATION_SEND_ENABLED");
-
-    for (const name of [
-      "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN",
-      "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
-      "DELIVERY_PREPAYMENT_HOLD_DRY_RUN",
-    ]) {
-      requireFlagTrue(failures, name);
-    }
 
     const appBaseUrl = envValue("DELIVERY_APP_BASE_URL");
     if (/localhost|127\.0\.0\.1|::1/i.test(appBaseUrl)) {

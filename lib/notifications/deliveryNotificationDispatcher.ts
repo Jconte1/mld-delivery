@@ -298,6 +298,10 @@ function flagIsTrue(env: NodeJS.ProcessEnv, name: string) {
   return env[name]?.trim().toLowerCase() === "true";
 }
 
+function flagIsExplicitFalse(env: NodeJS.ProcessEnv, name: string) {
+  return env[name]?.trim().toLowerCase() === "false";
+}
+
 function flagIsFalseOrUnset(env: NodeJS.ProcessEnv, name: string) {
   const value = env[name]?.trim().toLowerCase();
   return !value || value === "false";
@@ -397,7 +401,10 @@ export function evaluateDeliveryDispatcherPreflight(
   const preview = !send;
   const controlledRecipientMode = options.controlledRecipientSend === true;
   const realCustomerSendMode = send && !controlledRecipientMode;
-  const realCustomerSendEnabled = flagIsTrue(env, REAL_CUSTOMER_SEND_ENABLED_ENV);
+  const realCustomerSendExplicitlyDisabled = flagIsExplicitFalse(
+    env,
+    REAL_CUSTOMER_SEND_ENABLED_ENV
+  );
   const controlledRecipientEnvEnabled = flagIsTrue(env, CONTROLLED_RECIPIENT_MODE_ENV);
   const allowRealCustomerSendInNonProduction = flagIsTrue(
     env,
@@ -413,8 +420,8 @@ export function evaluateDeliveryDispatcherPreflight(
   const configuredConfirmPhrase = envValue(env, CONTROLLED_RECIPIENT_CONFIRM_PHRASE_ENV);
 
   if (realCustomerSendMode) {
-    if (!realCustomerSendEnabled) {
-      failures.push(`${REAL_CUSTOMER_SEND_ENABLED_ENV} must be exactly true for real customer sends.`);
+    if (realCustomerSendExplicitlyDisabled) {
+      failures.push(`${REAL_CUSTOMER_SEND_ENABLED_ENV} is explicitly false for real customer sends.`);
     }
     if (controlledRecipientEnvEnabled) {
       failures.push(`${CONTROLLED_RECIPIENT_MODE_ENV} must be false or unset for real customer sends.`);
@@ -431,8 +438,8 @@ export function evaluateDeliveryDispatcherPreflight(
     if (!flagIsFalseOrUnset(env, "DEMO_NOTIFICATION_SEND_ENABLED")) {
       failures.push("DEMO_NOTIFICATION_SEND_ENABLED must be false or unset for real customer sends.");
     }
-    if (!flagIsTrue(env, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES")) {
-      failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES must be exactly true for real customer sends.");
+    if (flagIsExplicitFalse(env, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES")) {
+      failures.push("TWILIO_WEBHOOK_VALIDATE_SIGNATURES is explicitly false for real customer sends.");
     }
     if (
       env.NODE_ENV !== "production" &&
@@ -445,7 +452,7 @@ export function evaluateDeliveryDispatcherPreflight(
   }
 
   if (controlledRecipientMode) {
-    if (realCustomerSendEnabled) {
+    if (flagIsTrue(env, REAL_CUSTOMER_SEND_ENABLED_ENV)) {
       failures.push(`${REAL_CUSTOMER_SEND_ENABLED_ENV} must be false or unset for controlled-recipient sends.`);
     }
     if (!controlledRecipientEnvEnabled) {
@@ -493,7 +500,7 @@ export function evaluateDeliveryDispatcherPreflight(
     mode,
     controlledRecipientMode,
     realCustomerSendMode,
-    realCustomerSendEnabled,
+    realCustomerSendEnabled: !realCustomerSendExplicitlyDisabled,
     allowRealCustomerSendInNonProduction,
     forceContactEligibilityForTest: flagIsTrue(env, FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV),
     testEmail,

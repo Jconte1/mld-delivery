@@ -146,7 +146,7 @@ export function shouldDryRunDeliveryRequestedDateWriteback() {
     ?.trim()
     .toLowerCase();
 
-  return dryRunOverride !== "false";
+  return dryRunOverride === "true";
 }
 
 export async function loadDeliveryRequestedDateWritebackLineNumbers(params: {

@@ -93,7 +93,7 @@ export function shouldDryRunDeliveryConfirmationAttributeWriteback() {
     ?.trim()
     .toLowerCase();
 
-  return dryRunOverride !== "false";
+  return dryRunOverride === "true";
 }
 
 export function buildDeliveryConfirmationAttributeWritebackPayload(

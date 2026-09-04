@@ -164,7 +164,7 @@ export function shouldDryRunDeliveryTenDayConfirmationWriteback() {
   const value = process.env[DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN_ENV]
     ?.trim()
     .toLowerCase();
-  return value !== "false";
+  return value === "true";
 }
 
 export function buildDeliveryTenDayConfirmationWritebackPayload(

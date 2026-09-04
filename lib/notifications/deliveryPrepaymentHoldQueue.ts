@@ -159,7 +159,7 @@ function normalizeDate(value: Date | string | null | undefined) {
 
 export function shouldDryRunDeliveryPrepaymentHold() {
   const value = process.env[DELIVERY_PREPAYMENT_HOLD_DRY_RUN_ENV]?.trim().toLowerCase();
-  return value !== "false";
+  return value === "true";
 }
 
 export function buildDeliveryPrepaymentHoldPayload(

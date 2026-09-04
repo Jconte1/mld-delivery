@@ -11,6 +11,7 @@
     "test:delivery-intervals:production-style": "tsx -r dotenv/config scripts/run-production-style-delivery-full-interval-test.ts",
     "dispatch:delivery-notifications": "tsx -r dotenv/config scripts/dispatch-delivery-notifications.ts",
     "run:delivery-interval": "tsx -r dotenv/config scripts/run-delivery-interval.ts",
+    "presentation:run-orders": "tsx -r dotenv/config scripts/run-presentation-orders.ts",
     "scheduled:delivery-interval": "tsx -r dotenv/config scripts/run-scheduled-delivery-interval.ts",
     "cleanup:delivery-notification-test-data": "tsx -r dotenv/config scripts/cleanup-delivery-notification-test-data.ts",
     "validate:delivery-scheduler-wrapper": "tsx scripts/validate-delivery-scheduler-wrapper.ts",

@@ -3,6 +3,7 @@ import {
   createDeliveryReminderEvents,
   type CreateDeliveryReminderEventsSummary,
 } from "@/lib/notifications/createDeliveryReminderEvents";
+import type { DeliveryOrderScope } from "@/lib/notifications/orderScope";
 
 const INTERVAL_DAYS = 90;
 
@@ -11,6 +12,7 @@ export type Create90DayDeliveryReminderEventsSummary = CreateDeliveryReminderEve
 export type Create90DayDeliveryReminderEventsOptions = {
   runDate?: Date | string;
   dryRun?: boolean;
+  orderScope?: DeliveryOrderScope | null;
 };
 
 export async function create90DayDeliveryReminderEvents(
@@ -21,5 +23,6 @@ export async function create90DayDeliveryReminderEvents(
     dryRun: options.dryRun,
     intervalType: NotificationIntervalType.DAY_90,
     intervalDays: INTERVAL_DAYS,
+    orderScope: options.orderScope,
   });
 }

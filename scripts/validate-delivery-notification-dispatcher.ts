@@ -665,12 +665,11 @@ async function main() {
   );
   assert(
     includes(productionIntervalRunner, "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN") &&
-      includes(productionIntervalRunner, "confirmationWritebackDryRunRequired: false") &&
+      includes(productionIntervalRunner, "dryRunOverrideEnabled") &&
       includes(productionIntervalRunner, "confirmationWritebackLivePayloadsEnabled") &&
-      includes(productionIntervalRunner, "DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN") &&
       includes(productionIntervalRunner, "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN") &&
-      includes(productionIntervalRunner, "DELIVERY_PREPAYMENT_HOLD_DRY_RUN"),
-    "production interval runner must require live 42 confirmation writeback posture while keeping unrelated writeback/hold dry-run flags protected",
+      includes(productionIntervalRunner, "tenDayConfirmationWritebackLivePayloadsEnabled"),
+    "production interval runner must default writeback payloads to production-live unless explicit dry-run env overrides are set",
     failures
   );
   assert(
@@ -863,8 +862,9 @@ async function main() {
   );
   assert(!broad.ok, "real customer send mode must not pass preflight in this phase", failures);
   assert(
-    broad.failures.includes("DELIVERY_REAL_CUSTOMER_SEND_ENABLED must be exactly true for real customer sends."),
-    "broad-send preflight must require the real customer send gate",
+    !broad.failures.includes("DELIVERY_REAL_CUSTOMER_SEND_ENABLED must be exactly true for real customer sends.") &&
+      !broad.failures.includes("DELIVERY_REAL_CUSTOMER_SEND_ENABLED is explicitly false for real customer sends."),
+    "broad-send preflight must not require DELIVERY_REAL_CUSTOMER_SEND_ENABLED when unset",
     failures
   );
   assert(
@@ -880,6 +880,19 @@ async function main() {
   assert(
     broad.failures.includes("USE_QUEUE_ERP must be exactly true for real customer sends."),
     "broad-send preflight must require queue-backed ERP for real sends",
+    failures
+  );
+
+  const broadExplicitlyDisabled = evaluateDeliveryDispatcherPreflight(
+    { send: true, controlledRecipientSend: false, testRunId: "validation" },
+    { ...safeEnv, DELIVERY_REAL_CUSTOMER_SEND_ENABLED: "false" }
+  );
+  assert(!broadExplicitlyDisabled.ok, "explicitly disabled real customer send must fail", failures);
+  assert(
+    broadExplicitlyDisabled.failures.includes(
+      "DELIVERY_REAL_CUSTOMER_SEND_ENABLED is explicitly false for real customer sends."
+    ),
+    "explicitly disabled real customer send must include override reason",
     failures
   );
 

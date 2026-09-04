@@ -19,18 +19,31 @@ function boolState(name: string) {
   return value === "true" ? "true" : value === "false" ? "false" : value ? "set_non_boolean" : "unset";
 }
 
+function boolStateWithDefault(name: string, defaultValue: boolean) {
+  const value = envValue(name).toLowerCase();
+  if (value === "true") return "true";
+  if (value === "false") return "false";
+  if (value) return "set_non_boolean";
+  return defaultValue ? "default_true" : "default_false";
+}
+
 function present(name: string) {
   return Boolean(envValue(name));
 }
 
 function liveWritebackReadiness(dryRunEnv: string, enabledEnv: string) {
-  const dryRun = boolState(dryRunEnv);
-  const enabled = boolState(enabledEnv);
+  const dryRun = boolStateWithDefault(dryRunEnv, false);
+  const enabled = boolStateWithDefault(enabledEnv, true);
   return {
     dryRun,
     enabled,
-    readyForPresentation: dryRun === "true" || (dryRun === "false" && enabled === "true"),
-    liveWriteback: dryRun === "false" && enabled === "true",
+    readyForPresentation:
+      dryRun === "true" ||
+      ((dryRun === "false" || dryRun === "default_false") &&
+        (enabled === "true" || enabled === "default_true")),
+    liveWriteback:
+      (dryRun === "false" || dryRun === "default_false") &&
+      (enabled === "true" || enabled === "default_true"),
   };
 }
 
@@ -56,32 +69,38 @@ export async function GET(request: Request) {
     todayInDenver: denver.date,
     actualDenverLocalTime: denver.time,
     customerSends: {
-      enabled: boolState("DELIVERY_REAL_CUSTOMER_SEND_ENABLED"),
+      enabled: boolStateWithDefault("DELIVERY_REAL_CUSTOMER_SEND_ENABLED", true),
       controlledRecipientMode: boolState("DELIVERY_CONTROLLED_RECIPIENT_MODE"),
       forcedContactEligibility: boolState("DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST"),
       demoSendEnabled: boolState("DEMO_NOTIFICATION_SEND_ENABLED"),
     },
     writebacks: {
-      confirmationDryRun: boolState("DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"),
-      confirmationEnabled: boolState("ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED"),
+      confirmationDryRun: boolStateWithDefault("DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN", false),
+      confirmationEnabled: boolStateWithDefault("ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED", true),
       confirmationPresentationReady: liveWritebackReadiness(
         "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN",
         "ACUMATICA_CONFIRMATION_WRITEBACK_ENABLED"
       ),
-      requestedDateDryRun: boolState("DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN"),
-      requestedDateEnabled: boolState("ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED"),
+      requestedDateDryRun: boolStateWithDefault("DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN", false),
+      requestedDateEnabled: boolStateWithDefault("ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED", true),
       requestedDatePresentationReady: liveWritebackReadiness(
         "DELIVERY_REQUESTED_DATE_WRITEBACK_DRY_RUN",
         "ACUMATICA_REQUESTED_DATE_WRITEBACK_ENABLED"
       ),
-      tenDayConfirmationDryRun: boolState("DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"),
-      tenDayConfirmationEnabled: boolState("ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED"),
+      tenDayConfirmationDryRun: boolStateWithDefault(
+        "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
+        false
+      ),
+      tenDayConfirmationEnabled: boolStateWithDefault(
+        "ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED",
+        true
+      ),
       tenDayConfirmationPresentationReady: liveWritebackReadiness(
         "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN",
         "ACUMATICA_TEN_DAY_CONFIRMATION_WRITE_ENABLED"
       ),
-      contactOptInDryRun: boolState("DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN"),
-      prepaymentHoldDryRun: boolState("DELIVERY_PREPAYMENT_HOLD_DRY_RUN"),
+      contactOptInDryRun: boolStateWithDefault("DELIVERY_CONTACT_OPT_IN_WRITEBACK_DRY_RUN", false),
+      prepaymentHoldDryRun: boolStateWithDefault("DELIVERY_PREPAYMENT_HOLD_DRY_RUN", false),
     },
     providers: {
       twilioAccountSidPresent: present("TWILIO_ACCOUNT_SID"),
@@ -92,7 +111,10 @@ export async function GET(request: Request) {
       graphClientPresent: present("MS_GRAPH_CLIENT_ID"),
       graphSecretPresent: present("MS_GRAPH_CLIENT_SECRET"),
       graphFromPresent: present("MS_GRAPH_FROM_EMAIL"),
-      twilioWebhookSignatureValidation: boolState("TWILIO_WEBHOOK_VALIDATE_SIGNATURES"),
+      twilioWebhookSignatureValidation: boolStateWithDefault(
+        "TWILIO_WEBHOOK_VALIDATE_SIGNATURES",
+        true
+      ),
     },
     queueErp: {
       useQueueErp: boolState("USE_QUEUE_ERP"),

@@ -432,7 +432,7 @@ async function validateCronRouteBehavior(
   assert(wrongTime.childResultSummary === null, "Wrong-time scheduler call should not run child process.");
 
   const previousGate = process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
-  delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "false";
   await (async () => {
     try {
       await scheduler.runScheduledDeliveryInterval({
@@ -444,7 +444,7 @@ async function validateCronRouteBehavior(
       const message = error instanceof Error ? error.message : String(error);
       assert(
         message.includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
-        "Live-send gate should block scheduled send before delegation."
+        "Explicit false live-send gate should block scheduled send before delegation."
       );
       return;
     } finally {
@@ -454,9 +454,10 @@ async function validateCronRouteBehavior(
         process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = previousGate;
       }
     }
-    throw new Error("Expected live-send gate to block scheduled send.");
+    throw new Error("Expected explicit false live-send gate to block scheduled send.");
   })();
 
+  process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "false";
   process.env.CRON_SECRET = "secret";
   const manualWrongTimeResponse = await route.GET(
     new Request("https://example.com/api/cron/delivery-interval/90?manualRun=true", {
@@ -501,9 +502,10 @@ async function validateCronRouteBehavior(
   );
   assert(
     String(manualEndpointBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
-    "Manual endpoint should still require scheduler live-send gate."
+    "Manual endpoint should respect explicit false scheduler live-send gate."
   );
 
+  process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = "false";
   process.env.CRON_SECRET = "secret";
   const retryFailedResponse = await manualRoute.GET(
     new Request("https://example.com/api/cron/delivery-interval/90/manual?retryFailed=true", {
@@ -526,8 +528,13 @@ async function validateCronRouteBehavior(
   );
   assert(
     String(retryFailedBody.error).includes(scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV),
-    "Manual retry endpoint should still require live-send gate before touching lock/delegate."
+    "Manual retry endpoint should respect explicit false live-send gate before touching lock/delegate."
   );
+  if (previousGate === undefined) {
+    delete process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV];
+  } else {
+    process.env[scheduler.DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV] = previousGate;
+  }
 }
 
 function validateStaticFiles(scheduler: SchedulerModule) {

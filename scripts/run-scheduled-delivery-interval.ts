@@ -578,9 +578,9 @@ export async function runScheduledDeliveryInterval(
 
   if (
     params.send === true &&
-    process.env[DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV]?.trim().toLowerCase() !== "true"
+    process.env[DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV]?.trim().toLowerCase() === "false"
   ) {
-    throw new Error(`${DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV} must be exactly true for scheduled sends.`);
+    throw new Error(`${DELIVERY_SCHEDULER_LIVE_SEND_ENABLED_ENV} is explicitly false for scheduled sends.`);
   }
 
   const lock = await (params.acquireLock ?? acquireSchedulerRunLock)({

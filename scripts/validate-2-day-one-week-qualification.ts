@@ -1,3 +1,5 @@
+export {};
+
 function assert(condition: unknown, message: string, failures: string[]) {
   if (!condition) failures.push(message);
 }

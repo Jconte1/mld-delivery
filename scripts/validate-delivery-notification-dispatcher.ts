@@ -802,10 +802,10 @@ async function main() {
     failures
   );
   assert(
-    includes(schedulerDoc, "Daily Run Order") &&
-      includes(schedulerDoc, "create:180-day-delivery-reminder-events") &&
-      includes(schedulerDoc, "dispatch:delivery-notifications"),
-    "scheduler readiness doc must define production run order",
+    includes(schedulerDoc, "Worker Run Order") &&
+      includes(schedulerDoc, "notifications:worker") &&
+      includes(schedulerDoc, "delivery_interval_scheduler_runs"),
+    "scheduler readiness doc must define delivery worker run order",
     failures
   );
   assert(

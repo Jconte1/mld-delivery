@@ -1,0 +1,14 @@
+.git
+.gitignore
+.next
+node_modules
+artifacts
+coverage
+dist
+logs
+*.log
+.env
+.env.*
+.azcodex
+.vercel
+*.xlsx

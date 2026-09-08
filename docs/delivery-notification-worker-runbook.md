@@ -6,7 +6,7 @@ This worker moves interval scheduling toward the Will Call pattern:
 delivery-owned worker -> Denver time check -> scheduler lock -> production interval runner
 ```
 
-It does not replace Vercel Cron until a later approved phase.
+It replaces the delivery Vercel Cron trigger layer. The customer-facing Vercel app still serves webpages and webhooks.
 
 ## Commands
 
@@ -86,10 +86,8 @@ Writeback and hold envs follow code defaults. Leave them unset for production de
 
 ## Rollout
 
-1. Keep Vercel Cron/manual routes working.
-2. Build and deploy the delivery worker disabled or in dry-run posture first.
-3. Run a scoped one-shot dry-run.
-4. Run one scoped live interval.
-5. Run one broad live interval.
-6. Disable Vercel Cron only after the worker proves stable.
-7. Remove old Vercel cron route and mld-queue shell-out scaffold in a later cleanup phase.
+1. Build and deploy the delivery worker disabled or in dry-run posture first.
+2. Run a scoped one-shot dry-run.
+3. Run one scoped live interval.
+4. Run one broad live interval.
+5. Leave only one production scheduler active: the delivery worker.

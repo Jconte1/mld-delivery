@@ -1,8 +1,8 @@
 # Delivery Notification Production Scheduler Readiness
 
-Status: scheduler wrapper foundation exists, but actual cron jobs are not created or enabled.
+Status: delivery-owned worker path exists. Vercel Cron delivery interval routes have been retired.
 
-Do not add Vercel cron routes or Azure Container Apps scheduled jobs until the live scheduler phase is explicitly approved. Current production-safe path is the scheduler wrapper command below, run manually or by a future external scheduler one interval at a time.
+The production scheduler path is the delivery notification worker. It follows the Will Call model: an always-running delivery-owned worker computes Denver local time, uses scheduler locks, and delegates to the existing interval runners.
 
 ## Scheduler Wrapper
 
@@ -26,15 +26,11 @@ Order-scoped canary runs can be passed through without bypassing eligibility:
 npm.cmd run scheduled:delivery-interval -- --interval 42 --send --order-type SO --order-number SO38056
 ```
 
-Live scheduled sends require:
-
-```text
-DELIVERY_SCHEDULER_LIVE_SEND_ENABLED=true
-```
+Live scheduled sends are enabled by default. Set `DELIVERY_SCHEDULER_LIVE_SEND_ENABLED=false` only when scheduled worker sends need to be temporarily stopped.
 
 The delegated `run:delivery-interval` command still enforces its normal production gates, fresh ERP import, fail-closed stale-data protection, opt-in/opt-out logic, dispatcher idempotency, and provider safeguards.
 
-The wrapper intentionally rejects interval 8 with `interval_8_not_schedule_ready`. The 8-day hold/payment enforcement flow needs separate approval before it is schedule-ready.
+The scheduler wrapper CLI intentionally rejects direct `--interval 8` use from the old scheduled command. The delivery notification worker supports interval 8 through its worker path, while still relying on the underlying production interval runner gates.
 
 ## Scheduler Locking
 
@@ -53,30 +49,23 @@ The migration for this foundation is:
 prisma/migrations/20260901150000_add_delivery_interval_scheduler_runs/migration.sql
 ```
 
-Apply it only during an approved migration/deploy step.
+This migration must be applied before worker live scheduling.
 
-## Daily Run Order
+## Worker Run Order
 
-1. Sync SharePoint stock.
-   - `npm.cmd run sync:sharepoint-stock`
-   - Run before interval qualification so stock/readiness uses the latest workbook.
-2. Create customer notification events, one interval at a time.
-   - `npm.cmd run create:180-day-delivery-reminder-events`
-   - `npm.cmd run create:90-day-delivery-reminder-events`
-   - `npm.cmd run create:60-day-delivery-reminder-events`
-   - `npm.cmd run create:42-day-delivery-confirmation-events`
-   - `npm.cmd run create:30-day-delivery-reminder-events`
-   - `npm.cmd run create:14-day-delivery-reminder-events`
-   - `npm.cmd run create:12-day-delivery-payment-request-events`
-   - `npm.cmd run create:10-day-delivery-payment-request-events`
-   - `npm.cmd run create:8-day-payment-enforcement-events`
-   - `npm.cmd run create:2-day-delivery-reminder-events`
-3. Dispatch scheduled events after creation succeeds.
-   - Preview: `npm.cmd run dispatch:delivery-notifications -- --preview --test-run-id <run_id> --limit 100`
-   - Live requires the real-customer gate and final approval.
-4. Keep the 42-day no-response follow-up job as a separate, later approval phase.
-   - Separate command only: `npm.cmd run run:42-day-confirmation-no-response`
-   - Do not schedule this with the initial 42-day confirmation request launch unless separately approved.
+The worker wakes on a timer and checks all configured interval times. When an interval is due, it calls the scheduler wrapper, which acquires the daily lock and delegates to the production interval logic.
+
+Run continuously:
+
+```powershell
+npm.cmd run notifications:worker
+```
+
+Run one scoped dry-run:
+
+```powershell
+npm.cmd run notifications:worker -- --once --interval 42 --order-type SO --order-number SO38056 --bypass-local-time-gate --dry-run
+```
 
 ## 42-Day Initial Confirmation Launch
 
@@ -90,24 +79,23 @@ This command creates 42-day confirmation request events and dispatches only the 
 
 ## Timing
 
-Use business-day execution in Mountain Time, highest interval first. These are proposed staggered run times for the future scheduler:
+Use business-day execution in Mountain Time, highest interval first:
 
-| Flow | Denver local time | Candidate UTC cron expression |
-| --- | ---: | --- |
-| 180-day | 15:00 | `0 21,22 * * 1-5` |
-| 90-day | 15:10 | `10 21,22 * * 1-5` |
-| 60-day | 15:20 | `20 21,22 * * 1-5` |
-| 42-day initial confirmation | 15:30 | `30 21,22 * * 1-5` |
-| 30-day | 15:40 | `40 21,22 * * 1-5` |
-| 14-day | 15:50 | `50 21,22 * * 1-5` |
-| 12-day | 16:00 | `0 22,23 * * 1-5` |
-| 10-day | 16:10 | `10 22,23 * * 1-5` |
-| 2-day | 16:30 | `30 22,23 * * 1-5` |
-| 41/40/39 no-response follow-up | 15:35 | `35 21,22 * * 1-5` |
+| Flow | Denver local time |
+| --- | ---: |
+| 180-day | 15:00 |
+| 90-day | 15:10 |
+| 60-day | 15:20 |
+| 42-day initial confirmation | 15:30 |
+| 41/40/39 no-response follow-up | 15:35 |
+| 30-day | 15:40 |
+| 14-day | 15:50 |
+| 12-day | 16:00 |
+| 10-day | 16:10 |
+| 8-day payment enforcement | 16:20 |
+| 2-day | 16:30 |
 
-Vercel Cron Jobs and Azure Container Apps scheduled jobs evaluate cron expressions in UTC. A fixed single UTC hour is not acceptable for Denver-local scheduling because daylight saving time shifts Mountain Time between UTC-6 and UTC-7. The future scheduler should run at both candidate UTC hours and let `run-scheduled-delivery-interval.ts` execute only when the Denver local time exactly matches the interval's expected HH:mm.
-
-Do not schedule interval 8 yet.
+The worker computes time in `America/Denver`; it does not rely on server local time or UTC cron conversion.
 
 ## Fresh ERP Import
 
@@ -129,9 +117,9 @@ Notification creation must keep the existing weekend send/date guards. If a run 
 
 ## Manual Rerun
 
-Use the same command with `--run-date=YYYY-MM-DD` only after verifying:
+Use the worker one-shot command with retry/rerun flags only after verifying:
 
 - queue-backed ERP is reachable,
 - no duplicate scheduled event exists for the same dedupe key,
 - prior attempts for the same event are not in flight,
-- writeback dry-run posture still matches the launch phase.
+- writeback posture still matches the launch phase.

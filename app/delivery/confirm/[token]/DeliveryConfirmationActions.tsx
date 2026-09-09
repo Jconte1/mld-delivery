@@ -77,7 +77,7 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
 
     if (
       !window.confirm(
-        "Are you sure you want to confirm this delivery date? Once confirmed, you will need to call Mountain Land Design to make changes."
+        "Are you sure you want to confirm this delivery date? Once confirmed, you will need to call MLD to make changes."
       )
     ) {
       event.preventDefault();
@@ -124,7 +124,7 @@ export function DeliveryConfirmationActions(props: DeliveryConfirmationActionsPr
 
     if (
       !window.confirm(
-        "Are you sure you want to request this new delivery date? After submitting, you will need to call Mountain Land Design to make additional changes."
+        "Are you sure you want to request this new delivery date? After submitting, you will need to call MLD to make additional changes."
       )
     ) {
       event.preventDefault();

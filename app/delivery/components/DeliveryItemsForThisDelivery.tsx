@@ -103,7 +103,7 @@ export function DeliveryItemsForThisDelivery({
           </p>
           {availabilityLastUpdatedLabel ? (
             <p className="mt-2 text-xs text-zinc-500">
-              Product availability and ETA information last updated from ERP import:{" "}
+              Product availability and ETA information last updated:{" "}
               {availabilityLastUpdatedLabel}
             </p>
           ) : null}

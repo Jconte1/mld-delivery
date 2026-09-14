@@ -93,6 +93,7 @@ const FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV =
   "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST";
 const CONTROLLED_RECIPIENT_CONFIRM_PHRASE_ENV =
   "DELIVERY_CONTROLLED_RECIPIENT_CONFIRM_PHRASE";
+const TEMP_ALLOWED_NOTIFICATION_LAST_NAME = "conte";
 
 export type DispatchDeliveryNotificationsOptions = {
   preview?: boolean;
@@ -1131,6 +1132,10 @@ function nonScheduledEventReason(event: DispatchNotificationEvent | null | undef
   return `event_not_scheduled_${String(event.status).toLowerCase()}`;
 }
 
+function contactPassesTemporarySendGate(event: DispatchNotificationEvent) {
+  return event.contact.lastName?.trim().toLowerCase() === TEMP_ALLOWED_NOTIFICATION_LAST_NAME;
+}
+
 async function createAttempt(params: {
   client: typeof prisma;
   event: DispatchNotificationEvent;
@@ -1143,6 +1148,10 @@ async function createAttempt(params: {
   testRunId: string | null;
   fallbackFromAttemptId?: string | null;
 }) {
+  if (!contactPassesTemporarySendGate(params.event)) {
+    throw new Error("temporary_contact_last_name_gate_not_conte");
+  }
+
   return params.client.notificationAttempt.create({
     data: {
       notificationEventId: params.event.id,

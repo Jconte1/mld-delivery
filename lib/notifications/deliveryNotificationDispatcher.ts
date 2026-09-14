@@ -895,8 +895,6 @@ async function renderForChannel(params: {
     if (event.actionType !== "DELIVERY_CONFIRMATION_REQUEST") {
       throw new Error("unsupported_event_action_for_interval");
     }
-    const payment = await paymentEvaluationForEvent(event);
-    const includePayment = paymentReminderApplies(payment);
     if (channel === "SMS") {
       return {
         subject: null,
@@ -917,8 +915,8 @@ async function renderForChannel(params: {
       customerDescription: event.order.customerDescription,
       locationDescription: event.order.locationDescription,
       link,
-      paymentReminderApplies: includePayment,
-      amountDueNowRounded: payment.amountDueNowRounded,
+      paymentReminderApplies: false,
+      amountDueNowRounded: null,
       salespersonContact,
     });
     return {

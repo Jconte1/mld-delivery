@@ -127,6 +127,8 @@ export type DeliveryGroupPaymentEvaluation = {
   currentDeliveryGroupTaxAmount: MoneyString | null;
   currentDeliveryGroupValue: MoneyString | null;
   completedValueBeforeCurrentDelivery: MoneyString | null;
+  depositCoverageBeforeCurrentDelivery?: MoneyString | null;
+  depositCoversCurrentDelivery?: boolean | null;
   remainingUndeliveredValueAfterCurrentDelivery: MoneyString | null;
   creditAfterCurrentDelivery: MoneyString | null;
   requiredDownOnRemaining: MoneyString | null;
@@ -726,6 +728,8 @@ export function evaluateDeliveryGroupPayment(
   let creditAfterCurrentDelivery: ScaledDecimal | null = null;
   let requiredDownOnRemaining: ScaledDecimal | null = null;
   let amountDueNow: ScaledDecimal | null = null;
+  let depositCoverageBeforeCurrentDelivery: ScaledDecimal | null = null;
+  let depositCoversCurrentDelivery: boolean | null = null;
 
   if (
     paymentApplicabilityStatus === "applicable" &&
@@ -755,22 +759,32 @@ export function evaluateDeliveryGroupPayment(
     remainingUndeliveredValueAfterCurrentDelivery = clampAtZero(
       orderTotal - completedValueBeforeCurrentDelivery - currentDeliveryGroupValue
     );
+    depositCoverageBeforeCurrentDelivery =
+      paidToDate - completedValueBeforeCurrentDelivery;
     creditAfterCurrentDelivery =
       paidToDate - completedValueBeforeCurrentDelivery - currentDeliveryGroupValue;
-    requiredDownOnRemaining =
-      (remainingUndeliveredValueAfterCurrentDelivery * DOWN_PAYMENT_RATE_NUMERATOR +
-        DOWN_PAYMENT_RATE_DENOMINATOR / TWO) /
-      DOWN_PAYMENT_RATE_DENOMINATOR;
-    amountDueNow = requiredDownOnRemaining - creditAfterCurrentDelivery;
-    amountDueNow = clampAtZero(amountDueNow);
-    if (amountDueNow > unpaidBalance) amountDueNow = unpaidBalance;
+    depositCoversCurrentDelivery = creditAfterCurrentDelivery >= ZERO;
 
-    if (amountDueNow > MEANINGFUL_BALANCE_THRESHOLD) {
-      paymentStatus = "balance_due";
-      urgencyStatus = "payment_required";
-    } else {
+    if (depositCoversCurrentDelivery) {
+      amountDueNow = ZERO;
       paymentStatus = "no_balance_due";
       urgencyStatus = "reminder_only";
+    } else {
+      requiredDownOnRemaining =
+        (remainingUndeliveredValueAfterCurrentDelivery * DOWN_PAYMENT_RATE_NUMERATOR +
+          DOWN_PAYMENT_RATE_DENOMINATOR / TWO) /
+        DOWN_PAYMENT_RATE_DENOMINATOR;
+      amountDueNow = requiredDownOnRemaining - creditAfterCurrentDelivery;
+      amountDueNow = clampAtZero(amountDueNow);
+      if (amountDueNow > unpaidBalance) amountDueNow = unpaidBalance;
+
+      if (amountDueNow > MEANINGFUL_BALANCE_THRESHOLD) {
+        paymentStatus = "balance_due";
+        urgencyStatus = "payment_required";
+      } else {
+        paymentStatus = "no_balance_due";
+        urgencyStatus = "reminder_only";
+      }
     }
   }
 
@@ -789,6 +803,8 @@ export function evaluateDeliveryGroupPayment(
     currentDeliveryGroupTaxAmount: moneyOrNull(currentDeliveryGroupTaxAmount),
     currentDeliveryGroupValue: moneyOrNull(currentDeliveryGroupValue),
     completedValueBeforeCurrentDelivery: moneyOrNull(completedValueBeforeCurrentDelivery),
+    depositCoverageBeforeCurrentDelivery: moneyOrNull(depositCoverageBeforeCurrentDelivery),
+    depositCoversCurrentDelivery,
     remainingUndeliveredValueAfterCurrentDelivery: moneyOrNull(
       remainingUndeliveredValueAfterCurrentDelivery
     ),

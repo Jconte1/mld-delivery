@@ -93,9 +93,11 @@ function payment(
     currentDeliveryGroupTaxAmount: "0.00",
     currentDeliveryGroupValue: "400.00",
     completedValueBeforeCurrentDelivery: "0.00",
+    depositCoverageBeforeCurrentDelivery: "1000.00",
+    depositCoversCurrentDelivery: true,
     remainingUndeliveredValueAfterCurrentDelivery: "600.00",
     creditAfterCurrentDelivery: "600.00",
-    requiredDownOnRemaining: "270.00",
+    requiredDownOnRemaining: null,
     amountDueNow: "0.000000",
     amountDueNowRounded: "0.00",
     payableStockValue: "400.00",
@@ -340,6 +342,7 @@ async function main() {
   const failures: string[] = [];
 
   const stockVsBackorder = evaluate({
+    unpaidBalance: "800.00",
     lines: [
       line({ id: "ready_400", lineNbr: 1, discountedUnitPrice: "400.00", readinessStatus: "ready" }),
       line({
@@ -360,8 +363,8 @@ async function main() {
     failures
   );
   assert(
-    stockVsBackorder.amountDueNowRounded === "170.00",
-    "1. Amount due is calculated from payable basis",
+    stockVsBackorder.amountDueNowRounded === "470.00",
+    "1. Amount due is calculated from payable basis after deposit coverage is exhausted",
     failures
   );
   assert(
@@ -600,11 +603,95 @@ async function main() {
     failures
   );
 
-  const thresholdDue = evaluate({ unpaidBalance: "332.00" });
+  const thresholdDue = evaluate({
+    unpaidBalance: "3.00",
+    lines: [line({ id: "threshold_due", lineNbr: 1, discountedUnitPrice: "998.00" })],
+  });
   assert(
-    thresholdDue.amountDueNowRounded === "2.00" &&
+    thresholdDue.amountDueNowRounded === "1.90" &&
       thresholdDue.paymentStatus === "no_balance_due",
     "20. amountDueNow <= threshold returns no_balance_due",
+    failures
+  );
+
+  const depositCoversCurrentDelivery = evaluate({
+    orderTotal: "50000.00",
+    unpaidBalance: "25000.00",
+    lines: [
+      line({ id: "covered_delivery", lineNbr: 1, discountedUnitPrice: "22000.00" }),
+      line({
+        id: "remaining_open",
+        lineNbr: 2,
+        requestedOn: "2026-09-01",
+        discountedUnitPrice: "28000.00",
+      }),
+    ],
+    activeOrderLineIds: ["covered_delivery"],
+  });
+  assert(
+    depositCoversCurrentDelivery.depositCoverageBeforeCurrentDelivery === "25000.00" &&
+      depositCoversCurrentDelivery.depositCoversCurrentDelivery === true &&
+      depositCoversCurrentDelivery.paymentStatus === "no_balance_due" &&
+      depositCoversCurrentDelivery.amountDueNowRounded === "0.00" &&
+      depositCoversCurrentDelivery.requiredDownOnRemaining === null,
+    "21. Deposit covering current delivery bypasses 45% remaining-open enforcement",
+    failures
+  );
+
+  const depositShortCurrentDelivery = evaluate({
+    orderTotal: "50000.00",
+    unpaidBalance: "25000.00",
+    lines: [
+      line({ id: "short_delivery", lineNbr: 1, discountedUnitPrice: "26000.00" }),
+      line({
+        id: "short_remaining_open",
+        lineNbr: 2,
+        requestedOn: "2026-09-01",
+        discountedUnitPrice: "24000.00",
+      }),
+    ],
+    activeOrderLineIds: ["short_delivery"],
+  });
+  assert(
+    depositShortCurrentDelivery.depositCoverageBeforeCurrentDelivery === "25000.00" &&
+      depositShortCurrentDelivery.depositCoversCurrentDelivery === false &&
+      depositShortCurrentDelivery.requiredDownOnRemaining === "10800.00" &&
+      depositShortCurrentDelivery.amountDueNowRounded === "11800.00" &&
+      depositShortCurrentDelivery.paymentStatus === "balance_due",
+    "22. Current delivery exceeding remaining deposit falls back to 45% remaining-open enforcement",
+    failures
+  );
+
+  const completedValueConsumesDeposit = evaluate({
+    orderTotal: "50000.00",
+    unpaidBalance: "25000.00",
+    lines: [
+      line({
+        id: "completed_delivery",
+        lineNbr: 1,
+        requestedOn: "2026-07-01",
+        discountedUnitPrice: "10000.00",
+        orderQty: "1",
+        openQty: "0",
+        activeAllocatedQty: "0",
+      }),
+      line({ id: "current_after_completed", lineNbr: 2, discountedUnitPrice: "22000.00" }),
+      line({
+        id: "remaining_after_completed",
+        lineNbr: 3,
+        requestedOn: "2026-09-01",
+        discountedUnitPrice: "18000.00",
+      }),
+    ],
+    activeOrderLineIds: ["current_after_completed"],
+  });
+  assert(
+    completedValueConsumesDeposit.depositCoverageBeforeCurrentDelivery === "15000.00" &&
+      completedValueConsumesDeposit.depositCoversCurrentDelivery === false &&
+      completedValueConsumesDeposit.requiredDownOnRemaining === "8100.00" &&
+      completedValueConsumesDeposit.amountDueNowRounded === "15100.00" &&
+      completedValueConsumesDeposit.paymentStatus === "balance_due",
+    "23. Completed/shipped value consumes deposit before current delivery coverage is checked",
     failures
   );
 
@@ -621,7 +708,7 @@ async function main() {
   );
   assert(
     !zeroMarkup.includes("$0.00") && !zeroMarkup.includes("-$1.00") && !zeroMarkup.includes("$2.00"),
-    "21. Zero, negative, null, and threshold balances are not rendered in customer payment rows",
+    "24. Zero, negative, null, and threshold balances are not rendered in customer payment rows",
     failures
   );
 

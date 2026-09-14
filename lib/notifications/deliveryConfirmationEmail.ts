@@ -1,6 +1,5 @@
 import {
   cleanNotificationText,
-  formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
   normalizeCustomerDisplayText,
@@ -12,23 +11,6 @@ import {
 
 const NO_REPLY_NOTICE =
   "This is an automated no-reply email. Please do not reply directly to this message.";
-export const DELIVERY_CONFIRMATION_PAYMENT_REMINDER_TEXT =
-  "Our records show a balance will be due before delivery.";
-
-function formatBalanceOwedAmount(value: string | null | undefined) {
-  if (!value) return null;
-  const amount = Number(value);
-  if (!Number.isFinite(amount) || amount <= 2) return null;
-
-  return formatCurrencyAmount(amount);
-}
-
-export function render42DayPaymentReminderText(amountDueNowRounded?: string | null) {
-  const amount = formatBalanceOwedAmount(amountDueNowRounded);
-  if (!amount) return DELIVERY_CONFIRMATION_PAYMENT_REMINDER_TEXT;
-
-  return `Balance owed before delivery: ${amount}`;
-}
 
 function escapeHtml(value: string) {
   return value
@@ -126,10 +108,6 @@ export function render42DayEmailConfirmationBody(params: {
     `Delivery address: ${jobAddress}`,
     `Order: ${params.orderNumber}`,
     "",
-    params.paymentReminderApplies
-      ? render42DayPaymentReminderText(params.amountDueNowRounded)
-      : null,
-    params.paymentReminderApplies ? "" : null,
     "To confirm/change delivery and view order details, click here:",
     link,
     "",
@@ -163,11 +141,7 @@ export function render42DayEmailConfirmationHtmlBody(params: {
   const link = cleanNotificationText(params.link) ?? "";
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
-  const paymentText = params.paymentReminderApplies
-    ? render42DayPaymentReminderText(params.amountDueNowRounded)
-    : null;
   const paragraph = (value: string) => `<p>${escapeHtml(value)}</p>`;
-  const paymentAmount = formatBalanceOwedAmount(params.amountDueNowRounded);
   const salespersonFooter = renderSalespersonEmailFooterText(params.salespersonContact);
 
   return [
@@ -179,11 +153,6 @@ export function render42DayEmailConfirmationHtmlBody(params: {
     })} is scheduled for ${escapeHtml(deliveryDate)}.</p>`,
     `<p>Delivery address: <strong>${escapeHtml(jobAddress)}</strong></p>`,
     `<p>Order: <strong>${escapeHtml(params.orderNumber)}</strong></p>`,
-    paymentText && paymentAmount
-      ? `<p>Balance owed before delivery: <strong>${escapeHtml(paymentAmount)}</strong></p>`
-      : paymentText
-        ? paragraph(paymentText)
-        : null,
     paragraph("To confirm/change delivery and view order details, click here:"),
     `<p><a href="${escapeHtml(
       link

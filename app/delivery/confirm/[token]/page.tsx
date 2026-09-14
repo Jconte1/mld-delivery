@@ -2,7 +2,6 @@ import { redirect } from "next/navigation";
 import type { Metadata } from "next";
 
 import { DeliveryConfirmationStatus } from "@/lib/generated/prisma/client";
-import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { DELIVERY_MANUAL_REVIEW_REASONS } from "@/lib/notifications/deliveryConfirmationManualReview";
 import {
@@ -32,7 +31,6 @@ import {
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
 import { DeliveryItemsForThisDelivery } from "../../components/DeliveryItemsForThisDelivery";
-import { DeliveryPaymentSummary } from "../../components/DeliveryPaymentSummary";
 import { SalespersonContactBlock } from "../../components/SalespersonContactBlock";
 import { DeliveryConfirmationActions } from "./DeliveryConfirmationActions";
 
@@ -367,7 +365,6 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
   });
   const jobAddress = formatJobAddress(order.address ?? {}) || "the job site";
   const readiness = await getDeliveryGroupReadiness(group.id);
-  const payment = await getDeliveryGroupPaymentEvaluation(group.id);
   const statusLabel = titleCaseStatus(confirmation.status);
   const scheduledDateLabel = formatCustomerFriendlyDate(group.deliveryDate);
   const requestedNewDateLabel = confirmation.requestedNewDate
@@ -418,7 +415,7 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
           ) : null}
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        <div className="grid gap-6">
           <section className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
             <h2 className="text-lg font-semibold">Delivery Details</h2>
             <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
@@ -474,7 +471,6 @@ export default async function DeliveryConfirmationPage({ params, searchParams }:
             />
           </section>
 
-          <DeliveryPaymentSummary payment={payment} />
         </div>
 
         <DeliveryItemsForThisDelivery

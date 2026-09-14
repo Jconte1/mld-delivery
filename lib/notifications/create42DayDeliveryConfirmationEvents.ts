@@ -1,8 +1,4 @@
 import {
-  getDeliveryGroupPaymentEvaluation,
-  type DeliveryGroupPaymentEvaluation,
-} from "@/lib/delivery-payment/deliveryGroupPayment";
-import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
   NotificationEventStatus,
@@ -285,62 +281,6 @@ type DeliveryConfirmation42DayPaymentReport = Pick<
   | "paymentCalculationWarnings"
 >;
 
-function amountIsMeaningful(value: string | null | undefined) {
-  if (!value) return false;
-  const parsed = Number(value);
-  return Number.isFinite(parsed) && parsed > 2;
-}
-
-function paymentReminderApplies(payment: DeliveryConfirmation42DayPaymentReport) {
-  return (
-    payment.paymentStatus === "balance_due" &&
-    amountIsMeaningful(payment.amountDueNowRounded) &&
-    payment.paymentCalculationWarnings.length === 0
-  );
-}
-
-function paymentReportFromEvaluation(
-  payment: DeliveryGroupPaymentEvaluation
-): DeliveryConfirmation42DayPaymentReport {
-  return {
-    paymentTerms: payment.paymentTerms,
-    unpaidBalance: payment.unpaidBalance,
-    orderTotal: payment.orderTotal,
-    paidToDate: payment.paidToDate,
-    paymentApplicabilityStatus: payment.paymentApplicabilityStatus,
-    paymentStatus: payment.paymentStatus,
-    amountDueNow: payment.amountDueNow,
-    amountDueNowRounded: payment.amountDueNowRounded,
-    currentDeliveryGroupValue: payment.currentDeliveryGroupValue,
-    currentDeliveryGroupMerchandiseValue: payment.currentDeliveryGroupMerchandiseValue,
-    currentDeliveryGroupTaxAmount: payment.currentDeliveryGroupTaxAmount,
-    remainingUndeliveredValueAfterCurrentDelivery:
-      payment.remainingUndeliveredValueAfterCurrentDelivery,
-    requiredDownOnRemaining: payment.requiredDownOnRemaining,
-    paymentCalculationWarnings: payment.calculationWarnings,
-  };
-}
-
-function paymentReportFromError(error: unknown): DeliveryConfirmation42DayPaymentReport {
-  const message = error instanceof Error ? error.message : String(error);
-  return {
-    paymentTerms: null,
-    unpaidBalance: null,
-    orderTotal: null,
-    paidToDate: null,
-    paymentApplicabilityStatus: "applicable",
-    paymentStatus: "calculation_blocked",
-    amountDueNow: null,
-    amountDueNowRounded: null,
-    currentDeliveryGroupValue: null,
-    currentDeliveryGroupMerchandiseValue: null,
-    currentDeliveryGroupTaxAmount: null,
-    remainingUndeliveredValueAfterCurrentDelivery: null,
-    requiredDownOnRemaining: null,
-    paymentCalculationWarnings: [`Payment evaluation failed: ${message}`],
-  };
-}
-
 function emptyPaymentReport(): DeliveryConfirmation42DayPaymentReport {
   return {
     paymentTerms: null,
@@ -358,14 +298,6 @@ function emptyPaymentReport(): DeliveryConfirmation42DayPaymentReport {
     requiredDownOnRemaining: null,
     paymentCalculationWarnings: [],
   };
-}
-
-async function evaluate42DayDeliveryGroupPayment(deliveryGroupId: string) {
-  try {
-    return paymentReportFromEvaluation(await getDeliveryGroupPaymentEvaluation(deliveryGroupId));
-  } catch (error) {
-    return paymentReportFromError(error);
-  }
 }
 
 const notificationEventSelect = {
@@ -837,8 +769,8 @@ export async function create42DayDeliveryConfirmationEvents(
     }
 
     summary.eligibleDeliveryGroups += 1;
-    const paymentReport = await evaluate42DayDeliveryGroupPayment(deliveryGroup.id);
-    const showPaymentReminder = paymentReminderApplies(paymentReport);
+    const paymentReport = emptyPaymentReport();
+    const showPaymentReminder = false;
     const alreadyConfirmedForDeliveryDate = await isDeliveryGroupDateConfirmed({
       deliveryGroupId: deliveryGroup.id,
       deliveryDate: deliveryGroup.deliveryDate,
@@ -1057,8 +989,8 @@ export async function create42DayDeliveryConfirmationEvents(
             jobAddress,
             deliveryDate: deliveryGroup.deliveryDate,
             link,
-            paymentReminderApplies: showPaymentReminder,
-            amountDueNowRounded: paymentReport.amountDueNowRounded,
+            paymentReminderApplies: false,
+            amountDueNowRounded: null,
             salespersonContact,
           })
         : null;

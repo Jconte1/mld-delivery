@@ -194,6 +194,8 @@ function validateCustomerMessages(failures: string[]) {
       emailBody: render42DayEmailConfirmationMessage({
         ...common,
         link: confirmLink,
+        paymentReminderApplies: true,
+        amountDueNowRounded: "125.00",
       }).body,
       sms: render42DaySmsConfirmationMessage({
         ...common,
@@ -297,6 +299,24 @@ function validateCustomerMessages(failures: string[]) {
         message.sms,
         "MLD: Order SO-CUST:",
         `${message.label}-day customer SMS includes order number`,
+        failures
+      );
+    }
+  }
+
+  const fortyTwo = proactiveMessages.find((message) => message.label === "42");
+  if (fortyTwo) {
+    for (const unexpected of ["Payment", "Balance owed", "$125.00", "balance will be due"]) {
+      assertNotIncludes(
+        fortyTwo.emailBody,
+        unexpected,
+        `42-day customer email suppresses payment text: ${unexpected}`,
+        failures
+      );
+      assertNotIncludes(
+        fortyTwo.sms,
+        unexpected,
+        `42-day customer SMS suppresses payment text: ${unexpected}`,
         failures
       );
     }

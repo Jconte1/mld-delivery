@@ -954,9 +954,10 @@ async function main() {
   assert(
     unpaidZero.paymentStatus === "no_balance_due" &&
       unpaidNegative.paymentStatus === "no_balance_due" &&
-      threshold.amountDueNowRounded === "2.00" &&
+      threshold.amountDueNowRounded === "0.00" &&
+      threshold.depositCoversCurrentDelivery === true &&
       threshold.paymentStatus === "no_balance_due",
-    "13/14/15. Zero, negative, and <= $2 due all return no_balance_due",
+    "13/14/15. Zero, negative, and deposit-covered threshold due all return no_balance_due",
     failures
   );
 

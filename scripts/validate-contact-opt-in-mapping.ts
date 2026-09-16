@@ -58,9 +58,22 @@ function contact(params: {
 }
 
 async function main() {
-  const trueValues = [true, "true", "1", 1, "yes", "y", "on", " TRUE "];
-  const falseValues = [false, "false", "0", 0, "no", "n", "off", " FALSE "];
-  const nullValues = [null, undefined, "", " ", "maybe", 2, {}, []];
+  const trueValues = [true, "true", "1", 1, "yes", "y", "on", " TRUE ", "Opt-in"];
+  const falseValues = [
+    false,
+    "false",
+    "0",
+    0,
+    "no",
+    "n",
+    "off",
+    " FALSE ",
+    "Opt-out",
+    "",
+    " ",
+    "1.00000000",
+  ];
+  const nullValues = [null, undefined, "maybe", 2, {}, []];
 
   for (const value of trueValues) {
     assertEqual(parseAcumaticaBoolean(value), true, `parse true value ${String(value)}`);
@@ -107,6 +120,11 @@ async function main() {
     "AttributeCONTEXT false maps smsOptIn false"
   );
   assertEqual(
+    mapAcumaticaContactOptIns(contact({ sms: "1.00000000" })).smsOptIn,
+    false,
+    "AttributeCONTEXT selector blank numeric token maps smsOptIn false"
+  );
+  assertEqual(
     mapAcumaticaContactOptIns(contact({ sms: null })).smsOptIn,
     false,
     "AttributeCONTEXT null maps smsOptIn false"
@@ -128,9 +146,19 @@ async function main() {
     "AttributeCONPHONE true maps phoneCallOptIn true"
   );
   assertEqual(
+    mapAcumaticaContactOptIns(contact({ phone: "Opt-in" })).phoneCallOptIn,
+    true,
+    "AttributeCONPHONE Opt-in maps phoneCallOptIn true"
+  );
+  assertEqual(
     mapAcumaticaContactOptIns(contact({ phone: false })).phoneCallOptIn,
     false,
     "AttributeCONPHONE false maps phoneCallOptIn false"
+  );
+  assertEqual(
+    mapAcumaticaContactOptIns(contact({ phone: "Opt-out" })).phoneCallOptIn,
+    false,
+    "AttributeCONPHONE Opt-out maps phoneCallOptIn false"
   );
   assertEqual(
     mapAcumaticaContactOptIns(contact({ phone: null })).phoneCallOptIn,
@@ -154,9 +182,19 @@ async function main() {
     "AttributeCONEMAIL true maps emailOptIn true"
   );
   assertEqual(
+    mapAcumaticaContactOptIns(contact({ email: "Opt-in" })).emailOptIn,
+    true,
+    "AttributeCONEMAIL Opt-in maps emailOptIn true"
+  );
+  assertEqual(
     mapAcumaticaContactOptIns(contact({ email: false })).emailOptIn,
     false,
     "AttributeCONEMAIL false maps emailOptIn false"
+  );
+  assertEqual(
+    mapAcumaticaContactOptIns(contact({ email: "Opt-out" })).emailOptIn,
+    false,
+    "AttributeCONEMAIL Opt-out maps emailOptIn false"
   );
   assertEqual(
     mapAcumaticaContactOptIns(contact({ email: null })).emailOptIn,

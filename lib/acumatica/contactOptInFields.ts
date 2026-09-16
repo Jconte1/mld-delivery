@@ -21,6 +21,9 @@ export const CONTACT_EMAIL_OPT_IN_FIELD_PATH = [
 
 const TRUE_VALUES = new Set(["1", "true", "t", "yes", "y", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "f", "no", "n", "off"]);
+const SELECTOR_TRUE_VALUES = new Set(["opt-in", "opt in", "optin"]);
+const SELECTOR_FALSE_VALUES = new Set(["opt-out", "opt out", "optout"]);
+const SELECTOR_BLANK_VALUES = new Set(["1.00000000"]);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value && typeof value === "object" && !Array.isArray(value));
@@ -55,7 +58,10 @@ export function parseAcumaticaBoolean(value: unknown): boolean | null {
   if (typeof unwrapped !== "string") return null;
 
   const normalized = unwrapped.trim().toLowerCase();
-  if (!normalized) return null;
+  if (!normalized) return false;
+  if (SELECTOR_TRUE_VALUES.has(normalized)) return true;
+  if (SELECTOR_FALSE_VALUES.has(normalized)) return false;
+  if (SELECTOR_BLANK_VALUES.has(normalized)) return false;
   if (TRUE_VALUES.has(normalized)) return true;
   if (FALSE_VALUES.has(normalized)) return false;
   return null;

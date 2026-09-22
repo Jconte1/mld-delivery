@@ -133,10 +133,17 @@ function main() {
   );
   assertIncludes(
     sms,
-    "Balance may be due before delivery. Please review details here: https://mld-delivery.example.test/delivery/details/dd_10_test.",
-    "SMS includes short balance and details-link wording",
+    "Balance owed prior to scheduling Delivery: $1,250.00",
+    "SMS includes the exact balance",
     failures
   );
+  assertIncludes(
+    sms,
+    "Your balance must be handled by Wednesday, July 22, 2026.",
+    "SMS includes the payment deadline",
+    failures
+  );
+  assertIncludes(sms, "\n\n", "10-day SMS uses paragraph spacing", failures);
 
   for (const forbidden of [
     "ACTION REQUIRED",

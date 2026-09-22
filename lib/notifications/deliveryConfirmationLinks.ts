@@ -10,8 +10,17 @@ export function newDeliveryConfirmationLinkToken() {
   return `dc42_${randomBytes(24).toString("hex")}`;
 }
 
-function normalizeBaseUrl(value: string) {
-  return value.trim().replace(/\/+$/, "");
+export function normalizeDeliveryAppBaseUrl(value: string) {
+  const normalized = value.trim().replace(/\/+$/, "");
+
+  try {
+    const url = new URL(normalized);
+    const pathname = url.pathname.replace(/\/+$/, "");
+    if (!pathname) url.pathname = "/delivery";
+    return url.toString().replace(/\/+$/, "");
+  } catch {
+    return normalized;
+  }
 }
 
 export function isLocalhostDeliveryAppBaseUrl(value: string) {
@@ -27,7 +36,7 @@ export function getDeliveryAppBaseUrlConfig() {
   for (const envVar of DELIVERY_APP_BASE_URL_ENV_VARS) {
     const value = process.env[envVar]?.trim();
     if (value) {
-      const baseUrl = normalizeBaseUrl(value);
+      const baseUrl = normalizeDeliveryAppBaseUrl(value);
       return {
         baseUrl,
         envVar,
@@ -37,7 +46,7 @@ export function getDeliveryAppBaseUrlConfig() {
     }
   }
 
-  const baseUrl = "http://localhost:3000";
+  const baseUrl = "http://localhost:3000/delivery";
   return {
     baseUrl,
     envVar: null,
@@ -51,7 +60,7 @@ export function getDeliveryAppBaseUrl() {
 }
 
 export function buildDeliveryConfirmationLink(token: string) {
-  return `${getDeliveryAppBaseUrl()}/delivery/confirm/${encodeURIComponent(token)}`;
+  return `${getDeliveryAppBaseUrl()}/confirm/${encodeURIComponent(token)}`;
 }
 
 export function buildShortDeliveryConfirmationLink(token: string) {
@@ -64,13 +73,14 @@ export function shortenDeliveryConfirmationLink(link: string) {
 
   try {
     const url = new URL(trimmed);
-    const prefix = "/delivery/confirm/";
-    if (!url.pathname.startsWith(prefix)) return trimmed;
+    const marker = "/confirm/";
+    const markerIndex = url.pathname.lastIndexOf(marker);
+    if (markerIndex < 0) return trimmed;
 
-    const token = url.pathname.slice(prefix.length);
+    const token = url.pathname.slice(markerIndex + marker.length);
     if (!token) return trimmed;
 
-    url.pathname = `/c/${token}`;
+    url.pathname = `${url.pathname.slice(0, markerIndex)}/c/${token}`;
     return url.toString();
   } catch {
     return trimmed;

@@ -115,7 +115,7 @@ async function main() {
   }
   addCheck("line resolver blocks missing lineNbr", missingLineNbrBlocked);
 
-  const pageSource = readProjectFile("app/delivery/confirm/[token]/page.tsx");
+  const pageSource = readProjectFile("app/confirm/[token]/page.tsx");
   const smsSource = readProjectFile("lib/notifications/handleTwilioInboundSms.ts");
   const helperSource = readProjectFile("lib/notifications/deliveryRequestedDateWritebackQueue.ts");
   addCheck("web requested-date path queues requested-date writeback", /enqueueDeliveryRequestedDateWriteback/.test(pageSource));

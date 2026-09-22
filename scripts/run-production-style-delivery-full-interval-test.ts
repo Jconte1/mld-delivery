@@ -50,7 +50,6 @@ import {
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
   selectNotificationChannel,
-  shouldSkipNotificationRunForWeekend,
 } from "../lib/notifications/helpers";
 import { render30DayDeliveryReminderEmail, render30DayDeliveryReminderSms } from "../lib/notifications/deliveryReminder30Day";
 import { render14DayDeliveryReminderEmail, render14DayDeliveryReminderSms } from "../lib/notifications/deliveryReminder14Day";
@@ -120,6 +119,7 @@ import {
   normalizeSmsPhoneForOptOut,
 } from "../lib/notifications/notificationAddressNormalization";
 import {
+  buildDeliveryDetailsLink,
   ensureDeliveryDetailsLink,
   markDeliveryDetailsLinkCreatedFromEvent,
 } from "../lib/notifications/deliveryDetailsLinks";
@@ -747,8 +747,8 @@ async function readExistingDetailsLink(group: DeliveryGroupRecord, options: CliO
   return {
     id: existing?.id ?? null,
     url: existing
-      ? `${envValue("DELIVERY_APP_BASE_URL").replace(/\/+$/, "")}/delivery/details/${encodeURIComponent(existing.token)}`
-      : `${envValue("DELIVERY_APP_BASE_URL").replace(/\/+$/, "")}/delivery/details/${encodeURIComponent(detailsPreviewToken(options, group))}`,
+      ? buildDeliveryDetailsLink(existing.token)
+      : buildDeliveryDetailsLink(detailsPreviewToken(options, group)),
     exists: Boolean(existing),
   };
 }
@@ -2362,15 +2362,14 @@ async function applySelectedRuntimeEvents(params: {
 async function importForInterval(config: IntervalConfig, options: CliOptions): Promise<ImportRunResult> {
   const targetDeliveryDate = dateKey(getNotificationTargetDate(options.runDate, config.days));
   const requestedOn = config.requestedOn(targetDeliveryDate);
-  const runSkipped = shouldSkipNotificationRunForWeekend(options.runDate);
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate);
 
-  if (runSkipped || deliveryDateSkipReason) {
+  if (deliveryDateSkipReason) {
     return {
       interval: config,
       targetDeliveryDate,
       requestedOn,
-      skippedReason: runSkipped ? "weekend_run_date" : deliveryDateSkipReason,
+      skippedReason: deliveryDateSkipReason,
       result: null,
       error: null,
       activeDeliveryGroupCount: await activeDeliveryGroupCount(targetDeliveryDate),

@@ -32,7 +32,6 @@ function main() {
   const helper = read("lib/notifications/deliveryDetailsLinks.ts");
   const notificationHelper = read("lib/notifications/helpers.ts");
 
-  const weekendIndex = source.indexOf("shouldSkipNotificationRunForWeekend(runDate)");
   const deliveryDateWeekendIndex = source.indexOf(
     "getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate)"
   );
@@ -44,10 +43,15 @@ function main() {
   );
   const scopeFilterIndex = source.indexOf("const deliveryGroups = filterByDeliveryOrderScope(");
 
-  assert(weekendIndex >= 0, "30-day creator checks global weekend skip", failures);
   assert(
-    deliveryDateWeekendIndex > weekendIndex,
-    "30-day creator checks weekend delivery dates after weekend run skip",
+    deliveryDateWeekendIndex >= 0,
+    "30-day creator preserves delivery-date eligibility checks",
+    failures
+  );
+  assertNotIncludes(
+    source,
+    "shouldSkipNotificationRunForWeekend(runDate)",
+    "30-day creator does not skip weekend notification runs",
     failures
   );
   assert(importIndex >= 0, "30-day creator imports fresh target-date data", failures);
@@ -177,7 +181,7 @@ function main() {
 
   assertIncludes(
     renderer,
-    "Payment may be needed before delivery. Please review details here:",
+    "Payment may be needed before delivery.",
     "30-day SMS renderer has required payment sentence",
     failures
   );

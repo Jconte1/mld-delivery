@@ -79,7 +79,8 @@ This command creates 42-day confirmation request events and dispatches only the 
 
 ## Timing
 
-Use business-day execution in Mountain Time, highest interval first:
+Use daily calendar-day execution in Mountain Time, highest interval first. Saturday,
+Sunday, and holiday runs use the same exact interval offsets as weekday runs:
 
 | Flow | Denver local time |
 | --- | ---: |

@@ -67,7 +67,7 @@ function sourceContains(relativePath: string, pattern: RegExp) {
 }
 
 function requestDifferentDateSource() {
-  const source = readProjectFile("app/delivery/confirm/[token]/page.tsx");
+  const source = readProjectFile("app/confirm/[token]/page.tsx");
   const start = source.indexOf("async function requestDifferentDate");
   const end = source.indexOf("export default async function DeliveryConfirmationPage");
   return start >= 0 && end > start ? source.slice(start, end) : "";
@@ -196,7 +196,7 @@ addCheck(
 );
 addCheck(
   "17. Webpage request-different-date uses the shared helper",
-  sourceContains("app/delivery/confirm/[token]/page.tsx", /validateRequestedDeliveryDateEligibility/)
+  sourceContains("app/confirm/[token]/page.tsx", /validateRequestedDeliveryDateEligibility/)
 );
 addCheck(
   "18. Valid requested date still sets NEW_DATE_REQUESTED and manualReviewRequired",
@@ -229,7 +229,7 @@ addCheck(
     "lib/notifications/deliveryDateEligibility.ts",
     "lib/notifications/deliveryConfirmationSmsReplies.ts",
     "lib/notifications/handleTwilioInboundSms.ts",
-    "app/delivery/confirm/[token]/page.tsx",
+    "app/confirm/[token]/page.tsx",
   ].every((relativePath) => !/createAcumaticaClientFromEnv|AcumaticaClient|ACUMATICA_/i.test(readProjectFile(relativePath)))
 );
 

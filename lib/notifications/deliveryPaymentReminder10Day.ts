@@ -50,8 +50,10 @@ export function render10DayDeliveryPaymentReminderSms(
 ) {
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
+  const paymentLine = paymentDueText(params.amountDueNowRounded);
+  const deadlineLine = paymentDeadlineText(params.deliveryDate, params.paymentDeadlineDate);
 
-  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Balance may be due before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}:\n\nThis is your final balance reminder.\n\nYour ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.\n\n${paymentLine}\n${deadlineLine}\n\nReview delivery details here: ${params.detailsLink}\n\nReply STOP to opt out.`;
 }
 
 export function render10DayDeliveryPaymentReminderEmail(

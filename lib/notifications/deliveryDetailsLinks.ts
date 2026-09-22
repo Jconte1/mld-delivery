@@ -23,7 +23,7 @@ export function newDeliveryDetailsLinkToken() {
 }
 
 export function buildDeliveryDetailsLink(token: string) {
-  return `${getDeliveryAppBaseUrl()}/delivery/details/${encodeURIComponent(token)}`;
+  return `${getDeliveryAppBaseUrl()}/details/${encodeURIComponent(token)}`;
 }
 
 function normalizeOptionalDate(value: Date | string | null | undefined) {

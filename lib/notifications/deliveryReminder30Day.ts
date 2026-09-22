@@ -42,10 +42,10 @@ export function render30DayDeliveryReminderSms(params: Render30DayDeliveryRemind
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
   if (params.paymentDue) {
-    return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Payment may be needed before delivery. Please review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+    return `MLD: Order ${params.orderNumber}:\n\nYour ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.\n\nPayment may be needed before delivery.\n\nPlease review details here: ${params.detailsLink}\n\nReply STOP to opt out.`;
   }
 
-  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}:\n\nYour ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.\n\nReview delivery details here: ${params.detailsLink}\n\nReply STOP to opt out.`;
 }
 
 export function render30DayDeliveryReminderEmail(params: Render30DayDeliveryReminderParams) {

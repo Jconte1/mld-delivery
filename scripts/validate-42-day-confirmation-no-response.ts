@@ -735,8 +735,8 @@ async function validateNoChannelAndSafetySkips(failures: string[]) {
     dryRun: false,
     prismaClient: weekendSendStore.client,
   });
-  assertEqual(weekendSummary.weekendSkipped, true, "weekend send date skipped", failures);
-  assertEqual(weekendSendStore.notificationEvents.length, 0, "weekend send creates no event", failures);
+  assertEqual(weekendSummary.weekendSkipped, false, "weekend send date is processed", failures);
+  assertEqual(weekendSendStore.notificationEvents.length, 1, "weekend send creates the exact-day event", failures);
 
   const weekendDeliveryStore = new FakeDeliveryStore();
   weekendDeliveryStore.seedConfirmation({

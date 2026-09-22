@@ -1,25 +1,48 @@
 import { syncSharePointStockItems } from "@/lib/sharepoint-stock/syncSharepointStockItems";
+import {
+  SHAREPOINT_STOCK_LIST_KEYS,
+  type SharePointStockListKey,
+} from "@/lib/sharepoint-stock/regionalStockLists";
+
+function requestedLists(args: string[]): SharePointStockListKey[] {
+  if (args.includes("--all")) return [...SHAREPOINT_STOCK_LIST_KEYS];
+  const index = args.findIndex((arg) => arg === "--list" || arg.startsWith("--list="));
+  if (index < 0) return ["utah_wyoming"];
+  const value = args[index].includes("=") ? args[index].split("=", 2)[1] : args[index + 1];
+  if (!SHAREPOINT_STOCK_LIST_KEYS.includes(value as SharePointStockListKey)) {
+    throw new Error(`--list must be one of ${SHAREPOINT_STOCK_LIST_KEYS.join(", ")}`);
+  }
+  return [value as SharePointStockListKey];
+}
 
 async function main() {
-  const result = await syncSharePointStockItems();
+  const results = [];
+  for (const stockListKey of requestedLists(process.argv.slice(2))) {
+    results.push(await syncSharePointStockItems({ stockListKey }));
+  }
   console.log(
     JSON.stringify(
       {
-        syncRunId: result.syncRunId,
-        finalStatus: result.status,
-        workbookName: result.workbookName,
-        worksheetName: result.worksheetName,
-        inventoryIdColumn: result.inventoryIdColumn,
-        rowsRead: result.rowsRead,
-        created: result.itemsCreated,
-        updated: result.itemsUpdated,
-        deactivated: result.itemsDeactivated,
-        skipped: result.itemsSkipped,
-        duplicateCount: result.duplicateCount,
-        skippedRowsByReason: result.skippedRowsByReason,
-        validationErrors: result.validationErrors,
-        metadataEndpointWorked: result.metadataEndpointWorked,
-        contentEndpointWorked: result.contentEndpointWorked,
+        finalStatus: results.every((result) => result.status === "SUCCESS") ? "SUCCESS" : "FAILED",
+        results: results.map((result) => ({
+          stockListKey: result.stockListKey,
+          source: result.source,
+          syncRunId: result.syncRunId,
+          status: result.status,
+          workbookName: result.workbookName,
+          worksheetName: result.worksheetName,
+          inventoryIdColumn: result.inventoryIdColumn,
+          rowsRead: result.rowsRead,
+          created: result.itemsCreated,
+          updated: result.itemsUpdated,
+          deactivated: result.itemsDeactivated,
+          skipped: result.itemsSkipped,
+          duplicateCount: result.duplicateCount,
+          skippedRowsByReason: result.skippedRowsByReason,
+          validationErrors: result.validationErrors,
+          metadataEndpointWorked: result.metadataEndpointWorked,
+          contentEndpointWorked: result.contentEndpointWorked,
+        })),
         safety:
           "Only SharePointStockSyncRun and ExternalStockItem are written by this script.",
       },
@@ -28,7 +51,7 @@ async function main() {
     )
   );
 
-  if (result.status === "FAILED") {
+  if (results.some((result) => result.status === "FAILED")) {
     process.exitCode = 1;
   }
 }

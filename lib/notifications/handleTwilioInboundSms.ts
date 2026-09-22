@@ -648,13 +648,34 @@ async function applyRequestedDate(params: {
       },
       params.queueOptions
     );
+    await params.client.deliveryConfirmation.update({
+      where: { id: params.candidate.id },
+      data: {
+        requestedDateWritebackJobId: queued.jobId,
+        requestedDateWritebackStatus: "queued",
+        requestedDateWritebackPayload: queued.payload,
+        requestedDateWritebackError: null,
+        requestedDateWritebackQueuedAt: params.now,
+        requestedDateWritebackCheckedAt: null,
+        requestedDateWritebackCompletedAt: null,
+      },
+    });
 
     return { responseMessage, writebackJobId: queued.jobId, error: null };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await params.client.deliveryConfirmation.update({
+      where: { id: params.candidate.id },
+      data: {
+        requestedDateWritebackStatus: "enqueue_failed",
+        requestedDateWritebackError: errorMessage.slice(0, 2048),
+        requestedDateWritebackCheckedAt: params.now,
+      },
+    });
     return {
       responseMessage,
       writebackJobId: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     };
   }
 }
@@ -756,13 +777,34 @@ async function applyConfirmation(params: {
       },
       params.queueOptions
     );
+    await params.client.deliveryConfirmation.update({
+      where: { id: params.candidate.id },
+      data: {
+        confirmationWritebackJobId: queued.jobId,
+        confirmationWritebackStatus: "queued",
+        confirmationWritebackPayload: queued.payload,
+        confirmationWritebackError: null,
+        confirmationWritebackQueuedAt: params.now,
+        confirmationWritebackCheckedAt: null,
+        confirmationWritebackCompletedAt: null,
+      },
+    });
 
     return { responseMessage: getSmsConfirmedMessage(), writebackJobId: queued.jobId, error: null };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await params.client.deliveryConfirmation.update({
+      where: { id: params.candidate.id },
+      data: {
+        confirmationWritebackStatus: "enqueue_failed",
+        confirmationWritebackError: errorMessage.slice(0, 2048),
+        confirmationWritebackCheckedAt: params.now,
+      },
+    });
     return {
       responseMessage: getSmsConfirmedMessage(),
       writebackJobId: null,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     };
   }
 }

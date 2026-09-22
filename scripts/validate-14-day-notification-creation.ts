@@ -35,7 +35,7 @@ function main() {
     "summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn)"
   );
   const queryIndex = shared.indexOf(
-    "const deliveryGroups = await find30DayDeliveryReminderTargetGroups"
+    "const unscopedDeliveryGroups = await find30DayDeliveryReminderTargetGroups"
   );
 
   assertIncludes(

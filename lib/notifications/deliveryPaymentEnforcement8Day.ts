@@ -61,8 +61,9 @@ export function render8DayPaymentEnforcementCustomerSms(
   params: Render8DayDeliveryPaymentEnforcementCustomerParams
 ) {
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
+  const amountDue = formatCurrencyAmount(params.amountDueNowRounded);
 
-  return `MLD: Order ${params.orderNumber}: Your ${deliveryDescription} for ${params.jobName} is currently on hold because payment was not received by the required deadline. Review details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}:\n\nYour ${deliveryDescription} for ${params.jobName} is currently on hold because payment was not received by the required deadline.\n\nBalance owed prior to scheduling Delivery: ${amountDue}\n\nReview delivery details here: ${params.detailsLink}\n\nReply STOP to opt out.`;
 }
 
 export function render8DayPaymentEnforcementCustomerEmail(

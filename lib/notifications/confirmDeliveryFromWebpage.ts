@@ -297,6 +297,18 @@ export async function confirmDeliveryFromWebpage(params: {
       },
       params.queueOptions
     );
+    await client.deliveryConfirmation.update({
+      where: { id: confirmation.id },
+      data: {
+        confirmationWritebackJobId: queued.jobId,
+        confirmationWritebackStatus: "queued",
+        confirmationWritebackPayload: queued.payload,
+        confirmationWritebackError: null,
+        confirmationWritebackQueuedAt: confirmedAt,
+        confirmationWritebackCheckedAt: null,
+        confirmationWritebackCompletedAt: null,
+      },
+    });
 
     return {
       outcome: "confirmed",
@@ -308,13 +320,23 @@ export async function confirmDeliveryFromWebpage(params: {
       },
     };
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await client.deliveryConfirmation.update({
+      where: { id: confirmation.id },
+      data: {
+        confirmationWritebackStatus: "enqueue_failed",
+        confirmationWritebackPayload: payload,
+        confirmationWritebackError: errorMessage.slice(0, 2048),
+        confirmationWritebackCheckedAt: confirmedAt,
+      },
+    });
     return {
       outcome: "confirmed",
       confirmation: updated as ConfirmedDeliverySnapshot,
       writeback: {
         payload,
         jobId: null,
-        error: error instanceof Error ? error.message : String(error),
+        error: errorMessage,
       },
     };
   }

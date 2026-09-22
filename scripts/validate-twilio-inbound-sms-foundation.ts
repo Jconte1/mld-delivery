@@ -1568,9 +1568,9 @@ async function runNoResponseValidation() {
     runDate: "2026-07-18",
     prismaClient: weekendStore.client,
   });
-  assertEqual(weekendPlan.weekendSkipped, true, "weekend skip flag");
-  assertEqual(weekendPlan.followUps[0].candidateCount, 0, "weekend follow-up skipped");
-  assertEqual(weekendPlan.followUps[0].reason, "weekend_skip_no_shift", "weekend no shift");
+  assertEqual(weekendPlan.weekendSkipped, false, "weekend runs remain enabled");
+  assertEqual(weekendPlan.followUps[0].candidateCount, 1, "weekend follow-up evaluated");
+  assertEqual(weekendPlan.followUps[0].reason, null, "weekend follow-up is not skipped");
 
   return {
     maxThreeAttemptsPlanned: true,
@@ -1582,7 +1582,7 @@ async function runNoResponseValidation() {
     smsNewDateStopsFollowUps: true,
     invalidSmsDoesNotCountAsResponse: true,
     failedSmsDoesNotCountAsResponse: true,
-    weekendFollowUpsSkippedNotShifted: true,
+    weekendFollowUpsEvaluated: true,
     day39ManualReviewNoMessage: true,
     noAcumaticaNoResponseWriteback: true,
   };
@@ -1600,7 +1600,7 @@ async function runSignatureValidation() {
   try {
     const body = new URLSearchParams(inboundPayload("Y", "SM-BAD-SIGNATURE"));
     const response = await inboundSmsPost(
-      new Request("https://mld-delivery.vercel.app/api/webhooks/twilio/inbound-sms", {
+      new Request("https://mld-delivery.vercel.app/delivery/api/webhooks/twilio/inbound-sms", {
         method: "POST",
         headers: {
           "content-type": "application/x-www-form-urlencoded",

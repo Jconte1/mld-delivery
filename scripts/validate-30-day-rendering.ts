@@ -91,13 +91,13 @@ function main() {
   );
   assertIncludes(
     smsNoPayment,
-    "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_test.",
+    "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_test",
     "SMS includes readonly details link",
     failures
   );
   assertIncludes(
     smsPayment,
-    "Payment may be needed before delivery. Please review details here:",
+    "Payment may be needed before delivery.",
     "SMS includes payment sentence only when due",
     failures
   );
@@ -107,6 +107,13 @@ function main() {
     "SMS omits payment sentence when no payment is due",
     failures
   );
+  assertNotIncludes(
+    smsPayment,
+    "$125.50",
+    "30-day SMS keeps the existing generic payment notice",
+    failures
+  );
+  assertIncludes(smsPayment, "\n\n", "30-day SMS uses paragraph spacing", failures);
 
   for (const forbidden of [
     "Confirm",

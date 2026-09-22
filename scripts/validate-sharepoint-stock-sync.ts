@@ -4,6 +4,7 @@ import path from "node:path";
 import ExcelJS from "exceljs";
 
 import { normalizeStockInventoryId, SHAREPOINT_STOCK_SOURCE } from "@/lib/sharepoint-stock/stockInventoryNormalization";
+import { SHAREPOINT_STOCK_SOURCES } from "@/lib/sharepoint-stock/regionalStockLists";
 import {
   extractStockInventoryRowsFromWorkbook,
   SharePointStockWorkbookError,
@@ -341,6 +342,24 @@ async function run() {
   assert(
     new Set([...successClient.state.items.keys()]).size === successClient.state.items.size,
     "source plus normalizedInventoryId uniqueness is respected in fake upsert",
+    failures
+  );
+
+  const idahoSync = await syncSharePointStockItems({
+    client: successClient.client as unknown as SyncClientOption,
+    stockListKey: "idaho",
+    loadWorkbook: async () => extractionFromRows([["IDAHO-ONLY", "regional"]]),
+    now: new Date("2026-07-31T13:00:00.000Z"),
+  });
+  assert(
+    idahoSync.source === SHAREPOINT_STOCK_SOURCES.idaho &&
+      successClient.state.items.get(`${SHAREPOINT_STOCK_SOURCES.idaho}:IDAHO-ONLY`)?.isActive === true,
+    "regional sync writes to its own source",
+    failures
+  );
+  assert(
+    successClient.state.items.get(`${SHAREPOINT_STOCK_SOURCE}:NEW/456`)?.isActive === true,
+    "regional sync does not deactivate another region",
     failures
   );
 

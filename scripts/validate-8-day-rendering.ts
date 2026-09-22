@@ -112,7 +112,14 @@ function main() {
   );
   assertIncludes(
     customerSms,
-    "Review details here: https://mld-delivery.example.test/delivery/details/dd_8_test",
+    "Balance owed prior to scheduling Delivery: $1,250.00",
+    "customer SMS includes the exact balance",
+    failures
+  );
+  assertIncludes(customerSms, "\n\n", "8-day SMS uses paragraph spacing", failures);
+  assertIncludes(
+    customerSms,
+    "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_8_test",
     "customer SMS includes details link",
     failures
   );

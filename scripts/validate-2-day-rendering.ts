@@ -127,6 +127,7 @@ function main() {
     failures
   );
   assertIncludes(sms, "Reply STOP to opt out.", "2-day SMS includes STOP language", failures);
+  assertIncludes(sms, "\n\n", "2-day SMS uses paragraph spacing", failures);
 
   for (const [label, source] of [
     ["email subject", email.subject],

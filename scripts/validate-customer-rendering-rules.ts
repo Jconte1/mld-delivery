@@ -220,12 +220,14 @@ function validateCustomerMessages(failures: string[]) {
       emailBody: render14DayDeliveryReminderEmail({
         ...common,
         detailsLink,
-        paymentDue: false,
+        paymentDue: true,
+        amountDueNowRounded: "125.00",
       }).body,
       sms: render14DayDeliveryReminderSms({
         ...common,
         detailsLink,
-        paymentDue: false,
+        paymentDue: true,
+        amountDueNowRounded: "125.00",
       }),
     },
     {
@@ -322,6 +324,23 @@ function validateCustomerMessages(failures: string[]) {
     }
   }
 
+  for (const label of ["14", "12", "10", "8"]) {
+    const message = proactiveMessages.find((candidate) => candidate.label === label);
+    assertIncludes(message?.emailBody ?? "", "$125.00", `${label}-day email includes balance amount`, failures);
+    assertIncludes(message?.sms ?? "", "$125.00", `${label}-day SMS includes balance amount`, failures);
+  }
+
+  for (const label of ["30", "2"]) {
+    const message = proactiveMessages.find((candidate) => candidate.label === label);
+    assertNotIncludes(message?.emailBody ?? "", "$125.00", `${label}-day email keeps payment amount suppressed`, failures);
+    assertNotIncludes(message?.sms ?? "", "$125.00", `${label}-day SMS keeps payment amount suppressed`, failures);
+  }
+
+  for (const label of ["30", "14", "12", "10", "8", "2"]) {
+    const message = proactiveMessages.find((candidate) => candidate.label === label);
+    assertIncludes(message?.sms ?? "", "\n\n", `${label}-day SMS uses paragraph spacing`, failures);
+  }
+
   for (const message of proactiveMessages.filter((candidate) => candidate.label !== "180" && candidate.label !== "90" && candidate.label !== "60")) {
     assertIncludes(
       message.sms,
@@ -357,7 +376,7 @@ function validateCustomerMessages(failures: string[]) {
   const standard42Sms = proactiveMessages.find((message) => message.label === "42")?.sms ?? "";
   assertIncludes(
     standard42Sms,
-    "For Delivery Details: https://delivery.example.test/c/token",
+    "For Delivery Details: https://delivery.example.test/delivery/c/token",
     "42-day SMS uses short confirmation link",
     failures
   );
@@ -385,7 +404,7 @@ function validateCustomerMessages(failures: string[]) {
 
 async function validateShortConfirmationLinkRoute(failures: string[]) {
   const response = await shortConfirmationLinkGet(
-    new Request("https://delivery.example.test/c/test-token"),
+    new Request("https://delivery.example.test/delivery/c/test-token"),
     { params: Promise.resolve({ token: "test-token" }) }
   );
   assert(

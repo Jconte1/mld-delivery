@@ -34,7 +34,6 @@ import {
   formatJobName,
   getDeliveryDateCustomerNotificationSkipReason,
   selectNotificationChannel,
-  shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import {
   loadActiveNotificationOptOutAddresses,
@@ -777,7 +776,7 @@ export async function planDeliveryConfirmationNoResponseWork(
 ): Promise<DeliveryConfirmationNoResponsePlan> {
   const client = await noResponseClient(params.prismaClient);
   const runDate = dateKey(params.runDate ?? new Date());
-  const weekendSkipped = shouldSkipNotificationRunForWeekend(runDate);
+  const weekendSkipped = false;
   const day41DeliveryDate = addDays(runDate, 41);
   const day40DeliveryDate = addDays(runDate, 40);
   const day39DeliveryDate = addDays(runDate, 39);
@@ -2850,12 +2849,6 @@ export async function run42DayDeliveryConfirmationNoResponse(
     params.currentStateRefresher ??
     (params.prismaClient ? noopCurrentStateRefresher : defaultCurrentStateRefresher);
   const summary = emptyRunSummary({ runDate, dryRun });
-
-  if (shouldSkipNotificationRunForWeekend(runDate)) {
-    summary.weekendSkipped = true;
-    addSkippedReason(summary, DELIVERY_CONFIRMATION_NO_RESPONSE_SKIP_REASONS.weekendSendDate);
-    return summary;
-  }
 
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
   const allCandidates = await findNoResponseLifecycleCandidates({

@@ -30,8 +30,8 @@ import {
 } from "@/lib/notifications/helpers";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
-import { DeliveryItemsForThisDelivery } from "../../components/DeliveryItemsForThisDelivery";
-import { SalespersonContactBlock } from "../../components/SalespersonContactBlock";
+import { DeliveryItemsForThisDelivery } from "@/app/delivery/components/DeliveryItemsForThisDelivery";
+import { SalespersonContactBlock } from "@/app/delivery/components/SalespersonContactBlock";
 import { DeliveryConfirmationActions } from "./DeliveryConfirmationActions";
 
 type PageProps = {
@@ -300,6 +300,18 @@ async function requestDifferentDate(formData: FormData) {
       requestedAt: now,
       contact: confirmation.contact,
     });
+    await prisma.deliveryConfirmation.update({
+      where: { id: confirmation.id },
+      data: {
+        requestedDateWritebackJobId: queued.jobId,
+        requestedDateWritebackStatus: "queued",
+        requestedDateWritebackPayload: queued.payload,
+        requestedDateWritebackError: null,
+        requestedDateWritebackQueuedAt: now,
+        requestedDateWritebackCheckedAt: null,
+        requestedDateWritebackCompletedAt: null,
+      },
+    });
 
     console.info("[delivery-requested-date-writeback] queued requested-date job", {
       jobId: queued.jobId,
@@ -311,12 +323,21 @@ async function requestDifferentDate(formData: FormData) {
       dryRun: queued.payload.dryRun,
     });
   } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : String(error);
+    await prisma.deliveryConfirmation.update({
+      where: { id: confirmation.id },
+      data: {
+        requestedDateWritebackStatus: "enqueue_failed",
+        requestedDateWritebackError: errorMessage.slice(0, 2048),
+        requestedDateWritebackCheckedAt: now,
+      },
+    });
     console.error("[delivery-requested-date-writeback] enqueue failed after request saved", {
       deliveryConfirmationId: confirmation.id,
       orderType: confirmation.orderType,
       orderNumber: confirmation.orderNumber,
       deliveryGroupId: confirmation.deliveryGroupId,
-      error: error instanceof Error ? error.message : String(error),
+      error: errorMessage,
     });
   }
 

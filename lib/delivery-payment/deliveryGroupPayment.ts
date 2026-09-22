@@ -1,6 +1,8 @@
 import { NotificationIntervalType, type Prisma } from "@/lib/generated/prisma/client";
-import { getFreshExternalStockMatchesForInventoryIds } from "@/lib/sharepoint-stock/externalStockReadiness";
-import { normalizeStockInventoryId } from "@/lib/sharepoint-stock/stockInventoryNormalization";
+import {
+  externalStockMatchesLine,
+  getFreshExternalStockMatchesForLines,
+} from "@/lib/sharepoint-stock/externalStockReadiness";
 
 export type PaymentApplicabilityStatus =
   | "not_applicable_terms"
@@ -40,6 +42,7 @@ export type DeliveryPaymentLineInput = {
   lineDescription: string | null;
   itemType: string | null;
   itemClass: string | null;
+  warehouseId?: string | null;
   requestedOn: Date | string | null;
   taxCategory: string | null;
   discountedUnitPrice: DecimalLike;
@@ -350,10 +353,7 @@ function lineHasExternalStockReadinessMatch(
   externalStockReadyInventoryIds: Set<string> | undefined
 ) {
   if (!externalStockReadyInventoryIds || !lineIsDeliverableStock(line)) return false;
-  const normalizedInventoryId = normalizeStockInventoryId(line.inventoryId);
-  return Boolean(
-    normalizedInventoryId && externalStockReadyInventoryIds.has(normalizedInventoryId)
-  );
+  return externalStockMatchesLine(externalStockReadyInventoryIds, line);
 }
 
 function lineBelongsToCurrentDeliveryGroup(params: {
@@ -968,7 +968,7 @@ async function inputWithExternalStockReadiness(
   const activeOrderLineIds = input.activeOrderLineIds
     ? new Set(input.activeOrderLineIds.filter(Boolean))
     : null;
-  const inventoryIds = input.lines
+  const stockLines = input.lines
     .filter((line) =>
       lineBelongsToCurrentDeliveryGroup({
         line,
@@ -976,13 +976,12 @@ async function inputWithExternalStockReadiness(
         activeOrderLineIds,
       })
     )
-    .filter(lineIsDeliverableStock)
-    .map((line) => line.inventoryId);
+    .filter(lineIsDeliverableStock);
 
   return {
     ...input,
     externalStockReadyInventoryIds:
-      await getFreshExternalStockMatchesForInventoryIds(inventoryIds),
+      await getFreshExternalStockMatchesForLines(stockLines),
   };
 }
 

@@ -7,10 +7,10 @@ import {
 } from "@/lib/notifications/helpers";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
-import { DeliveryInfoState } from "../../components/DeliveryInfoState";
-import { DeliveryItemsForThisDelivery } from "../../components/DeliveryItemsForThisDelivery";
-import { DeliveryPaymentSummary } from "../../components/DeliveryPaymentSummary";
-import { SalespersonContactBlock } from "../../components/SalespersonContactBlock";
+import { DeliveryInfoState } from "@/app/delivery/components/DeliveryInfoState";
+import { DeliveryItemsForThisDelivery } from "@/app/delivery/components/DeliveryItemsForThisDelivery";
+import { DeliveryPaymentSummary } from "@/app/delivery/components/DeliveryPaymentSummary";
+import { SalespersonContactBlock } from "@/app/delivery/components/SalespersonContactBlock";
 
 type PageProps = {
   params: Promise<{ token: string }>;

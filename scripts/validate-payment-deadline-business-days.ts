@@ -18,13 +18,13 @@ function main() {
     failures
   );
   assert(
-    getPaymentDeadlineDate("2026-08-02") === "2026-07-24",
-    "Saturday raw 8-day date moves to prior Friday",
+    getPaymentDeadlineDate("2026-08-02") === "2026-07-25",
+    "Saturday raw 8-day date remains exactly 8 calendar days before delivery",
     failures
   );
   assert(
-    getPaymentDeadlineDate("2026-08-03") === "2026-07-24",
-    "Sunday raw 8-day date moves to prior Friday",
+    getPaymentDeadlineDate("2026-08-03") === "2026-07-26",
+    "Sunday raw 8-day date remains exactly 8 calendar days before delivery",
     failures
   );
   assert(
@@ -39,7 +39,7 @@ function main() {
     process.exit(1);
   }
 
-  console.log("Payment deadline business-day validation passed.");
+  console.log("Payment deadline exact calendar-day validation passed.");
 }
 
 main();

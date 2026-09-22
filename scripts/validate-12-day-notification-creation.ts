@@ -331,34 +331,11 @@ async function validateMockedRuntimeBehavior(
   assert(!weekendImportCalled, "C106293 Saturday target skips before fresh import", failures);
   assert(!weekendPaymentCalled, "C106293 Saturday target skips before payment evaluation", failures);
   assert(!weekendReadinessCalled, "C106293 Saturday target skips before readiness loading", failures);
-  assert(
-    weekendSummary.deliveryGroupsSkippedWeekendDeliveryDate === 1,
-    "C106293 Saturday target reports one weekend delivery-date skip",
-    failures
-  );
-  assert(
-    weekendSummary.skippedReasons.delivery_date_weekend === 1,
-    "C106293 Saturday target uses delivery_date_weekend reason",
-    failures
-  );
-  assert(
-    weekendSummary.scheduledEvents === 0 && weekendReport?.status === "SKIPPED",
-    "C106293 Saturday target is skipped, not scheduled",
-    failures
-  );
-  assert(
-    weekendReport?.orderNumber === "C106293" &&
-      weekendReport.reasonSkipped === "delivery_date_weekend",
-    "C106293 Saturday target report has delivery_date_weekend reason",
-    failures
-  );
-  assert(
-    weekendReport?.detailsLinkCreated === false &&
-      weekendReport.detailsLinkReused === false &&
-      weekendReport.detailsLinkTokenPresent === false,
-    "C106293 Saturday target does not create or reuse details links",
-    failures
-  );
+  assert(weekendSummary.deliveryGroupsSkippedWeekendDeliveryDate === 1, "C106293 Saturday target reports one weekend delivery-date skip", failures);
+  assert(weekendSummary.skippedReasons.delivery_date_weekend === 1, "C106293 Saturday target uses delivery_date_weekend reason", failures);
+  assert(weekendSummary.scheduledEvents === 0 && weekendReport?.status === "SKIPPED", "C106293 Saturday target is skipped, not scheduled", failures);
+  assert(weekendReport?.orderNumber === "C106293" && weekendReport.reasonSkipped === "delivery_date_weekend", "C106293 Saturday target report has delivery_date_weekend reason", failures);
+  assert(weekendReport?.detailsLinkCreated === false && weekendReport.detailsLinkReused === false && weekendReport.detailsLinkTokenPresent === false, "C106293 Saturday target does not create or reuse details links", failures);
 
   const qualifiedFlags = { queried: false, dedupeChecked: false };
   const qualifiedSummary = await create12DayDeliveryPaymentRequestEvents({
@@ -434,8 +411,8 @@ async function validateMockedRuntimeBehavior(
     failures
   );
   assert(
-    report?.paymentDeadlineDate === "2026-07-24",
-    "12-day report includes adjusted 8-day deadline",
+    report?.paymentDeadlineDate === "2026-07-26",
+    "12-day report includes exact 8-calendar-day deadline",
     failures
   );
 }

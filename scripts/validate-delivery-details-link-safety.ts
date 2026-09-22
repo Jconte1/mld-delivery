@@ -28,8 +28,8 @@ function main() {
   const failures: string[] = [];
   const schema = read("prisma/schema.prisma");
   const helper = read("lib/notifications/deliveryDetailsLinks.ts");
-  const detailsPage = read("app/delivery/details/[token]/page.tsx");
-  const confirmationPage = read("app/delivery/confirm/[token]/page.tsx");
+  const detailsPage = read("app/details/[token]/page.tsx");
+  const confirmationPage = read("app/confirm/[token]/page.tsx");
   const migration = read(
     "prisma/migrations/20260723103000_add_delivery_details_links/migration.sql"
   );

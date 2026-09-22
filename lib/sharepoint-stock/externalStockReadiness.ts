@@ -1,11 +1,10 @@
+import { SharePointStockSyncRunStatus, type Prisma } from "@/lib/generated/prisma/client";
+import { normalizeStockInventoryId } from "@/lib/sharepoint-stock/stockInventoryNormalization";
 import {
-  SharePointStockSyncRunStatus,
-  type Prisma,
-} from "@/lib/generated/prisma/client";
-import {
-  normalizeStockInventoryId,
-  SHAREPOINT_STOCK_SOURCE,
-} from "@/lib/sharepoint-stock/stockInventoryNormalization";
+  SHAREPOINT_STOCK_SOURCES,
+  stockMatchKey,
+  stockSourceForWarehouse,
+} from "@/lib/sharepoint-stock/regionalStockLists";
 
 export type SharePointStockFreshnessStaleReason =
   | "no_successful_sync"
@@ -14,6 +13,7 @@ export type SharePointStockFreshnessStaleReason =
   | null;
 
 export type SharePointStockSyncFreshness = {
+  source: string;
   latestSyncId: string | null;
   completedAt: Date | null;
   freshnessDays: number;
@@ -21,11 +21,10 @@ export type SharePointStockSyncFreshness = {
   staleReason: SharePointStockFreshnessStaleReason;
 };
 
+export type ExternalStockLineIdentity = { inventoryId: unknown; warehouseId?: unknown };
+
 type ExternalStockReadinessClient = {
-  sharePointStockSyncRun: Pick<
-    Prisma.TransactionClient["sharePointStockSyncRun"],
-    "findFirst"
-  >;
+  sharePointStockSyncRun: Pick<Prisma.TransactionClient["sharePointStockSyncRun"], "findFirst">;
   externalStockItem: Pick<Prisma.TransactionClient["externalStockItem"], "findMany">;
 };
 
@@ -44,60 +43,33 @@ async function getReadinessPrisma(client?: ExternalStockReadinessClient) {
   return prisma;
 }
 
-export function getSharePointStockFreshnessDays(
-  env: NodeJS.ProcessEnv = process.env
-) {
-  const raw = env.SHAREPOINT_STOCK_FRESHNESS_DAYS?.trim();
-  if (!raw) return DEFAULT_SHAREPOINT_STOCK_FRESHNESS_DAYS;
-
-  const parsed = Number(raw);
-  if (!Number.isFinite(parsed) || parsed <= 0) {
-    return DEFAULT_SHAREPOINT_STOCK_FRESHNESS_DAYS;
-  }
-
-  return parsed;
+export function getSharePointStockFreshnessDays(env: NodeJS.ProcessEnv = process.env) {
+  const parsed = Number(env.SHAREPOINT_STOCK_FRESHNESS_DAYS?.trim());
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : DEFAULT_SHAREPOINT_STOCK_FRESHNESS_DAYS;
 }
 
 export async function getLatestSharePointStockSyncFreshness(
-  options: ExternalStockReadinessOptions = {}
+  options: ExternalStockReadinessOptions & { source?: string } = {}
 ): Promise<SharePointStockSyncFreshness> {
   const db = await getReadinessPrisma(options.client);
+  const source = options.source ?? SHAREPOINT_STOCK_SOURCES.utah_wyoming;
   const freshnessDays = getSharePointStockFreshnessDays(options.env);
   const now = options.now ?? new Date();
   const latest = await db.sharePointStockSyncRun.findFirst({
-    where: {
-      status: SharePointStockSyncRunStatus.SUCCESS,
-    },
+    where: { source, status: SharePointStockSyncRunStatus.SUCCESS },
     orderBy: [{ completedAt: "desc" }, { startedAt: "desc" }],
-    select: {
-      id: true,
-      completedAt: true,
-    },
+    select: { id: true, completedAt: true },
   });
 
   if (!latest) {
-    return {
-      latestSyncId: null,
-      completedAt: null,
-      freshnessDays,
-      isFresh: false,
-      staleReason: "no_successful_sync",
-    };
+    return { source, latestSyncId: null, completedAt: null, freshnessDays, isFresh: false, staleReason: "no_successful_sync" };
   }
-
   if (!latest.completedAt) {
-    return {
-      latestSyncId: latest.id,
-      completedAt: null,
-      freshnessDays,
-      isFresh: false,
-      staleReason: "missing_completed_at",
-    };
+    return { source, latestSyncId: latest.id, completedAt: null, freshnessDays, isFresh: false, staleReason: "missing_completed_at" };
   }
-
-  const oldestFreshTime = now.getTime() - freshnessDays * MS_PER_DAY;
-  const isFresh = latest.completedAt.getTime() >= oldestFreshTime;
+  const isFresh = latest.completedAt.getTime() >= now.getTime() - freshnessDays * MS_PER_DAY;
   return {
+    source,
     latestSyncId: latest.id,
     completedAt: latest.completedAt,
     freshnessDays,
@@ -106,40 +78,53 @@ export async function getLatestSharePointStockSyncFreshness(
   };
 }
 
-export function normalizeStockInventoryIds(inventoryIds: unknown[]) {
-  return [
-    ...new Set(
-      inventoryIds
-        .map((inventoryId) => normalizeStockInventoryId(inventoryId))
-        .filter((inventoryId): inventoryId is string => Boolean(inventoryId))
-    ),
-  ];
+export function externalStockMatchKeyForLine(line: ExternalStockLineIdentity) {
+  const source = stockSourceForWarehouse(line.warehouseId);
+  const inventoryId = normalizeStockInventoryId(line.inventoryId);
+  return source && inventoryId ? stockMatchKey(source, inventoryId) : null;
 }
 
+export function externalStockMatchesLine(matches: Set<string> | undefined, line: ExternalStockLineIdentity) {
+  const key = externalStockMatchKeyForLine(line);
+  return Boolean(matches && key && matches.has(key));
+}
+
+export async function getFreshExternalStockMatchesForLines(
+  lines: ExternalStockLineIdentity[],
+  options: ExternalStockReadinessOptions = {}
+): Promise<Set<string>> {
+  const requestedBySource = new Map<string, Set<string>>();
+  for (const line of lines) {
+    const source = stockSourceForWarehouse(line.warehouseId);
+    const inventoryId = normalizeStockInventoryId(line.inventoryId);
+    if (!source || !inventoryId) continue;
+    const ids = requestedBySource.get(source) ?? new Set<string>();
+    ids.add(inventoryId);
+    requestedBySource.set(source, ids);
+  }
+  if (requestedBySource.size === 0) return new Set();
+
+  const db = await getReadinessPrisma(options.client);
+  const matches = new Set<string>();
+  for (const [source, ids] of requestedBySource) {
+    const freshness = await getLatestSharePointStockSyncFreshness({ ...options, client: db, source });
+    if (!freshness.isFresh) continue;
+    const rows = await db.externalStockItem.findMany({
+      where: { source, isActive: true, normalizedInventoryId: { in: [...ids] } },
+      select: { normalizedInventoryId: true },
+    });
+    for (const row of rows) matches.add(stockMatchKey(source, row.normalizedInventoryId));
+  }
+  return matches;
+}
+
+// Kept for existing Utah/Wyoming inspection scripts.
 export async function getFreshExternalStockMatchesForInventoryIds(
   inventoryIds: unknown[],
   options: ExternalStockReadinessOptions = {}
-): Promise<Set<string>> {
-  const normalizedInventoryIds = normalizeStockInventoryIds(inventoryIds);
-  if (normalizedInventoryIds.length === 0) return new Set();
-
-  const db = await getReadinessPrisma(options.client);
-  const freshness = await getLatestSharePointStockSyncFreshness({
-    ...options,
-    client: db,
-  });
-  if (!freshness.isFresh) return new Set();
-
-  const matches = await db.externalStockItem.findMany({
-    where: {
-      source: SHAREPOINT_STOCK_SOURCE,
-      isActive: true,
-      normalizedInventoryId: { in: normalizedInventoryIds },
-    },
-    select: {
-      normalizedInventoryId: true,
-    },
-  });
-
-  return new Set(matches.map((match) => match.normalizedInventoryId));
+) {
+  return getFreshExternalStockMatchesForLines(
+    inventoryIds.map((inventoryId) => ({ inventoryId, warehouseId: "SALT LAKE SHOWROOM" })),
+    options
+  );
 }

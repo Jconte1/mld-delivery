@@ -92,6 +92,22 @@ function validateScheduleAwareness(worker: WorkerModule, scheduler: SchedulerMod
     }).join(",") === "8",
     "Interval 8 should be worker/manual supported when the local time gate is bypassed."
   );
+  assert(
+    worker.isWeeklyStockSyncDue({ weekday: "Sun", localTime: "03:00", env: {} }),
+    "SharePoint stock sync should default to Sunday 03:00 Denver time."
+  );
+  assert(
+    !worker.isWeeklyStockSyncDue({ weekday: "Sun", localTime: "03:01", env: {} }),
+    "SharePoint stock sync should not run outside its exact minute."
+  );
+  assert(
+    !worker.isWeeklyStockSyncDue({
+      weekday: "Sun",
+      localTime: "03:00",
+      env: { DELIVERY_SHAREPOINT_STOCK_SYNC_ENABLED: "false" },
+    }),
+    "Explicit false should disable weekly SharePoint stock sync."
+  );
 }
 
 async function validateDryRunTick(worker: WorkerModule) {

@@ -31,7 +31,16 @@ function externalWebhookUrl(request: Request) {
   const requestUrl = new URL(request.url);
 
   if (configuredBaseUrl) {
-    return `${normalizeBaseUrl(configuredBaseUrl)}${requestUrl.pathname}`;
+    const baseUrl = new URL(normalizeBaseUrl(configuredBaseUrl));
+    const basePath = baseUrl.pathname.replace(/\/+$/, "");
+    const requestPath = requestUrl.pathname;
+    const internalPath =
+      basePath && (requestPath === basePath || requestPath.startsWith(`${basePath}/`))
+        ? requestPath.slice(basePath.length) || "/"
+        : requestPath;
+    baseUrl.pathname = `${basePath}${internalPath.startsWith("/") ? internalPath : `/${internalPath}`}`;
+    baseUrl.search = requestUrl.search;
+    return baseUrl.toString();
   }
 
   const forwardedProto = request.headers.get("x-forwarded-proto")?.split(",")[0]?.trim();

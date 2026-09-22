@@ -9,7 +9,6 @@ import {
   DELIVERY_DATE_WEEKEND_SKIP_REASON,
   getDeliveryDateCustomerNotificationSkipReason,
   isEligibleDeliveryDateForCustomerNotification,
-  shouldSkipNotificationRunForWeekend,
 } from "../lib/notifications/helpers";
 
 type CreatedEvent = {
@@ -232,13 +231,6 @@ async function main() {
     "Friday delivery date remains eligible",
     failures
   );
-  assert(
-    shouldSkipNotificationRunForWeekend(saturday) &&
-      shouldSkipNotificationRunForWeekend(sunday),
-    "existing weekend run skip helper remains true for Saturday/Sunday run dates",
-    failures
-  );
-
   for (const [label, runDate, deliveryDate] of [
     ["180-day Saturday", "2026-02-09", saturday],
     ["180-day Sunday", "2026-02-10", sunday],
@@ -279,6 +271,8 @@ async function main() {
     );
     const summary = await confirmation42Module.create42DayDeliveryConfirmationEvents({
       runDate,
+      dryRun: false,
+      freshImport: false,
       prismaClient: client as never,
     });
     const report = summary.eventReports[0];
@@ -369,6 +363,7 @@ async function main() {
     runDate: "2026-02-11",
     intervalDays: 180,
     intervalType: NotificationIntervalType.DAY_180,
+    freshImport: false,
     prismaClient: weekdayClient as never,
   });
   assert(weekdaySummary.eligibleDeliveryGroups === 1, "weekday delivery remains eligible", failures);
@@ -390,17 +385,11 @@ async function main() {
     intervalDays: 14,
     prismaClient: weekendRunClient as never,
   });
-  assert(weekendRunSummary.weekendSkipped, "existing weekend run skip remains for 14-day", failures);
-  assert((weekendRunFlags.groupQueries ?? 0) === 0, "weekend run skip stops before DB query", failures);
+  assert(!weekendRunSummary.weekendSkipped, "14-day weekend run is processed", failures);
+  assert((weekendRunFlags.groupQueries ?? 0) === 1, "14-day weekend run reaches the target query", failures);
 
   const confirmedSource = read("lib/notifications/create30DayDeliveryReminderEvents.ts");
   const fourteenSource = read("lib/notifications/create14DayDeliveryReminderEvents.ts");
-  const manualHarness = read("scripts/manual-demo/test-interval-emails-with-salesperson.ts");
-  const manualSkipIndex = manualHarness.indexOf(
-    "getDeliveryDateCustomerNotificationSkipReason(targetDate)"
-  );
-  const manualImportIndex = manualHarness.indexOf("importSalesOrdersForLineRequestedOn(requestedOn)");
-  const manualSelectIndex = manualHarness.indexOf("const selected = await selectDeliveryGroup");
   assert(
     fourteenSource.includes("createConfirmedDeliveryReminderEvents") &&
       confirmedSource.includes("getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate)"),
@@ -414,13 +403,6 @@ async function main() {
     "14-day Saturday/Sunday delivery dates map to the shared skip reason",
     failures
   );
-  assert(
-    manualSkipIndex >= 0 &&
-      manualImportIndex > manualSkipIndex &&
-      manualSelectIndex > manualSkipIndex,
-    "manual harness skips weekend delivery dates before import or candidate selection",
-    failures
-  );
 
   if (failures.length > 0) {
     console.error("Weekend delivery-date notification qualification validation failed:");
@@ -432,10 +414,11 @@ async function main() {
     JSON.stringify(
       {
         weekendDeliveryDateSkipReason: DELIVERY_DATE_WEEKEND_SKIP_REASON,
+        saturdayNotificationRunProcessed: true,
+        sundayNotificationRunProcessed: true,
         saturdayDeliveryDateSkipped: true,
         sundayDeliveryDateSkipped: true,
         weekdayDeliveryDateStillQualifies: true,
-        manualHarnessExcludesWeekendDeliveryDates: true,
         detailsLinksCreatedForWeekendSkips: false,
         confirmationLinksCreatedForWeekendSkips: false,
         liveSmsSent: false,

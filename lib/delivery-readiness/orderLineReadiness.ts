@@ -1,6 +1,7 @@
 import type { Prisma } from "@/lib/generated/prisma/client";
 import {
-  getFreshExternalStockMatchesForInventoryIds,
+  externalStockMatchesLine,
+  getFreshExternalStockMatchesForLines,
 } from "@/lib/sharepoint-stock/externalStockReadiness";
 import { normalizeStockInventoryId } from "@/lib/sharepoint-stock/stockInventoryNormalization";
 
@@ -55,6 +56,7 @@ export type OrderLineReadinessInput = {
   lineDescription: string | null;
   itemType: string | null;
   itemClass: string | null;
+  warehouseId?: string | null;
   requestedOn: Date | string | null;
   eta: Date | string | null;
   orderQty: DecimalLike;
@@ -69,6 +71,7 @@ export type OrderLineReadinessSummary = {
   lineDescription: string | null;
   itemType: string | null;
   itemClass: string | null;
+  warehouseId?: string | null;
   requestedOn: string | null;
   eta: string | null;
   orderQty: number | null;
@@ -258,6 +261,7 @@ export function classifyOrderLineReadiness(
     lineDescription: line.lineDescription,
     itemType: line.itemType,
     itemClass: line.itemClass,
+    warehouseId: line.warehouseId ?? null,
     requestedOn,
     eta,
     orderQty,
@@ -340,14 +344,11 @@ function isDeliverableStockReadinessLine(line: {
 }
 
 function externalStockReadinessMatches(
-  line: { itemType: string | null; inventoryId: string | null },
+  line: { itemType: string | null; inventoryId: string | null; warehouseId?: string | null },
   externalStockReadyInventoryIds: Set<string> | undefined
 ) {
   if (!externalStockReadyInventoryIds || !isDeliverableStockReadinessLine(line)) return false;
-  const normalizedInventoryId = normalizeStockInventoryId(line.inventoryId);
-  return Boolean(
-    normalizedInventoryId && externalStockReadyInventoryIds.has(normalizedInventoryId)
-  );
+  return externalStockMatchesLine(externalStockReadyInventoryIds, line);
 }
 
 function applyExternalStockReadiness(
@@ -398,6 +399,7 @@ export async function getDeliveryGroupReadiness(
               lineDescription: true,
               itemType: true,
               itemClass: true,
+              warehouseId: true,
               requestedOn: true,
               eta: true,
               orderQty: true,
@@ -429,10 +431,8 @@ export async function getDeliveryGroupReadiness(
   const externalStockReadyInventoryIds =
     options.applyExternalStockReadiness === false
       ? new Set<string>()
-      : await getFreshExternalStockMatchesForInventoryIds(
-          lines
-            .filter(isDeliverableStockReadinessLine)
-            .map((line) => line.inventoryId)
+      : await getFreshExternalStockMatchesForLines(
+          lines.filter(isDeliverableStockReadinessLine)
         );
 
   return summarizeDeliveryGroupReadiness({

@@ -207,9 +207,9 @@ async function validateMockedRuntimeBehavior(
     },
     getSalespersonContactMap: async () => new Map(),
   });
-  assert(weekendRunSummary.weekendSkipped, "weekend run date skips", failures);
-  assert(!weekendImportCalled, "weekend run skips before import", failures);
-  assert(!weekendRunFlags.queried, "weekend run skips before group query", failures);
+  assert(!weekendRunSummary.weekendSkipped, "weekend run date is processed", failures);
+  assert(weekendImportCalled, "weekend run performs fresh import", failures);
+  assert(weekendRunFlags.queried, "weekend run queries target groups", failures);
 
   const perOrderFlags = { queried: false, dedupeChecked: false };
   const perOrderSummary = await create2DayDeliveryReminderEvents({
@@ -474,7 +474,7 @@ async function main() {
   assert(importIndex >= 0 && importIndex < queryIndex, "fresh import runs before qualification query", failures);
   assert(scopeFilterIndex > queryIndex, "2-day creator applies order scope after target query", failures);
   assertIncludes(service, "isActive: true", "target query filters to active delivery groups only", failures);
-  assertIncludes(service, "shouldSkipNotificationRunForWeekend(runDate)", "weekend run dates are skipped", failures);
+  assertNotIncludes(service, "shouldSkipNotificationRunForWeekend(runDate)", "weekend notification runs are not skipped", failures);
   assertIncludes(service, "getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate)", "weekend delivery dates are checked", failures);
   assertIncludes(service, "DELIVERY_DATE_WEEKEND_SKIP_REASON", "delivery_date_weekend skip reason is reused", failures);
   assertIncludes(service, "get2DayFailedImportExclusions", "per-order failed import exclusions are collected", failures);

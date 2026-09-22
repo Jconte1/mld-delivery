@@ -17,7 +17,6 @@ import {
   getNotificationTargetDate,
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
-  shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import {
   FRESH_IMPORT_FAILED_SKIP_REASON,
@@ -221,11 +220,6 @@ export async function createDeliveryReminderEvents(
     targetDeliveryDate: targetDeliveryDateKey,
     dryRun,
   });
-
-  if (shouldSkipNotificationRunForWeekend(runDate)) {
-    summary.weekendSkipped = true;
-    return summary;
-  }
 
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
     targetDeliveryDate

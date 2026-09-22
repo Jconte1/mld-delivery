@@ -237,6 +237,7 @@ model SalespersonContact {
 
 model SharePointStockSyncRun {
   id                     String                       @id @default(cuid())
+  source                 String                       @default("sharepoint_stock_list") @db.VarChar(64)
   status                 SharePointStockSyncRunStatus
   startedAt              DateTime                     @default(now())
   completedAt            DateTime?
@@ -256,6 +257,7 @@ model SharePointStockSyncRun {
   updatedAt              DateTime                     @updatedAt
 
   @@index([status, completedAt])
+  @@index([source, status, completedAt])
   @@map("sharepoint_stock_sync_runs")
 }
 
@@ -855,6 +857,22 @@ model DeliveryConfirmation {
   linkCreatedAt             DateTime?
   linkExpiresAt             DateTime?
   linkExpiredAt             DateTime?
+  confirmationWritebackJobId      String?   @db.VarChar(128)
+  confirmationWritebackStatus     String?   @db.VarChar(64)
+  confirmationWritebackPayload    Json?
+  confirmationWritebackResult     Json?
+  confirmationWritebackError      String?   @db.VarChar(2048)
+  confirmationWritebackQueuedAt   DateTime?
+  confirmationWritebackCheckedAt  DateTime?
+  confirmationWritebackCompletedAt DateTime?
+  requestedDateWritebackJobId      String?   @db.VarChar(128)
+  requestedDateWritebackStatus     String?   @db.VarChar(64)
+  requestedDateWritebackPayload    Json?
+  requestedDateWritebackResult     Json?
+  requestedDateWritebackError      String?   @db.VarChar(2048)
+  requestedDateWritebackQueuedAt   DateTime?
+  requestedDateWritebackCheckedAt  DateTime?
+  requestedDateWritebackCompletedAt DateTime?
   createdAt                 DateTime                   @default(now())
   updatedAt                 DateTime                   @updatedAt
 
@@ -880,6 +898,10 @@ model DeliveryConfirmation {
   @@index([manualReviewRequired])
   @@index([manualReviewReason])
   @@index([lastSmsResponseAt])
+  @@index([confirmationWritebackJobId])
+  @@index([confirmationWritebackStatus])
+  @@index([requestedDateWritebackJobId])
+  @@index([requestedDateWritebackStatus])
   @@map("delivery_confirmations")
 }
 

@@ -11,14 +11,22 @@ import {
 } from "./run-scheduled-delivery-interval";
 import { runDeliveryInterval } from "./run-delivery-interval";
 import { run42DayNoResponseCommand } from "./run-42-day-confirmation-no-response";
+import { runDeliveryOperationsReport } from "../lib/notifications/deliveryOperationsReport";
 import { addDays, dateKey } from "../lib/notifications/helpers";
 import {
   normalizeDeliveryOrderScope,
 } from "../lib/notifications/orderScope";
 import { prisma } from "../lib/prisma";
+import { syncSharePointStockItems } from "../lib/sharepoint-stock/syncSharepointStockItems";
+import {
+  SHAREPOINT_STOCK_LIST_KEYS,
+  SHAREPOINT_STOCK_SOURCES,
+} from "../lib/sharepoint-stock/regionalStockLists";
 
 const DEFAULT_WORKER_INTERVAL_MS = 60_000;
 const NO_RESPONSE_INTERVAL = "39";
+const DEFAULT_STOCK_SYNC_WEEKDAY = "Sun";
+const DEFAULT_STOCK_SYNC_LOCAL_TIME = "03:00";
 
 type WorkerChannel = "sms" | "email" | "both";
 
@@ -202,6 +210,43 @@ export function dueIntervalsForLocalTime(params: {
   return params.intervals.filter(
     (interval) => DELIVERY_INTERVAL_SCHEDULE[interval].expectedLocalTime === params.localTime
   );
+}
+
+export function isWeeklyStockSyncDue(params: {
+  weekday: string;
+  localTime: string;
+  env?: Record<string, string | undefined>;
+}) {
+  const env = params.env ?? process.env;
+  if (env.DELIVERY_SHAREPOINT_STOCK_SYNC_ENABLED?.trim().toLowerCase() === "false") return false;
+  const expectedWeekday = env.DELIVERY_SHAREPOINT_STOCK_SYNC_WEEKDAY?.trim() || DEFAULT_STOCK_SYNC_WEEKDAY;
+  const expectedTime = env.DELIVERY_SHAREPOINT_STOCK_SYNC_LOCAL_TIME?.trim() || DEFAULT_STOCK_SYNC_LOCAL_TIME;
+  return params.weekday === expectedWeekday && params.localTime === expectedTime;
+}
+
+export async function runWeeklySharePointStockSync(params: {
+  todayInDenver: string;
+  now?: Date;
+}) {
+  const now = params.now ?? new Date();
+  const results = [];
+  for (const stockListKey of SHAREPOINT_STOCK_LIST_KEYS) {
+    const source = SHAREPOINT_STOCK_SOURCES[stockListKey];
+    const latest = await prisma.sharePointStockSyncRun.findFirst({
+      where: { source, status: "SUCCESS" },
+      orderBy: [{ completedAt: "desc" }, { startedAt: "desc" }],
+      select: { completedAt: true },
+    });
+    const latestDenverDate = latest?.completedAt
+      ? denverDateTimeParts(latest.completedAt, DEFAULT_DELIVERY_SCHEDULER_TIMEZONE).date
+      : null;
+    if (latestDenverDate === params.todayInDenver) {
+      results.push({ stockListKey, source, status: "SKIPPED_ALREADY_SYNCED_TODAY" });
+      continue;
+    }
+    results.push(await syncSharePointStockItems({ stockListKey, now }));
+  }
+  return results;
 }
 
 function intervalDays(interval: DeliveryScheduledInterval) {
@@ -391,15 +436,66 @@ async function main() {
     workerIntervalMs: options.workerIntervalMs,
   });
 
+  let lastOperationsReportDate: string | null = null;
+  let lastStockSyncDate: string | null = null;
+
   do {
+    const now = new Date();
     const result = await runDeliveryNotificationWorkerTick({
       ...options,
-      now: new Date(),
+      now,
     });
     if (options.once) {
       console.log(JSON.stringify(result, null, 2));
       if (!result.ok) process.exitCode = 1;
       break;
+    }
+    const local = denverDateTimeParts(now, DEFAULT_DELIVERY_SCHEDULER_TIMEZONE);
+    const weekday = new Intl.DateTimeFormat("en-US", {
+      timeZone: DEFAULT_DELIVERY_SCHEDULER_TIMEZONE,
+      weekday: "short",
+    }).format(now);
+    const reportEnabled = process.env.DELIVERY_OPERATIONS_REPORT_ENABLED?.trim().toLowerCase() !== "false";
+    if (
+      !options.interval &&
+      !options.dryRun &&
+      lastStockSyncDate !== local.date &&
+      isWeeklyStockSyncDue({ weekday, localTime: local.time })
+    ) {
+      try {
+        const stockResults = await runWeeklySharePointStockSync({ todayInDenver: local.date, now });
+        const ok = stockResults.every((result) =>
+          "status" in result && ["SUCCESS", "SKIPPED_ALREADY_SYNCED_TODAY"].includes(result.status)
+        );
+        log(ok ? "info" : "error", "delivery_sharepoint_stock_sync_result", {
+          todayInDenver: local.date,
+          results: stockResults,
+        });
+        if (ok) lastStockSyncDate = local.date;
+      } catch (error) {
+        log("error", "delivery_sharepoint_stock_sync_failed", {
+          todayInDenver: local.date,
+          error: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+        });
+      }
+    }
+    if (
+      reportEnabled &&
+      !options.interval &&
+      !options.dryRun &&
+      local.time >= "17:00" &&
+      lastOperationsReportDate !== local.date
+    ) {
+      try {
+        const report = await runDeliveryOperationsReport({ reportDate: local.date });
+        log("info", "delivery_operations_report_result", report);
+        if (report.ok) lastOperationsReportDate = local.date;
+      } catch (error) {
+        log("error", "delivery_operations_report_failed", {
+          reportDate: local.date,
+          error: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+        });
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, options.workerIntervalMs));
   } while (!shuttingDown);

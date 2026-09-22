@@ -905,8 +905,8 @@ async function validateDateBumpsAndWeekend(failures: Failure[]) {
     prismaClient: saturdayStore.client,
     currentStateRefresher: noopRefresh,
   });
-  assertEqual(weekendSummary.weekendSkipped, true, "weekend run skips customer send", failures);
-  assertEqual(saturdayStore.notificationEvents.length, 0, "weekend run does not count/create touch", failures);
+  assertEqual(weekendSummary.weekendSkipped, false, "weekend run is processed", failures);
+  assertEqual(saturdayStore.notificationEvents.length, 1, "weekend run creates the exact-day touch", failures);
 
   const deferredStore = new FakeDeliveryStore();
   const deferred = deferredStore.seed({ deliveryDate: addDays("2026-07-27", 39) });

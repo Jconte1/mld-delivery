@@ -65,7 +65,7 @@ export function render2DayDeliveryReminderSms(params: Render2DayDeliveryReminder
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
-  return `MLD: Order ${params.orderNumber}: Final reminder - your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}. Review delivery details here: ${params.detailsLink}. Reply STOP to opt out.`;
+  return `MLD: Order ${params.orderNumber}:\n\nFinal reminder - your ${deliveryDescription} for ${params.jobName} is scheduled for ${deliveryDate}.\n\nReview delivery details here: ${params.detailsLink}\n\nReply STOP to opt out.`;
 }
 
 export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryReminderParams) {

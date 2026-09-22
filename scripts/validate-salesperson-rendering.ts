@@ -159,7 +159,7 @@ async function main() {
   const projectRoot = path.resolve(__dirname, "..");
   const [page, block, emailRenderer, reminderEmailRenderer, intervalTestScript] =
     await Promise.all([
-    readFile(path.join(projectRoot, "app/delivery/confirm/[token]/page.tsx"), "utf8"),
+    readFile(path.join(projectRoot, "app/confirm/[token]/page.tsx"), "utf8"),
     readFile(path.join(projectRoot, "app/delivery/components/SalespersonContactBlock.tsx"), "utf8"),
     readFile(path.join(projectRoot, "lib/notifications/deliveryConfirmationEmail.ts"), "utf8"),
     readFile(path.join(projectRoot, "lib/notifications/deliveryReminderEmail.ts"), "utf8"),

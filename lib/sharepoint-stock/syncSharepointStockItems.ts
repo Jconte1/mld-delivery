@@ -3,7 +3,11 @@ import {
   type Prisma,
 } from "@/lib/generated/prisma/client";
 import { prisma } from "@/lib/prisma";
-import { SHAREPOINT_STOCK_SOURCE } from "@/lib/sharepoint-stock/stockInventoryNormalization";
+import {
+  REGIONAL_STOCK_LIST_CONFIGS,
+  stockListEnv,
+  type SharePointStockListKey,
+} from "@/lib/sharepoint-stock/regionalStockLists";
 import {
   loadSharePointStockWorkbookFromEnv,
   safeSharePointStockWorkbookErrors,
@@ -23,6 +27,8 @@ type SharePointStockSyncClient = {
 
 export type SharePointStockSyncSummary = {
   syncRunId: string;
+  stockListKey: SharePointStockListKey;
+  source: string;
   status: "SUCCESS" | "FAILED";
   workbookName: string | null;
   worksheetName: string | null;
@@ -43,6 +49,8 @@ export type SyncSharePointStockItemsOptions = {
   client?: SharePointStockSyncClient;
   loadWorkbook?: () => Promise<SharePointStockWorkbookExtraction>;
   now?: Date;
+  stockListKey?: SharePointStockListKey;
+  env?: NodeJS.ProcessEnv;
 };
 
 function countSkippedRowsByReason(rows: SharePointStockWorkbookExtraction["skippedRows"]) {
@@ -76,14 +84,19 @@ export async function syncSharePointStockItems(
 ): Promise<SharePointStockSyncSummary> {
   const client = options.client ?? prisma;
   const startedAt = options.now ?? new Date();
-  const loadWorkbook = options.loadWorkbook ?? (() => loadSharePointStockWorkbookFromEnv());
+  const stockListKey = options.stockListKey ?? "utah_wyoming";
+  const stockConfig = REGIONAL_STOCK_LIST_CONFIGS[stockListKey];
+  const env = stockListEnv(stockListKey, options.env ?? process.env);
+  const source = stockConfig.source;
+  const loadWorkbook = options.loadWorkbook ?? (() => loadSharePointStockWorkbookFromEnv(env));
   const run = await client.sharePointStockSyncRun.create({
     data: {
+      source,
       status: SharePointStockSyncRunStatus.RUNNING,
       startedAt,
-      workbookSiteId: process.env.SHAREPOINT_SITE_ID?.trim() || null,
-      workbookDriveId: process.env.SHAREPOINT_DRIVE_ID?.trim() || null,
-      workbookFileId: process.env.SHAREPOINT_FILE_ID?.trim() || null,
+      workbookSiteId: env.SHAREPOINT_SITE_ID?.trim() || null,
+      workbookDriveId: env.SHAREPOINT_DRIVE_ID?.trim() || null,
+      workbookFileId: env.SHAREPOINT_FILE_ID?.trim() || null,
     },
     select: { id: true },
   });
@@ -94,7 +107,7 @@ export async function syncSharePointStockItems(
     const seenIds = workbook.rows.map((row) => row.normalizedInventoryId);
     const existing = await client.externalStockItem.findMany({
       where: {
-        source: SHAREPOINT_STOCK_SOURCE,
+        source,
         normalizedInventoryId: { in: seenIds },
       },
       select: {
@@ -110,16 +123,16 @@ export async function syncSharePointStockItems(
       await client.externalStockItem.upsert({
         where: {
           source_normalizedInventoryId: {
-            source: SHAREPOINT_STOCK_SOURCE,
+            source,
             normalizedInventoryId: row.normalizedInventoryId,
           },
         },
         create: {
           inventoryId: row.inventoryId,
           normalizedInventoryId: row.normalizedInventoryId,
-          source: SHAREPOINT_STOCK_SOURCE,
+          source,
           sourceRowNumber: row.rowNumber,
-          sourceWorkbookId: workbook.metadata.id ?? process.env.SHAREPOINT_FILE_ID?.trim() ?? null,
+          sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
           lastSeenAt: startedAt,
           lastSyncedAt: startedAt,
           isActive: true,
@@ -127,7 +140,7 @@ export async function syncSharePointStockItems(
         update: {
           inventoryId: row.inventoryId,
           sourceRowNumber: row.rowNumber,
-          sourceWorkbookId: workbook.metadata.id ?? process.env.SHAREPOINT_FILE_ID?.trim() ?? null,
+          sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
           lastSeenAt: startedAt,
           lastSyncedAt: startedAt,
           isActive: true,
@@ -140,7 +153,7 @@ export async function syncSharePointStockItems(
 
     const deactivated = await client.externalStockItem.updateMany({
       where: {
-        source: SHAREPOINT_STOCK_SOURCE,
+        source,
         isActive: true,
         normalizedInventoryId: { notIn: seenIds },
       },
@@ -174,6 +187,8 @@ export async function syncSharePointStockItems(
 
     return {
       syncRunId: run.id,
+      stockListKey,
+      source,
       status: "SUCCESS",
       workbookName: workbook.metadata.name,
       worksheetName: workbook.worksheetName,
@@ -208,6 +223,8 @@ export async function syncSharePointStockItems(
 
     return {
       syncRunId: run.id,
+      stockListKey,
+      source,
       status: "FAILED",
       workbookName: null,
       worksheetName: null,

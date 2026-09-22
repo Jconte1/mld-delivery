@@ -1,7 +1,8 @@
 import { evaluateDeliveryGroupPayment } from "../lib/delivery-payment/deliveryGroupPayment";
 import { summarizeDeliveryGroupReadiness } from "../lib/delivery-readiness/orderLineReadiness";
 import {
-  getFreshExternalStockMatchesForInventoryIds,
+  externalStockMatchesLine,
+  getFreshExternalStockMatchesForLines,
   getLatestSharePointStockSyncFreshness,
 } from "../lib/sharepoint-stock/externalStockReadiness";
 import {
@@ -121,10 +122,8 @@ async function main() {
   const membershipLines = selected.deliveryGroupLines
     .map((membership) => membership.orderLine)
     .filter((line): line is NonNullable<typeof line> => Boolean(line));
-  const stockInventoryIds = membershipLines
-    .filter((line) => line.itemType === "F")
-    .map((line) => line.inventoryId);
-  const freshMatches = await getFreshExternalStockMatchesForInventoryIds(stockInventoryIds);
+  const stockLines = membershipLines.filter((line) => line.itemType === "F");
+  const freshMatches = await getFreshExternalStockMatchesForLines(stockLines);
   const oldReadiness = summarizeDeliveryGroupReadiness({
     orderDeliveryGroupId: selected.id,
     orderId: selected.orderId,
@@ -138,6 +137,7 @@ async function main() {
       lineDescription: line.lineDescription,
       itemType: line.itemType,
       itemClass: line.itemClass,
+      warehouseId: line.warehouseId,
       requestedOn: line.requestedOn,
       eta: line.eta,
       orderQty: line.orderQty,
@@ -159,6 +159,7 @@ async function main() {
       lineDescription: line.lineDescription,
       itemType: line.itemType,
       itemClass: line.itemClass,
+      warehouseId: line.warehouseId,
       requestedOn: line.requestedOn,
       eta: line.eta,
       orderQty: line.orderQty,
@@ -211,8 +212,7 @@ async function main() {
   });
   const stockMemberLineCount = membershipLines.filter((line) => line.itemType === "F").length;
   const matchingStockItemCount = membershipLines.filter((line) => {
-    const normalized = normalizeStockInventoryId(line.inventoryId);
-    return line.itemType === "F" && Boolean(normalized && freshMatches.has(normalized));
+    return line.itemType === "F" && externalStockMatchesLine(freshMatches, line);
   }).length;
   const readyDueToStockList = newReadiness.lines.filter((line) => {
     const previous = oldReadiness.lines.find((candidate) => candidate.orderLineId === line.orderLineId);

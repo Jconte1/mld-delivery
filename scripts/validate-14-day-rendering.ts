@@ -91,22 +91,23 @@ function main() {
   );
   assertIncludes(
     smsNoPayment,
-    "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_14_test.",
+    "Review delivery details here: https://mld-delivery.example.test/delivery/details/dd_14_test",
     "14-day SMS includes readonly details link",
     failures
   );
   assertIncludes(
     smsPayment,
-    "Payment may be needed before delivery. Please review details here:",
-    "14-day SMS includes payment sentence only when due",
+    "Balance owed prior to scheduling Delivery: $225.75",
+    "14-day SMS includes the exact balance when due",
     failures
   );
   assertNotIncludes(
     smsNoPayment,
-    "Payment may be needed before delivery",
-    "14-day SMS omits payment sentence when no payment is due",
+    "$225.75",
+    "14-day SMS omits the balance when no payment is due",
     failures
   );
+  assertIncludes(smsPayment, "\n\n", "14-day SMS uses paragraph spacing", failures);
 
   for (const forbidden of [
     "Confirm",

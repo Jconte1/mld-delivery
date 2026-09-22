@@ -14,15 +14,21 @@ import {
 import { NotificationIntervalType } from "../lib/generated/prisma/client";
 import {
   getFreshExternalStockMatchesForInventoryIds,
+  getFreshExternalStockMatchesForLines,
   getLatestSharePointStockSyncFreshness,
   type ExternalStockReadinessOptions,
 } from "../lib/sharepoint-stock/externalStockReadiness";
 import { SHAREPOINT_STOCK_SOURCE } from "../lib/sharepoint-stock/stockInventoryNormalization";
+import {
+  SHAREPOINT_STOCK_SOURCES,
+  stockMatchKey,
+  stockSourceForWarehouse,
+} from "../lib/sharepoint-stock/regionalStockLists";
 
 const ROOT = process.cwd();
 const DELIVERY_DATE = "2026-08-10";
 const MATCHED_INVENTORY_ID = "STOCK-READY-1";
-const STOCK_MATCHES = new Set([MATCHED_INVENTORY_ID]);
+const STOCK_MATCHES = new Set([stockMatchKey(SHAREPOINT_STOCK_SOURCE, MATCHED_INVENTORY_ID)]);
 
 function assert(condition: unknown, message: string, failures: string[]) {
   if (!condition) failures.push(message);
@@ -42,6 +48,7 @@ function readinessLine(
     lineDescription: overrides.lineDescription ?? `Fixture item ${overrides.lineNbr}`,
     itemType: overrides.itemType ?? "F",
     itemClass: overrides.itemClass ?? "TEST",
+    warehouseId: overrides.warehouseId ?? "SALT LAKE SHOWROOM",
     requestedOn: overrides.requestedOn ?? DELIVERY_DATE,
     eta: "eta" in overrides ? overrides.eta ?? null : null,
     orderQty: overrides.orderQty ?? "1",
@@ -75,6 +82,7 @@ function paymentLine(
     lineDescription: overrides.lineDescription ?? `Fixture item ${overrides.lineNbr}`,
     itemType: overrides.itemType ?? "F",
     itemClass: overrides.itemClass ?? "TEST",
+    warehouseId: overrides.warehouseId ?? "SALT LAKE SHOWROOM",
     requestedOn: overrides.requestedOn ?? DELIVERY_DATE,
     taxCategory: overrides.taxCategory ?? "EXEMPT",
     discountedUnitPrice: overrides.discountedUnitPrice ?? "100.00",
@@ -177,6 +185,7 @@ function oneWeekGroup() {
 function fakeExternalStockClient(params: {
   completedAt?: Date | null;
   matchedIds?: string[];
+  matchedBySource?: Record<string, string[]>;
 }) {
   let externalStockItemFindManyCalls = 0;
   return {
@@ -203,8 +212,11 @@ function fakeExternalStockClient(params: {
           select: { normalizedInventoryId: boolean };
         }) => {
           externalStockItemFindManyCalls += 1;
-          const matchedIds = new Set(params.matchedIds ?? []);
-          return args.where.source === SHAREPOINT_STOCK_SOURCE && args.where.isActive
+          const matchedIds = new Set(
+            params.matchedBySource?.[args.where.source] ??
+              (args.where.source === SHAREPOINT_STOCK_SOURCE ? params.matchedIds ?? [] : [])
+          );
+          return args.where.isActive
             ? args.where.normalizedInventoryId.in
                 .filter((inventoryId) => matchedIds.has(inventoryId))
                 .map((normalizedInventoryId) => ({ normalizedInventoryId }))
@@ -377,8 +389,59 @@ async function run() {
     }
   );
   assert(
-    freshMatches.has(MATCHED_INVENTORY_ID) && freshClient.externalStockItemFindManyCalls === 1,
+    freshMatches.has(stockMatchKey(SHAREPOINT_STOCK_SOURCE, MATCHED_INVENTORY_ID)) &&
+      freshClient.externalStockItemFindManyCalls === 1,
     "11. Fresh stock sync applies normalized matches with one batch lookup",
+    failures
+  );
+
+  const regionalClient = fakeExternalStockClient({
+    completedAt: new Date("2026-07-30T00:00:00.000Z"),
+    matchedBySource: {
+      [SHAREPOINT_STOCK_SOURCES.idaho]: [MATCHED_INVENTORY_ID],
+      [SHAREPOINT_STOCK_SOURCES.southwest]: ["SW-STOCK-1"],
+    },
+  });
+  const regionalMatches = await getFreshExternalStockMatchesForLines(
+    [
+      { inventoryId: MATCHED_INVENTORY_ID, warehouseId: "BOISE WAREHOUSE" },
+      { inventoryId: MATCHED_INVENTORY_ID, warehouseId: "SALT LAKE SHOWROOM" },
+      { inventoryId: "SW-STOCK-1", warehouseId: "SOUTHWEST SHOWROOM" },
+      { inventoryId: MATCHED_INVENTORY_ID, warehouseId: "UNKNOWN WAREHOUSE" },
+    ],
+    {
+      client: regionalClient.client as unknown as NonNullable<ExternalStockReadinessOptions["client"]>,
+      now: new Date("2026-07-31T00:00:00.000Z"),
+    }
+  );
+  assert(
+    regionalMatches.has(stockMatchKey(SHAREPOINT_STOCK_SOURCES.idaho, MATCHED_INVENTORY_ID)) &&
+      regionalMatches.has(stockMatchKey(SHAREPOINT_STOCK_SOURCES.southwest, "SW-STOCK-1")) &&
+      !regionalMatches.has(stockMatchKey(SHAREPOINT_STOCK_SOURCES.utah_wyoming, MATCHED_INVENTORY_ID)),
+    "11b. Regional matches use the stock list assigned to each warehouse",
+    failures
+  );
+  assert(
+    stockSourceForWarehouse("  ketchum   showroom ") === SHAREPOINT_STOCK_SOURCES.idaho &&
+      stockSourceForWarehouse("SOUTHWEST WAREHOUSE") === SHAREPOINT_STOCK_SOURCES.southwest &&
+      stockSourceForWarehouse("UNMAPPED") === null,
+    "11c. Warehouse mapping is normalized and unknown warehouses fail closed",
+    failures
+  );
+
+  const idahoOnlyMatch = new Set([
+    stockMatchKey(SHAREPOINT_STOCK_SOURCES.idaho, MATCHED_INVENTORY_ID),
+  ]);
+  assert(
+    readinessFor(
+      readinessLine({ id: "idaho_match", lineNbr: 111, warehouseId: "BOISE SHOWROOM" }),
+      idahoOnlyMatch
+    ).readinessStatus === "ready" &&
+      readinessFor(
+        readinessLine({ id: "utah_no_cross_match", lineNbr: 112, warehouseId: "PROVO SHOWROOM" }),
+        idahoOnlyMatch
+      ).readinessStatus === "eta_pending",
+    "11d. Same model cannot cross-match between regional warehouse lists",
     failures
   );
 

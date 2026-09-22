@@ -1,3 +1,5 @@
+import { normalizeDeliveryAppBaseUrl } from "@/lib/notifications/deliveryConfirmationLinks";
+
 export type DeliveryNotificationProviderName = "twilio" | "ms_graph";
 
 export type DeliveryNotificationProviderResult = {
@@ -99,7 +101,7 @@ async function graphAccessToken(env: NodeJS.ProcessEnv) {
 }
 
 export function buildTwilioStatusCallbackUrl(env: NodeJS.ProcessEnv = process.env) {
-  const baseUrl = requireEnv(env, "DELIVERY_APP_BASE_URL").replace(/\/+$/, "");
+  const baseUrl = normalizeDeliveryAppBaseUrl(requireEnv(env, "DELIVERY_APP_BASE_URL"));
   return `${baseUrl}/api/webhooks/twilio/message-status`;
 }
 

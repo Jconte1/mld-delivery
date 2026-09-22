@@ -33,7 +33,6 @@ import {
   formatJobName,
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
-  shouldSkipNotificationRunForWeekend,
 } from "@/lib/notifications/helpers";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
@@ -477,11 +476,6 @@ export async function create12DayDeliveryPaymentRequestEvents(
     importRequestedOn,
     dryRun,
   });
-
-  if (shouldSkipNotificationRunForWeekend(runDate)) {
-    summary.weekendSkipped = true;
-    return summary;
-  }
 
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate);
   if (!deliveryDateSkipReason) {

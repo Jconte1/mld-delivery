@@ -230,14 +230,6 @@ export function getNotificationTargetDate(runDate: Date | string, intervalDays: 
   return addDays(runDate, intervalDays);
 }
 
-export function isNotificationBusinessDay(runDate: Date | string) {
-  return !isWeekendDate(runDate);
-}
-
-export function shouldSkipNotificationRunForWeekend(runDate: Date | string) {
-  return !isNotificationBusinessDay(runDate);
-}
-
 export function isWeekendDate(value: Date | string) {
   const day = dateFromKey(value).getUTCDay();
   return day === 0 || day === 6;
@@ -255,12 +247,6 @@ export function getDeliveryDateCustomerNotificationSkipReason(deliveryDate: Date
   return isEligibleDeliveryDateForCustomerNotification(deliveryDate)
     ? null
     : DELIVERY_DATE_WEEKEND_SKIP_REASON;
-}
-
-export function assertNotificationBusinessDay(runDate: Date | string) {
-  if (shouldSkipNotificationRunForWeekend(runDate)) {
-    throw new Error(`Notification run skipped because ${dateKey(runDate)} is a weekend`);
-  }
 }
 
 export function selectNotificationChannel(

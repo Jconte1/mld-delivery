@@ -403,17 +403,21 @@ function validateCustomerMessages(failures: string[]) {
 }
 
 async function validateShortConfirmationLinkRoute(failures: string[]) {
+  const previousBaseUrl = process.env.DELIVERY_APP_BASE_URL;
+  process.env.DELIVERY_APP_BASE_URL = "https://www.mld.com/delivery";
   const response = await shortConfirmationLinkGet(
-    new Request("https://delivery.example.test/delivery/c/test-token"),
+    new Request("https://mld-delivery.vercel.app/delivery/c/test-token"),
     { params: Promise.resolve({ token: "test-token" }) }
   );
+  if (previousBaseUrl === undefined) delete process.env.DELIVERY_APP_BASE_URL;
+  else process.env.DELIVERY_APP_BASE_URL = previousBaseUrl;
   assert(
     response.status === 307 || response.status === 308,
     "short confirmation route returns a redirect",
     failures
   );
   assert(
-    response.headers.get("location") === "https://delivery.example.test/delivery/confirm/test-token",
+    response.headers.get("location") === "https://www.mld.com/delivery/confirm/test-token",
     "short confirmation route redirects to full confirmation page with same token",
     failures
   );

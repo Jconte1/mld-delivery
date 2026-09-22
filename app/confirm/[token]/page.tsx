@@ -19,6 +19,7 @@ import {
   enqueueDeliveryRequestedDateWriteback,
   loadDeliveryRequestedDateWritebackLineNumbers,
 } from "@/lib/notifications/deliveryRequestedDateWritebackQueue";
+import { buildDeliveryConfirmationLink } from "@/lib/notifications/deliveryConfirmationLinks";
 import {
   dateFromKey,
   dateKey,
@@ -178,8 +179,9 @@ function actionStateMessage(value: string | undefined) {
 }
 
 function redirectToConfirmation(token: string, params: Record<string, string>): never {
-  const query = new URLSearchParams(params).toString();
-  redirect(`/delivery/confirm/${encodeURIComponent(token)}${query ? `?${query}` : ""}`);
+  const target = new URL(buildDeliveryConfirmationLink(token));
+  target.search = new URLSearchParams(params).toString();
+  redirect(target.toString());
 }
 
 function InfoState({ title, message }: { title: string; message: string }) {
@@ -197,10 +199,10 @@ async function confirmDelivery(formData: FormData) {
   "use server";
 
   const token = String(formData.get("token") ?? "");
-  if (!token) redirect("/delivery/confirm/invalid");
+  if (!token) redirectToConfirmation("invalid", {});
 
   const result = await confirmDeliveryFromWebpage({ linkToken: token });
-  if (result.outcome === "not_found") redirect("/delivery/confirm/invalid");
+  if (result.outcome === "not_found") redirectToConfirmation("invalid", {});
 
   if (result.outcome === "already_final") {
     redirectToConfirmation(token, { updated: "already_final" });
@@ -237,7 +239,7 @@ async function confirmDelivery(formData: FormData) {
     }
   }
 
-  redirect(`/delivery/confirm/${encodeURIComponent(token)}?updated=confirmed`);
+  redirectToConfirmation(token, { updated: "confirmed" });
 }
 
 async function requestDifferentDate(formData: FormData) {
@@ -245,12 +247,12 @@ async function requestDifferentDate(formData: FormData) {
 
   const token = String(formData.get("token") ?? "");
   const requestedNewDateRaw = String(formData.get("requestedNewDate") ?? "").trim();
-  if (!token) redirect("/delivery/confirm/invalid");
+  if (!token) redirectToConfirmation("invalid", {});
 
   const guard = await guardDeliveryConfirmationWebAction({
     linkToken: token,
   });
-  if (guard.outcome === "not_found") redirect("/delivery/confirm/invalid");
+  if (guard.outcome === "not_found") redirectToConfirmation("invalid", {});
   if (guard.outcome !== "eligible") {
     redirectToConfirmation(token, { updated: guard.outcome });
   }
@@ -341,7 +343,7 @@ async function requestDifferentDate(formData: FormData) {
     });
   }
 
-  redirect(`/delivery/confirm/${encodeURIComponent(token)}?updated=change_requested`);
+  redirectToConfirmation(token, { updated: "change_requested" });
 }
 
 export default async function DeliveryConfirmationPage({ params, searchParams }: PageProps) {

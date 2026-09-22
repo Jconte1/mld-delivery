@@ -241,7 +241,7 @@ const idahoStandardSms = smsFor({ state: "ID", postalCode: "83702" });
 addCheck(
   "24. Standard 42-day SMS does not include Wyoming/McCall route note and uses short link",
   !/Wyoming deliveries|McCall deliveries/.test(standardSms) &&
-    standardSms.includes("https://delivery.example.test/c/abc123") &&
+    standardSms.includes("https://delivery.example.test/delivery/c/abc123") &&
     !standardSms.includes("/delivery/confirm/abc123"),
   { standardSms }
 );

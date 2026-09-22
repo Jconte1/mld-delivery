@@ -814,7 +814,7 @@ function validateRendering(failures: string[]) {
   assertIncludes(sms, "MLD Reminder", "SMS is labeled reminder", failures);
   assertIncludes(sms, "Order# SO42", "SMS includes order number", failures);
   assertIncludes(sms, "Reply Y to confirm or N", "SMS includes Y/N action", failures);
-  assertIncludes(sms, "https://delivery.example.test/c/token", "SMS includes short confirmation link", failures);
+  assertIncludes(sms, "https://delivery.example.test/delivery/c/token", "SMS includes short confirmation link", failures);
   assertIncludes(sms, "McCall deliveries are available on Mondays only.", "SMS preserves McCall route note", failures);
   assertIncludes(sms, "Reply STOP to opt out", "SMS includes STOP language", failures);
 

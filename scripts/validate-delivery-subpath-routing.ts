@@ -81,6 +81,17 @@ async function main() {
     const config = readFileSync(join(root, "next.config.ts"), "utf8");
     assert(config.includes('|| "/delivery"'), "Next basePath must default to /delivery");
 
+    const confirmationPage = readFileSync(join(root, "app/confirm/[token]/page.tsx"), "utf8");
+    assert(
+      confirmationPage.includes("buildDeliveryConfirmationLink(token)"),
+      "confirmation actions must redirect through the canonical link builder"
+    );
+    assert(
+      !confirmationPage.includes('redirect("/delivery/') &&
+        !confirmationPage.includes("redirect(`/delivery/"),
+      "confirmation actions must not hardcode the configured base path"
+    );
+
     console.log(
       JSON.stringify(
         {

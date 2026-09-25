@@ -5,6 +5,7 @@ import { NotificationActionType, NotificationIntervalType } from "../lib/generat
 import {
   deliveryOperationsIntervalLabel,
   deliveryWritebackSucceeded,
+  REPORT_INTERVAL,
 } from "../lib/notifications/deliveryOperationsReport";
 
 function assert(condition: unknown, message: string, failures: string[]) {
@@ -62,6 +63,9 @@ function main() {
   const worker = read("scripts/delivery-notification-worker.ts");
   const report = read("lib/notifications/deliveryOperationsReport.ts");
   const schema = read("prisma/schema.prisma");
+  const schedulerModel = schema.match(/model DeliveryIntervalSchedulerRun \{([\s\S]*?)\n\}/)?.[1];
+  const intervalLimit = Number(schedulerModel?.match(/interval\s+String\s+@db\.VarChar\((\d+)\)/)?.[1]);
+  assert(intervalLimit > 0 && REPORT_INTERVAL.length <= intervalLimit, "report interval fits scheduler database column", failures);
   assert(worker.includes('local.time >= "17:00"'), "worker runs report after 17:00 Denver", failures);
   assert(worker.includes("lastOperationsReportDate"), "worker suppresses repeat report attempts", failures);
   assert(report.includes("delivery_operations_report:${reportDate}"), "report uses date lock", failures);
@@ -82,7 +86,7 @@ function main() {
   }
   console.log(JSON.stringify({
     ok: true,
-    validations: 21,
+    validations: 22,
     emailsSent: 0,
     smsSent: 0,
     providerCalls: 0,

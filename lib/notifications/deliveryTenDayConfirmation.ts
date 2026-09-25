@@ -7,7 +7,9 @@ import {
   type Order,
   type OrderDeliveryGroup,
 } from "@/lib/generated/prisma/client";
-import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
+import { dateFromKey, dateKey, selectNotificationChannel } from "@/lib/notifications/helpers";
+import { loadActiveNotificationOptOutAddresses, mergeNotificationOptOutAddresses } from "@/lib/notifications/notificationOptOutLookup";
+import { normalizeEmailForOptOut, normalizeSmsPhoneForOptOut } from "@/lib/notifications/notificationAddressNormalization";
 import {
   enqueueDeliveryTenDayConfirmationWriteback,
   type DeliveryTenDayConfirmationQueueResult,
@@ -28,10 +30,12 @@ export const DELIVERY_TEN_DAY_CONFIRMATION_REASONS = {
   writebackFailed: "one_week_confirmation_writeback_failed",
   writebackQueued: "one_week_confirmation_writeback_pending",
   mismatchPaymentNotCleared: "acumatica_one_week_true_but_group_balance_due",
+  notificationRequired: "successful_opted_in_notification_required",
 } as const;
 
 export const DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES = {
   NOT_CLEARED: "NOT_CLEARED",
+  AWAITING_NOTIFICATION: "AWAITING_NOTIFICATION",
   DRY_RUN: "DRY_RUN",
   QUEUED: "QUEUED",
   WRITTEN: "WRITTEN",
@@ -52,6 +56,60 @@ type DeliveryTenDayConfirmationDelegate = {
 type DeliveryTenDayConfirmationClient = {
   deliveryGroupTenDayConfirmation?: DeliveryTenDayConfirmationDelegate;
 };
+
+// Only the current recipient's real 14/12/10/8 sends can authorize payment clearance writeback.
+export async function hasQualifyingTenDayNotification(
+  group: DeliveryTenDayConfirmationDeliveryGroupInput,
+  client: typeof prisma
+) {
+  if (!client.order?.findUnique || !client.notificationAttempt?.findMany ||
+      !client.smsOptOut?.findMany || !client.emailOptOut?.findMany) return false;
+  const order = await client.order.findUnique({
+    where: { id: group.order.id },
+    include: { contact: { include: {
+      smsOptOuts: { where: { isActive: true } },
+      emailOptOuts: { where: { isActive: true } },
+    } } },
+  });
+  if (!order?.contact) return false;
+  const optOuts = mergeNotificationOptOutAddresses(await loadActiveNotificationOptOutAddresses(client), {
+    activeSmsOptOutPhones: order.contact.smsOptOuts.map(row => row.phone),
+    activeEmailOptOutEmails: order.contact.emailOptOuts.map(row => row.email),
+  });
+  const attempts = await client.notificationAttempt.findMany({
+    where: {
+      success: true,
+      status: { in: ["SUBMITTED", "DELIVERED"] },
+      sentAt: { not: null },
+      controlledRecipientMode: false,
+      forcedContactEligibility: false,
+      OR: [
+        { channel: "SMS", realSmsOptIn: true, localSmsOptOutActive: false, globalSmsOptOutActive: false },
+        { channel: "EMAIL", realEmailOptIn: true, localEmailOptOutActive: false, globalEmailOptOutActive: false },
+      ],
+      notificationEvent: {
+        orderId: group.order.id, deliveryGroupId: group.id,
+        deliveryDate: dateFromKey(group.deliveryDate), contactId: order.contactId,
+        intervalType: { in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] },
+      },
+    },
+    orderBy: { createdAt: "desc" },
+  });
+  return attempts.some(attempt => {
+    const sms = attempt.channel === "SMS";
+    if (!sms && attempt.channel !== "EMAIL") return false;
+    if (sms ? attempt.realSmsOptIn !== true : attempt.realEmailOptIn !== true) return false;
+    const channel = selectNotificationChannel({
+      ...order.contact,
+      smsOptIn: sms && order.contact.smsOptIn,
+      emailOptIn: !sms && order.contact.emailOptIn,
+    }, optOuts);
+    const normalize = sms ? normalizeSmsPhoneForOptOut : normalizeEmailForOptOut;
+    const recipient = normalize(attempt.recipient);
+    return channel.selectedChannel === attempt.channel && Boolean(recipient) &&
+      recipient === normalize(sms ? channel.recipientPhone : channel.recipientEmail);
+  });
+}
 
 type ExistingTenDayConfirmationRecord = {
   id: string;
@@ -354,6 +412,26 @@ export async function evaluateAndRecordDeliveryTenDayConfirmation(
         DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES.NOT_CLEARED,
       reason: clearance.reason,
       dryRun,
+    });
+  }
+
+  if (!acumaticaAlreadyTrue && !await hasQualifyingTenDayNotification(
+    params.deliveryGroup, (params.prismaClient ?? prisma) as typeof prisma
+  )) {
+    if (!dryRun) {
+      await upsertTenDayConfirmation({
+        client: requireTenDayConfirmationClient(client), deliveryGroup: params.deliveryGroup,
+        payment: params.payment, sourceInterval: params.sourceInterval,
+        localConfirmed: false, confirmedAt: null,
+        confirmedReason: DELIVERY_TEN_DAY_CONFIRMATION_REASONS.notificationRequired,
+        acumaticaWritebackStatus: DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES.AWAITING_NOTIFICATION,
+      });
+    }
+    return resultBase({
+      deliveryGroup: params.deliveryGroup, payment: params.payment, localCleared: true,
+      localConfirmed: false, wouldWrite: false, dryRun,
+      reason: DELIVERY_TEN_DAY_CONFIRMATION_REASONS.notificationRequired,
+      acumaticaWritebackStatus: DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES.AWAITING_NOTIFICATION,
     });
   }
 

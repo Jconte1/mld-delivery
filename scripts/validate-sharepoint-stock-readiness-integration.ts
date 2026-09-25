@@ -603,9 +603,9 @@ async function run() {
   });
   assert(
     oneWeekNoBalance.localCleared &&
-      oneWeekNoBalance.wouldWrite &&
+      !oneWeekNoBalance.wouldWrite &&
       oneWeekNoBalance.dryRun,
-    "24. ONEWEEKCON no-balance path remains for no payable due",
+    "24. ONEWEEKCON no-balance path waits for a successful notification",
     failures
   );
 

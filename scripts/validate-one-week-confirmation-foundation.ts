@@ -74,11 +74,34 @@ function group(overrides: {
   };
 }
 
-function fakeClient(existing: ConfirmationRecord[] = []) {
+function fakeClient(existing: ConfirmationRecord[] = [], evidence: {
+  sent?: boolean; optedIn?: boolean; optedOut?: boolean; recipient?: string;
+  snapshotOptIn?: boolean;
+} = {}) {
   const records = [...existing];
   return {
     records,
     client: {
+      order: { findUnique: async () => ({ contactId: "contact_test", contact: {
+        phone1: null, phone2: null, email: "test@example.com", smsOptIn: false,
+        emailOptIn: evidence.optedIn !== false, smsOptOuts: [], emailOptOuts: [],
+      } }) },
+      smsOptOut: { findMany: async () => [] },
+      emailOptOut: { findMany: async () => evidence.optedOut ? [{ email: "test@example.com" }] : [] },
+      notificationAttempt: { findMany: async (args: { where: Record<string, unknown> }) => {
+        const where = args.where;
+        const scope = where.notificationEvent as Record<string, unknown>;
+        if (where.success !== true || where.controlledRecipientMode !== false ||
+            where.forcedContactEligibility !== false || !where.sentAt ||
+            JSON.stringify(where.status) !== JSON.stringify({ in: ["SUBMITTED", "DELIVERED"] }) ||
+            !scope.orderId || !scope.deliveryGroupId || !scope.deliveryDate ||
+            scope.contactId !== "contact_test" ||
+            JSON.stringify(scope.intervalType) !== JSON.stringify({ in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] })) {
+          throw new Error("notification evidence query must exclude failed, unsent, test and unrelated sends");
+        }
+        return evidence.sent === false ? [] : [{ channel: "EMAIL", realEmailOptIn: evidence.snapshotOptIn !== false,
+          recipient: evidence.recipient ?? "test@example.com" }];
+      } },
       deliveryGroupTenDayConfirmation: {
         findUnique: async (args: { where: { orderDeliveryGroupId: string } }) =>
           records.find((record) => record.orderDeliveryGroupId === args.where.orderDeliveryGroupId) ??
@@ -171,7 +194,7 @@ async function main() {
   });
   assert(nonPrepayDryRun.localCleared, "non-prepay group is locally clear after interval qualification", failures);
   assert(nonPrepayDryRun.localConfirmed === false, "dry-run does not locally confirm", failures);
-  assert(nonPrepayDryRun.acumaticaWritebackStatus === "DRY_RUN", "dry-run status is recorded in result", failures);
+  assert(nonPrepayDryRun.acumaticaWritebackStatus === "AWAITING_NOTIFICATION", "preview requires notification evidence too", failures);
 
   const balanceDue = fakeClient();
   const balanceDueResult = await evaluateAndRecordDeliveryTenDayConfirmation({
@@ -289,6 +312,30 @@ async function main() {
   });
   assert(existingResult.localConfirmed, "existing completed local confirmation is reused", failures);
   assert(!enqueueCalledForExisting, "existing completed local confirmation does not enqueue duplicate writeback", failures);
+
+  for (const interval of [NotificationIntervalType.DAY_14, NotificationIntervalType.DAY_12,
+    NotificationIntervalType.DAY_10, NotificationIntervalType.DAY_8]) {
+    for (const evidence of [{ sent: false }, { optedIn: false }, { optedOut: true },
+      { recipient: "old@example.com" }, { snapshotOptIn: false }]) {
+      const store = fakeClient([], evidence);
+      const result = await evaluateAndRecordDeliveryTenDayConfirmation({
+        deliveryGroup: group(), payment: payment({ paymentStatus: "no_balance_due", amountDueNowRounded: "0.00" }),
+        sourceInterval: interval, prismaClient: store.client,
+        enqueueWriteback: async () => { throw new Error("ineligible notification must never enqueue"); },
+      });
+      assert(result.acumaticaWritebackStatus === "AWAITING_NOTIFICATION" && !result.wouldWrite && !result.localConfirmed,
+        `${interval} blocks writeback for ${JSON.stringify(evidence)}`, failures);
+    }
+  }
+  const legacy = fakeClient([{ id: "legacy", orderDeliveryGroupId: "group_one_week",
+    localConfirmed: true, acumaticaWritebackStatus: "WRITTEN" }], { sent: false });
+  const legacyResult = await evaluateAndRecordDeliveryTenDayConfirmation({
+    deliveryGroup: group(), payment: payment({ paymentStatus: "no_balance_due", amountDueNowRounded: "0.00" }),
+    sourceInterval: NotificationIntervalType.DAY_12, prismaClient: legacy.client,
+    enqueueWriteback: async () => { throw new Error("legacy writeback is not notification proof"); },
+  });
+  assert(!legacyResult.localConfirmed && legacy.records[0].localConfirmed === false,
+    "ERP false and legacy WRITTEN cannot bypass notification evidence", failures);
 
   if (failures.length > 0) {
     console.error("One-week confirmation foundation validation failed:");

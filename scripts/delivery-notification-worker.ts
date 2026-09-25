@@ -12,6 +12,11 @@ import {
 import { runDeliveryInterval } from "./run-delivery-interval";
 import { run42DayNoResponseCommand } from "./run-42-day-confirmation-no-response";
 import { runDeliveryOperationsReport } from "../lib/notifications/deliveryOperationsReport";
+import {
+  orderThankYouIsDue,
+  reconcileOrderThankYouWritebacks,
+  runScheduledOrderThankYou,
+} from "../lib/notifications/orderThankYou";
 import { addDays, dateKey } from "../lib/notifications/helpers";
 import {
   normalizeDeliveryOrderScope,
@@ -456,6 +461,36 @@ async function main() {
       weekday: "short",
     }).format(now);
     const reportEnabled = process.env.DELIVERY_OPERATIONS_REPORT_ENABLED?.trim().toLowerCase() !== "false";
+    if (!options.interval && !options.dryRun) {
+      try {
+        const writebacks = await reconcileOrderThankYouWritebacks(now);
+        if (writebacks.checked > 0) {
+          log("info", "delivery_order_thank_you_writeback_reconciliation", writebacks);
+        }
+      } catch (error) {
+        log("error", "delivery_order_thank_you_writeback_reconciliation_failed", {
+          error: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+        });
+      }
+    }
+    if (
+      !options.interval &&
+      !options.dryRun &&
+      orderThankYouIsDue({
+        localTime: local.time,
+        enabled: process.env.DELIVERY_THANK_YOU_ENABLED,
+      })
+    ) {
+      try {
+        const thankYouResult = await runScheduledOrderThankYou({ now, send: true });
+        log("info", "delivery_order_thank_you_result", thankYouResult);
+      } catch (error) {
+        log("error", "delivery_order_thank_you_failed", {
+          todayInDenver: local.date,
+          error: error instanceof Error ? error.message.slice(0, 1000) : String(error).slice(0, 1000),
+        });
+      }
+    }
     if (
       !options.interval &&
       !options.dryRun &&

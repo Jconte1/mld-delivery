@@ -23,6 +23,8 @@ type DeliveryTwilioStatusClient = Pick<
   | "notificationAttempt"
   | "notificationEvent"
   | "deliveryConfirmation"
+  | "orderThankYouAttempt"
+  | "orderThankYouEvent"
 >;
 
 type StatusMatch =
@@ -33,18 +35,34 @@ type StatusMatch =
       deliveryConfirmationId: string | null;
       notificationAttemptNumber: number;
       notificationAttemptChannel: NotificationChannel;
+      orderThankYouAttemptId: null;
+      orderThankYouEventId: null;
+    }
+  | {
+      matchStatus: "MATCHED_THANK_YOU_ATTEMPT";
+      notificationAttemptId: null;
+      notificationEventId: null;
+      deliveryConfirmationId: null;
+      orderThankYouAttemptId: string;
+      orderThankYouEventId: string;
+      orderThankYouAttemptNumber: number;
+      orderThankYouAttemptChannel: NotificationChannel;
     }
   | {
       matchStatus: "MATCHED_EVENT";
       notificationAttemptId: null;
       notificationEventId: string;
       deliveryConfirmationId: string | null;
+      orderThankYouAttemptId: null;
+      orderThankYouEventId: null;
     }
   | {
       matchStatus: "UNMATCHED";
       notificationAttemptId: null;
       notificationEventId: null;
       deliveryConfirmationId: null;
+      orderThankYouAttemptId: null;
+      orderThankYouEventId: null;
     };
 
 export type HandleTwilioMessageStatusResult = {
@@ -56,6 +74,8 @@ export type HandleTwilioMessageStatusResult = {
   notificationAttemptId: string | null;
   notificationEventId: string | null;
   deliveryConfirmationId: string | null;
+  orderThankYouAttemptId: string | null;
+  orderThankYouEventId: string | null;
   manualReviewFlagged: boolean;
   duplicate: boolean;
 };
@@ -164,6 +184,28 @@ async function findStatusMatch(
       deliveryConfirmationId: confirmations.length === 1 ? confirmations[0].id : null,
       notificationAttemptNumber: attempt.attemptNumber,
       notificationAttemptChannel: attempt.channel,
+      orderThankYouAttemptId: null,
+      orderThankYouEventId: null,
+    };
+  }
+
+  const thankYouDelegate = (client as Partial<DeliveryTwilioStatusClient>).orderThankYouAttempt;
+  const thankYouAttempt = thankYouDelegate
+    ? await thankYouDelegate.findFirst({
+        where: { externalMessageId: messageSid },
+        orderBy: { createdAt: "desc" },
+      })
+    : null;
+  if (thankYouAttempt) {
+    return {
+      matchStatus: "MATCHED_THANK_YOU_ATTEMPT",
+      notificationAttemptId: null,
+      notificationEventId: null,
+      deliveryConfirmationId: null,
+      orderThankYouAttemptId: thankYouAttempt.id,
+      orderThankYouEventId: thankYouAttempt.orderThankYouEventId,
+      orderThankYouAttemptNumber: thankYouAttempt.attemptNumber,
+      orderThankYouAttemptChannel: thankYouAttempt.channel,
     };
   }
 
@@ -186,6 +228,8 @@ async function findStatusMatch(
       notificationEventId: event.id,
       deliveryConfirmationId:
         event.deliveryConfirmations.length === 1 ? event.deliveryConfirmations[0].id : null,
+      orderThankYouAttemptId: null,
+      orderThankYouEventId: null,
     };
   }
 
@@ -194,6 +238,8 @@ async function findStatusMatch(
     notificationAttemptId: null,
     notificationEventId: null,
     deliveryConfirmationId: null,
+    orderThankYouAttemptId: null,
+    orderThankYouEventId: null,
   };
 }
 
@@ -205,6 +251,28 @@ async function updateMatchedAttempt(params: {
   errorMessage: string | null;
   now: Date;
 }) {
+  if (params.match.matchStatus === "MATCHED_THANK_YOU_ATTEMPT") {
+    const delivered = DELIVERED_STATUSES.has(params.messageStatus);
+    const inFlight = IN_FLIGHT_STATUSES.has(params.messageStatus);
+    const failed = FAILURE_STATUSES.has(params.messageStatus);
+    if (delivered) {
+      await params.client.orderThankYouAttempt.updateMany({
+        where: { id: params.match.orderThankYouAttemptId, status: { not: ATTEMPT_FAILED } },
+        data: { provider: "twilio", providerCode: params.errorCode ?? params.messageStatus, status: ATTEMPT_DELIVERED, errorMessage: null, success: true, sentAt: params.now },
+      });
+    } else if (inFlight) {
+      await params.client.orderThankYouAttempt.updateMany({
+        where: { id: params.match.orderThankYouAttemptId, status: { in: [ATTEMPT_CREATED, ATTEMPT_SUBMITTED] } },
+        data: { provider: "twilio", providerCode: params.errorCode ?? params.messageStatus, status: ATTEMPT_SUBMITTED, success: true },
+      });
+    } else if (failed) {
+      await params.client.orderThankYouAttempt.updateMany({
+        where: { id: params.match.orderThankYouAttemptId, status: { not: ATTEMPT_DELIVERED } },
+        data: { provider: "twilio", providerCode: params.errorCode ?? params.messageStatus, status: ATTEMPT_FAILED, errorMessage: params.errorMessage, success: false },
+      });
+    }
+    return;
+  }
   if (params.match.matchStatus !== "MATCHED_ATTEMPT") return;
 
   const delivered = DELIVERED_STATUSES.has(params.messageStatus);
@@ -257,6 +325,43 @@ async function updateMatchedAttempt(params: {
         status: ATTEMPT_FAILED,
         errorMessage: params.errorMessage,
         success: false,
+      },
+    });
+  }
+}
+
+async function updateMatchedThankYouEventFromStatus(params: {
+  client: DeliveryTwilioStatusClient;
+  match: StatusMatch;
+  messageSid: string;
+  messageStatus: string;
+  errorCode: string | null;
+  errorMessage: string | null;
+  now: Date;
+}) {
+  if (params.match.matchStatus !== "MATCHED_THANK_YOU_ATTEMPT") return;
+  const latest = await params.client.orderThankYouAttempt.findFirst({
+    where: { orderThankYouEventId: params.match.orderThankYouEventId },
+    orderBy: { attemptNumber: "desc" },
+    select: { id: true, status: true },
+  });
+  if (!latest || latest.id !== params.match.orderThankYouAttemptId) return;
+  if (DELIVERED_STATUSES.has(params.messageStatus) || IN_FLIGHT_STATUSES.has(params.messageStatus)) {
+    await params.client.orderThankYouEvent.updateMany({
+      where: { id: params.match.orderThankYouEventId, status: { in: [EVENT_PENDING, EVENT_SENT] } },
+      data: { status: EVENT_SENT, provider: "twilio", externalMessageId: params.messageSid, reasonFailed: null },
+    });
+  } else if (FAILURE_STATUSES.has(params.messageStatus) && latest.status !== ATTEMPT_DELIVERED) {
+    await params.client.orderThankYouEvent.update({
+      where: { id: params.match.orderThankYouEventId },
+      data: {
+        status: EVENT_FAILED,
+        provider: "twilio",
+        reasonFailed: [
+          `Twilio SMS delivery ${params.messageStatus.toLowerCase()}`,
+          params.errorCode,
+          params.errorMessage,
+        ].filter(Boolean).join(": ").slice(0, 1000),
       },
     });
   }
@@ -415,6 +520,8 @@ export async function handleTwilioMessageStatus(params: {
       notificationAttemptId: true,
       notificationEventId: true,
       deliveryConfirmationId: true,
+      orderThankYouAttemptId: true,
+      orderThankYouEventId: true,
       matchStatus: true,
       processedAt: true,
     },
@@ -430,6 +537,8 @@ export async function handleTwilioMessageStatus(params: {
       notificationAttemptId: existing.notificationAttemptId,
       notificationEventId: existing.notificationEventId,
       deliveryConfirmationId: existing.deliveryConfirmationId,
+      orderThankYouAttemptId: existing.orderThankYouAttemptId,
+      orderThankYouEventId: existing.orderThankYouEventId,
       manualReviewFlagged: false,
       duplicate: true,
     };
@@ -461,6 +570,15 @@ export async function handleTwilioMessageStatus(params: {
     errorMessage,
     now,
   });
+  await updateMatchedThankYouEventFromStatus({
+    client,
+    match,
+    messageSid,
+    messageStatus,
+    errorCode,
+    errorMessage,
+    now,
+  });
   const manualReviewFlagged = await flagSmsDeliveryFailureForManualReview({
     client,
     deliveryConfirmationId: match.deliveryConfirmationId,
@@ -478,6 +596,8 @@ export async function handleTwilioMessageStatus(params: {
       notificationAttemptId: match.notificationAttemptId,
       notificationEventId: match.notificationEventId,
       deliveryConfirmationId: match.deliveryConfirmationId,
+      orderThankYouAttemptId: match.orderThankYouAttemptId,
+      orderThankYouEventId: match.orderThankYouEventId,
       processedAt: now,
     },
   });
@@ -491,6 +611,8 @@ export async function handleTwilioMessageStatus(params: {
     notificationAttemptId: match.notificationAttemptId,
     notificationEventId: match.notificationEventId,
     deliveryConfirmationId: match.deliveryConfirmationId,
+    orderThankYouAttemptId: match.orderThankYouAttemptId,
+    orderThankYouEventId: match.orderThankYouEventId,
     manualReviewFlagged,
     duplicate: false,
   };

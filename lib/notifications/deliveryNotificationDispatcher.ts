@@ -53,6 +53,7 @@ import {
 import { getPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
+import { evaluateAndRecordDeliveryTenDayConfirmation } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
   render30DayDeliveryReminderEmail,
   render30DayDeliveryReminderSms,
@@ -1878,8 +1879,7 @@ export async function dispatchDeliveryNotifications(
   const reports: DeliveryDispatchEventReport[] = [];
 
   for (const event of events) {
-    reports.push(
-      await dispatchOne({
+    const report = await dispatchOne({
         event,
         client,
         preflight,
@@ -1887,8 +1887,27 @@ export async function dispatchDeliveryNotifications(
         provider,
         globalOptOuts,
         now,
-      })
-    );
+      });
+    reports.push(report);
+    // Writeback errors must never enter provider fallback or cause a duplicate send.
+    if (report.outcome === "submitted" && !preflight.controlledRecipientMode &&
+        !preflight.forceContactEligibilityForTest &&
+        (["DAY_14", "DAY_12", "DAY_10", "DAY_8"] as string[]).includes(event.intervalType)) {
+      try {
+        const payment = await getDeliveryGroupPaymentEvaluation(event.deliveryGroupId, client);
+        await evaluateAndRecordDeliveryTenDayConfirmation({
+          deliveryGroup: {
+            id: event.deliveryGroupId, orderId: event.orderId,
+            orderType: event.orderType, orderNumber: event.orderNumber,
+            deliveryDate: event.deliveryDate, order: event.order,
+          },
+          payment, sourceInterval: event.intervalType, prismaClient: client,
+        });
+      } catch (error) {
+        console.error(JSON.stringify({ message: "post_send_one_week_confirmation_failed",
+          eventId: event.id, error: truncateError(error) }));
+      }
+    }
   }
 
   const attemptsCreated =

@@ -10,7 +10,7 @@ import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
 import { prisma } from "@/lib/prisma";
 
 const REPORT_TIMEZONE = "America/Denver";
-const REPORT_INTERVAL = "OPERATIONS_REPORT";
+export const REPORT_INTERVAL = "OPS_REPORT";
 const DEFAULT_REPORT_RECIPIENT = "james@mld.com";
 const REPORT_LIFECYCLE_INTERVALS = ["180", "90", "60", "42", "41", "40", "39", "30", "14", "12", "10", "8", "2"] as const;
 
@@ -221,7 +221,12 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
   await refreshConfirmationWritebacks();
   const runDate = dateFromKey(reportDate);
   const window = recentWindow(reportDate);
-  const [schedulerRuns, events, internalEscalations, confirmations, tenDay, holds] = await Promise.all([
+  const [thankYouTables] = await prisma.$queryRaw<Array<{ available: boolean }>>`
+    SELECT to_regclass('public.order_thank_you_events') IS NOT NULL
+      AND to_regclass('public.order_thank_you_attempts') IS NOT NULL AS available
+  `;
+  const thankYouReportingUnavailable = !thankYouTables.available;
+  const [schedulerRuns, events, internalEscalations, confirmations, tenDay, holds, thankYouEvents] = await Promise.all([
     prisma.deliveryIntervalSchedulerRun.findMany({
       where: { runDate, interval: { not: REPORT_INTERVAL } },
       orderBy: [{ interval: "asc" }, { startedAt: "asc" }],
@@ -259,6 +264,11 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
     prisma.deliveryOrderHoldAction.findMany({
       where: { updatedAt: window },
       orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+    }),
+    thankYouReportingUnavailable ? Promise.resolve([]) : prisma.orderThankYouEvent.findMany({
+      where: { OR: [{ createdAt: window }, { updatedAt: window }] },
+      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+      include: { attempts: { orderBy: { attemptNumber: "desc" }, take: 1 } },
     }),
   ]);
 
@@ -360,6 +370,23 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
       error: row.errorMessage ?? "",
     });
   }
+  const thankYouRows = thankYouEvents.map((event) => {
+    const attempt = event.attempts[0];
+    return [
+      `${event.orderType} ${event.orderNumber}`,
+      event.classification,
+      event.selectedChannel ?? "none",
+      event.status,
+      attempt?.status ?? "none",
+      attempt?.success ? "yes" : attempt ? "no" : "n/a",
+      event.acumaticaWritebackStatus ?? "not queued",
+      event.acumaticaWritebackJobId ?? "none",
+      event.reasonSkipped ?? event.reasonFailed ?? event.acumaticaWritebackError ?? "",
+    ];
+  });
+  const thankYouWritebackFailures = thankYouEvents.filter((event) =>
+    ["failed", "enqueue_failed", "status_check_failed"].includes(event.acumaticaWritebackStatus ?? "")
+  ).length;
 
   const schedulerRows = schedulerRuns.map((run) => {
     const health = importHealth(run.resultSummary);
@@ -383,7 +410,8 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
   });
   const failedWritebacks = writebacks.filter((row) => row.success !== "yes" && !["queued", "processing"].includes(row.status)).length;
   const pendingWritebacks = writebacks.filter((row) => ["queued", "processing"].includes(row.status)).length;
-  const subject = `[MLD Delivery] Daily operations report ${reportDate} - ${failedWritebacks ? `${failedWritebacks} writeback failure(s)` : "OK"}`;
+  const totalWritebackFailures = failedWritebacks + thankYouWritebackFailures;
+  const subject = `[MLD Delivery] Daily operations report ${reportDate} - ${totalWritebackFailures ? `${totalWritebackFailures} writeback failure(s)` : thankYouReportingUnavailable ? "Thank-you reporting unavailable" : "OK"}`;
   const htmlBody = `
     <div style="font:14px Arial,sans-serif;color:#1f2933;max-width:1200px">
       <h1 style="font-size:20px">Delivery operations report - ${escapeHtml(reportDate)}</h1>
@@ -396,6 +424,9 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
       ${table(["Interval", "Order", "Delivery date", "Channel", "Event", "Attempt", "Provider accepted", "Order last synced"], eventRows.map((row) => [row.interval, row.order, row.deliveryDate, row.channel, row.eventStatus, row.attemptStatus, row.providerAccepted, row.lastSyncedAt]))}
       <h2 style="font-size:16px">Acumatica writebacks</h2>
       ${table(["Order", "Lifecycle", "Value written", "Queue job", "Status", "Successful", "Error"], writebacks.map((row) => [row.order, row.kind, row.target, row.jobId, row.status, row.success, row.error]))}
+      <h2 style="font-size:16px">Order thank-you notifications</h2>
+      ${thankYouReportingUnavailable ? "<p>Thank-you reporting unavailable: its database migration has not been applied. Interval notification results are included above.</p>" : ""}
+      ${table(["Order", "Type", "Channel", "Event", "Attempt", "Provider accepted", "THANKYOU writeback", "Queue job", "Reason/error"], thankYouRows)}
     </div>`;
 
   return {
@@ -409,18 +440,21 @@ export async function buildDeliveryOperationsReport(reportDate: string) {
       writebacks: writebacks.length,
       pendingWritebacks,
       failedWritebacks,
+      thankYouEvents: thankYouRows.length,
+      thankYouWritebackFailures,
+      thankYouReportingUnavailable,
     },
   };
 }
 
-async function acquireReportLock(reportDate: string) {
+async function acquireReportLock(reportDate: string, retryFailed = false) {
   const lockKey = `delivery_operations_report:${reportDate}`;
   const existing = await prisma.deliveryIntervalSchedulerRun.findUnique({ where: { lockKey } });
   if (existing?.status === "SUCCESS") return { acquired: false, row: existing };
   if (existing?.status === "RUNNING" && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) {
     return { acquired: false, row: existing };
   }
-  if (existing?.status === "FAILED" && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) {
+  if (existing?.status === "FAILED" && !retryFailed && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) {
     return { acquired: false, row: existing };
   }
   if (existing) {
@@ -448,10 +482,10 @@ async function acquireReportLock(reportDate: string) {
   };
 }
 
-export async function runDeliveryOperationsReport(params: { reportDate: string; recipient?: string | null }): Promise<ReportResult> {
+export async function runDeliveryOperationsReport(params: { reportDate: string; recipient?: string | null; retryFailed?: boolean }): Promise<ReportResult> {
   const reportDate = dateKey(params.reportDate);
   const recipient = params.recipient?.trim() || process.env.DELIVERY_OPERATIONS_REPORT_EMAIL?.trim() || DEFAULT_REPORT_RECIPIENT;
-  const lock = await acquireReportLock(reportDate);
+  const lock = await acquireReportLock(reportDate, params.retryFailed);
   if (!lock.acquired) return { ok: true, phase: "skipped_already_reported_or_running", reportDate, recipient, schedulerRunId: lock.row.id };
 
   try {

@@ -23,6 +23,7 @@ async function main() {
   const result = await runDeliveryOperationsReport({
     reportDate,
     recipient: argValue("recipient"),
+    retryFailed: process.argv.slice(2).includes("--retry-failed"),
   });
   console.log(JSON.stringify({ ...result, sensitiveValuesPrinted: false }, null, 2));
 }

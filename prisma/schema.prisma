@@ -135,6 +135,11 @@ enum DeliveryIntervalSchedulerRunStatus {
   FAILED  @map("failed")
 }
 
+enum OrderThankYouClassification {
+  DELIVERY
+  WILL_CALL
+}
+
 model Contact {
   id             String    @id @default(cuid())
   contactId      String    @unique @db.VarChar(64)
@@ -158,11 +163,93 @@ model Contact {
   smsOptOuts            SmsOptOut[]
   emailOptOuts          EmailOptOut[]
   deliveryConfirmations DeliveryConfirmation[]
+  orderThankYouEvents   OrderThankYouEvent[]
 
   @@index([contactId])
   @@index([email])
   @@index([status])
   @@map("contacts")
+}
+
+model OrderThankYouEvent {
+  id                           String                       @id @default(cuid())
+  orderType                    String                       @db.VarChar(16)
+  orderNumber                  String                       @db.VarChar(64)
+  classification               OrderThankYouClassification
+  contactId                    String?                      @db.VarChar(64)
+  customerId                   String?                      @db.VarChar(64)
+  billingZip                   String?                      @db.VarChar(16)
+  shipVia                      String?                      @db.VarChar(128)
+  requestedDeliveryDate        DateTime?                    @db.Date
+  selectedChannel              NotificationChannel?
+  channelReason                String?                      @db.VarChar(256)
+  recipientEmail               String?                      @db.VarChar(256)
+  recipientPhone               String?                      @db.VarChar(32)
+  status                       NotificationEventStatus      @default(PENDING)
+  reasonSkipped                String?                      @db.VarChar(1024)
+  reasonFailed                 String?                      @db.VarChar(1024)
+  provider                     String?                      @db.VarChar(64)
+  externalMessageId            String?                      @db.VarChar(256)
+  reportFetchedAt              DateTime
+  fullOrderFetchedAt           DateTime?
+  contactFetchedAt             DateTime?
+  firstSentAt                  DateTime?
+  willCallUrl                  String?                      @db.VarChar(2048)
+  acumaticaWritebackStatus     String?                      @db.VarChar(64)
+  acumaticaWritebackJobId      String?                      @db.VarChar(128)
+  acumaticaWritebackAttempts   Int                          @default(0)
+  acumaticaWritebackError      String?                      @db.VarChar(2048)
+  acumaticaWritebackQueuedAt   DateTime?
+  acumaticaWritebackCheckedAt  DateTime?
+  acumaticaWritebackCompletedAt DateTime?
+  createdAt                    DateTime                     @default(now())
+  updatedAt                    DateTime                     @updatedAt
+
+  contact   Contact?                      @relation(fields: [contactId], references: [contactId], onDelete: SetNull)
+  attempts  OrderThankYouAttempt[]
+  callbacks TwilioMessageStatusCallback[]
+
+  @@unique([orderType, orderNumber])
+  @@index([classification])
+  @@index([contactId])
+  @@index([status])
+  @@index([selectedChannel])
+  @@index([firstSentAt])
+  @@index([acumaticaWritebackStatus])
+  @@index([acumaticaWritebackJobId])
+  @@map("order_thank_you_events")
+}
+
+model OrderThankYouAttempt {
+  id                     String                    @id @default(cuid())
+  orderThankYouEventId   String
+  attemptNumber          Int
+  channel                NotificationChannel
+  status                 NotificationAttemptStatus @default(CREATED)
+  recipient              String?                   @db.VarChar(256)
+  provider               String?                   @db.VarChar(64)
+  success                Boolean                   @default(false)
+  errorMessage           String?                   @db.VarChar(1024)
+  providerCode           String?                   @db.VarChar(128)
+  httpStatus             Int?
+  externalMessageId      String?                   @db.VarChar(256)
+  realSmsOptIn           Boolean?
+  realEmailOptIn         Boolean?
+  localSmsOptOutActive   Boolean                    @default(false)
+  localEmailOptOutActive Boolean                    @default(false)
+  sentAt                 DateTime?
+  createdAt              DateTime                   @default(now())
+  updatedAt              DateTime                   @updatedAt
+
+  event     OrderThankYouEvent           @relation(fields: [orderThankYouEventId], references: [id], onDelete: Cascade)
+  callbacks TwilioMessageStatusCallback[]
+
+  @@unique([orderThankYouEventId, attemptNumber])
+  @@index([orderThankYouEventId])
+  @@index([channel])
+  @@index([status])
+  @@index([externalMessageId])
+  @@map("order_thank_you_attempts")
 }
 
 model Order {
@@ -1025,6 +1112,8 @@ model TwilioMessageStatusCallback {
   notificationEventId    String?
   notificationAttemptId  String?
   deliveryConfirmationId String?
+  orderThankYouEventId   String?
+  orderThankYouAttemptId String?
   matchStatus            String    @default("UNPROCESSED") @db.VarChar(64)
   rawPayload             Json
   receivedAt             DateTime  @default(now())
@@ -1033,6 +1122,8 @@ model TwilioMessageStatusCallback {
   notificationEvent    NotificationEvent?    @relation(fields: [notificationEventId], references: [id], onDelete: SetNull)
   notificationAttempt  NotificationAttempt?  @relation(fields: [notificationAttemptId], references: [id], onDelete: SetNull)
   deliveryConfirmation DeliveryConfirmation? @relation(fields: [deliveryConfirmationId], references: [id], onDelete: SetNull)
+  orderThankYouEvent   OrderThankYouEvent?   @relation(fields: [orderThankYouEventId], references: [id], onDelete: SetNull)
+  orderThankYouAttempt OrderThankYouAttempt? @relation(fields: [orderThankYouAttemptId], references: [id], onDelete: SetNull)
 
   @@index([messageSid])
   @@index([messageStatus])
@@ -1042,6 +1133,8 @@ model TwilioMessageStatusCallback {
   @@index([notificationEventId])
   @@index([notificationAttemptId])
   @@index([deliveryConfirmationId])
+  @@index([orderThankYouEventId])
+  @@index([orderThankYouAttemptId])
   @@index([matchStatus])
   @@index([receivedAt])
   @@map("twilio_message_status_callbacks")

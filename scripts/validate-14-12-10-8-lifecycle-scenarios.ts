@@ -349,7 +349,7 @@ const scenarios: Scenario[] = [
       const status = await dryRunTenDayStatus(p);
       const failures: string[] = [];
       assert(tenDayWritebackEligible({ evaluation: p }), "non-prepay should be writeback eligible", failures);
-      assert(status === "DRY_RUN", "writeback should be dry-run in validation", failures);
+      assert(status === "AWAITING_NOTIFICATION", "writeback requires a successful notification", failures);
       return done({ tenDayWritebackStatus: status }, failures);
     },
   },
@@ -401,7 +401,7 @@ const scenarios: Scenario[] = [
       const action = nextPaymentLifecycleAction({ day: paidOnDay === 8 ? 8 : 10, evaluation: p });
       const failures: string[] = [];
       assert(action === "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE", "paid customer should skip payment reminder", failures);
-      assert(status === "DRY_RUN", "paid customer should make ONEWEEKCON dry-run eligible", failures);
+      assert(status === "AWAITING_NOTIFICATION", "paid customer still needs a successful notification", failures);
       return done({ paidOnDay, action, tenDayWritebackStatus: status }, failures);
     },
   })),
@@ -832,7 +832,7 @@ const scenarios: Scenario[] = [
       assert(!tenDayWritebackEligible({ evaluation: unpaid }), "unpaid prepay should not write", failures);
       assert(tenDayWritebackEligible({ evaluation: paid }), "paid prepay should write", failures);
       assert(tenDayWritebackEligible({ evaluation: unpaid, acumaticaOneWeekConfirmed: true }), "already-confirmed Acumatica should not duplicate", failures);
-      assert(status === "DRY_RUN", "writeback remains dry-run in validation", failures);
+      assert(status === "AWAITING_NOTIFICATION", "writeback waits for notification evidence", failures);
       return done({ nonPrepay: true, unpaid: false, paid: true, dryRunStatus: status }, failures);
     },
   },

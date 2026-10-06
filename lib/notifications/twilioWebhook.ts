@@ -48,7 +48,7 @@ function externalWebhookUrl(request: Request) {
   const host = forwardedHost || request.headers.get("host");
 
   if (host) {
-    return `${forwardedProto || requestUrl.protocol.replace(":", "")}://${host}${requestUrl.pathname}`;
+    return `${forwardedProto || requestUrl.protocol.replace(":", "")}://${host}${requestUrl.pathname}${requestUrl.search}`;
   }
 
   return requestUrl.toString();

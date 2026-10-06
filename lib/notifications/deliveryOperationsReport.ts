@@ -1,516 +1,189 @@
-import {
-  InternalNotificationPurpose,
-  NotificationActionType,
-  NotificationIntervalType,
-  Prisma,
-} from "@/lib/generated/prisma/client";
+import { NotificationActionType, NotificationIntervalType, Prisma } from "@/lib/generated/prisma/client";
 import { createDeliveryNotificationProvider } from "@/lib/notifications/deliveryNotificationProviders";
-import { deliveryConfirmationReminderTouchNumberFromDedupeKey } from "@/lib/notifications/deliveryConfirmationNoResponse";
 import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
 import { prisma } from "@/lib/prisma";
+import { groupEvidenceSelect } from "./deliveryNotificationGroupEvidence";
+import { auditObject, auditTable, buildOperationsAudit, denverDayStart, lifecycle, nextDate, operationsWorkbook, operationsCoverageStart,
+  type AuditRecord, type AuditRow, type OperationsAuditInput } from "./deliveryOperationsAudit";
 
-const REPORT_TIMEZONE = "America/Denver";
 export const REPORT_INTERVAL = "OPS_REPORT";
-const DEFAULT_REPORT_RECIPIENT = "james@mld.com";
-const REPORT_LIFECYCLE_INTERVALS = ["180", "90", "60", "42", "41", "40", "39", "30", "14", "12", "10", "8", "2"] as const;
-
-type QueueJobStatus = {
-  jobId?: string;
-  status?: "queued" | "processing" | "succeeded" | "failed";
-  result?: unknown;
-  error?: string | null;
-};
-
-type ReportResult = {
-  ok: boolean;
-  phase: string;
-  reportDate: string;
-  recipient: string;
-  schedulerRunId?: string;
-  qualifyingOrders?: number;
-  writebacks?: number;
-  failedWritebacks?: number;
-  providerRequestIdPresent?: boolean;
-};
-
-function escapeHtml(value: unknown): string {
-  return String(value ?? "")
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
+const LIMIT = 10000;
+const str = (value: unknown) => value == null ? "" : String(value);
+export function deliveryOperationsIntervalLabel(event: { intervalType: NotificationIntervalType; actionType: NotificationActionType; dedupeKey: string }) { return lifecycle(event); }
+export function deliveryWritebackSucceeded(kind: "confirmation" | "requestedDate", status: string | null | undefined) {
+  return status === "written" || (kind === "requestedDate" && status === "skipped_existing_value");
 }
-
-function denverDate(value: Date): string {
-  const parts = new Intl.DateTimeFormat("en-CA", {
-    timeZone: REPORT_TIMEZONE,
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-  }).formatToParts(value);
-  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
-  return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function recentWindow(reportDate: string) {
-  const center = dateFromKey(reportDate).getTime();
-  return {
-    gte: new Date(center - 36 * 60 * 60 * 1000),
-    lt: new Date(center + 48 * 60 * 60 * 1000),
-  };
-}
-
-function happenedOnDenverDate(value: Date | null | undefined, reportDate: string) {
-  return Boolean(value && denverDate(value) === reportDate);
-}
-
-function objectValue(value: unknown): Record<string, unknown> {
-  return value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {};
-}
-
-function queueWritebackOutcome(job: QueueJobStatus) {
-  if (job.status === "queued" || job.status === "processing") {
-    return { status: job.status, error: job.error ?? null };
-  }
-  if (job.status === "failed") {
-    return { status: "queue_failed", error: job.error ?? "Queue worker marked the job failed" };
-  }
-  const result = objectValue(job.result);
-  const businessStatus = typeof result.status === "string" && result.status.trim()
-    ? result.status.trim().toLowerCase()
-    : "succeeded_unclassified";
-  const detail = [result.reason, result.error, result.holdRestoreError]
-    .find((value) => typeof value === "string" && value.trim());
-  return {
-    status: businessStatus,
-    error: typeof detail === "string" ? detail : job.error ?? null,
-  };
-}
-
-export function deliveryWritebackSucceeded(
-  kind: "confirmation" | "requestedDate",
-  status: string | null | undefined
-) {
-  if (status === "written") return true;
-  return kind === "requestedDate" && status === "skipped_existing_value";
-}
-
-function queueConfig() {
-  const baseUrl = process.env.MLD_QUEUE_BASE_URL?.trim().replace(/\/+$/, "");
+async function fetchQueueJob(jobId: string): Promise<AuditRecord> {
+  const base = process.env.MLD_QUEUE_BASE_URL?.trim().replace(/\/+$/, "");
   const token = process.env.MLD_QUEUE_TOKEN?.trim();
-  if (!baseUrl || !token) throw new Error("MLD_QUEUE_BASE_URL and MLD_QUEUE_TOKEN are required for writeback reporting");
-  return { baseUrl: /^https?:\/\//i.test(baseUrl) ? baseUrl : `https://${baseUrl}`, token };
+  if (!base || !token) throw new Error("Queue reporting credentials unavailable");
+  const url = /^https?:\/\//i.test(base) ? base : `https://${base}`;
+  const response = await fetch(`${url}/api/erp/jobs/${encodeURIComponent(jobId)}`, {
+    headers: { Authorization: `Bearer ${token}`, Accept: "application/json" }, cache: "no-store", signal: AbortSignal.timeout(15000),
+  });
+  if (!response.ok) throw new Error(`Queue status HTTP ${response.status}`);
+  return auditObject(await response.json());
 }
 
-async function fetchQueueJob(jobId: string): Promise<QueueJobStatus> {
-  const config = queueConfig();
-  const response = await fetch(`${config.baseUrl}/api/erp/jobs/${encodeURIComponent(jobId)}`, {
-    headers: { Accept: "application/json", Authorization: `Bearer ${config.token}` },
-    cache: "no-store",
+// Read-only collection: report generation never updates business records or enqueues jobs.
+export async function buildDeliveryOperationsReport(reportDate: string, options: { now?: Date; queueLookup?: typeof fetchQueueJob } = {}) {
+  const now = options.now ?? new Date();
+  const dayEnd = denverDayStart(nextDate(reportDate));
+  const end = now < dayEnd ? now : dayEnd;
+  if (end <= denverDayStart(reportDate)) throw new Error("Report date is in the future");
+  const coverage: AuditRow[] = [];
+  const previous = await prisma.deliveryIntervalSchedulerRun.findFirst({
+    where: { interval: REPORT_INTERVAL, status: "SUCCESS", runDate: { lt: dateFromKey(reportDate) } },
+    orderBy: { runDate: "desc" }, select: { runDate: true, resultSummary: true },
   });
-  const text = await response.text();
-  if (!response.ok) throw new Error(`Queue status failed for ${jobId}: ${response.status} ${text.slice(0, 500)}`);
-  return text ? (JSON.parse(text) as QueueJobStatus) : {};
-}
-
-async function refreshConfirmationWritebacks() {
-  const confirmations = await prisma.deliveryConfirmation.findMany({
-    where: {
-      OR: [
-        {
-          confirmationWritebackJobId: { not: null },
-          OR: [
-            { confirmationWritebackStatus: null },
-            { confirmationWritebackStatus: { in: ["queued", "processing", "status_check_failed"] } },
-          ],
-        },
-        {
-          requestedDateWritebackJobId: { not: null },
-          OR: [
-            { requestedDateWritebackStatus: null },
-            { requestedDateWritebackStatus: { in: ["queued", "processing", "status_check_failed"] } },
-          ],
-        },
-      ],
-    },
-    take: 500,
-    orderBy: { updatedAt: "asc" },
-    select: {
-      id: true,
-      confirmationWritebackJobId: true,
-      requestedDateWritebackJobId: true,
-    },
-  });
-
-  for (const confirmation of confirmations) {
-    for (const kind of ["confirmation", "requestedDate"] as const) {
-      const jobId = kind === "confirmation"
-        ? confirmation.confirmationWritebackJobId
-        : confirmation.requestedDateWritebackJobId;
-      if (!jobId) continue;
-      try {
-        const job = await fetchQueueJob(jobId);
-        const terminal = job.status === "succeeded" || job.status === "failed";
-        const outcome = queueWritebackOutcome(job);
-        const prefix = kind === "confirmation" ? "confirmationWriteback" : "requestedDateWriteback";
-        await prisma.deliveryConfirmation.update({
-          where: { id: confirmation.id },
-          data: {
-            [`${prefix}Status`]: outcome.status,
-            [`${prefix}Result`]: job.result === undefined
-              ? undefined
-              : job.result === null
-                ? Prisma.JsonNull
-                : job.result as Prisma.InputJsonValue,
-            [`${prefix}Error`]: outcome.error?.slice(0, 2048) ?? null,
-            [`${prefix}CheckedAt`]: new Date(),
-            [`${prefix}CompletedAt`]: terminal ? new Date() : null,
-          },
-        });
-      } catch (error) {
-        const prefix = kind === "confirmation" ? "confirmationWriteback" : "requestedDateWriteback";
-        await prisma.deliveryConfirmation.update({
-          where: { id: confirmation.id },
-          data: {
-            [`${prefix}Status`]: "status_check_failed",
-            [`${prefix}Error`]: (error instanceof Error ? error.message : String(error)).slice(0, 2048),
-            [`${prefix}CheckedAt`]: new Date(),
-          },
-        });
-      }
-    }
-  }
-}
-
-export function deliveryOperationsIntervalLabel(event: {
-  intervalType: NotificationIntervalType;
-  actionType: NotificationActionType;
-  dedupeKey: string;
-}) {
-  if (event.intervalType !== NotificationIntervalType.DAY_42) {
-    return event.intervalType.replace("DAY_", "");
-  }
-  if (event.actionType === NotificationActionType.DELIVERY_CONFIRMATION_REQUEST) return "42";
-  const touch = deliveryConfirmationReminderTouchNumberFromDedupeKey(event.dedupeKey);
-  if (touch === 2) return "41";
-  if (touch === 3) return "40";
-  return "42 follow-up";
-}
-
-function importHealth(summary: unknown) {
-  const root = objectValue(summary);
-  const importSummary = objectValue(root.importSummary);
-  const errors = Array.isArray(importSummary.errors) ? importSummary.errors.length : 0;
-  const refreshed = Array.isArray(root.successfullyRefreshedOrders)
-    ? root.successfullyRefreshedOrders.length
-    : Number(importSummary.importedOrders ?? importSummary.ordersImported ?? 0);
-  const failed = Array.isArray(root.failedImportExclusions) ? root.failedImportExclusions.length : errors;
-  return { refreshed, failed };
-}
-
-function table(headers: string[], rows: Array<Array<unknown>>) {
-  const head = headers.map((header) => `<th style="text-align:left;padding:7px;border:1px solid #ccd2d8;background:#eef1f4">${escapeHtml(header)}</th>`).join("");
-  const body = rows.length
-    ? rows.map((row) => `<tr>${row.map((cell) => `<td style="padding:7px;border:1px solid #ccd2d8;vertical-align:top">${escapeHtml(cell)}</td>`).join("")}</tr>`).join("")
-    : `<tr><td colspan="${headers.length}" style="padding:9px;border:1px solid #ccd2d8">None</td></tr>`;
-  return `<table style="border-collapse:collapse;width:100%;font:13px Arial,sans-serif"><thead><tr>${head}</tr></thead><tbody>${body}</tbody></table>`;
-}
-
-export async function buildDeliveryOperationsReport(reportDate: string) {
-  await refreshConfirmationWritebacks();
-  const runDate = dateFromKey(reportDate);
-  const window = recentWindow(reportDate);
-  const [thankYouTables] = await prisma.$queryRaw<Array<{ available: boolean }>>`
-    SELECT to_regclass('public.order_thank_you_events') IS NOT NULL
-      AND to_regclass('public.order_thank_you_attempts') IS NOT NULL AS available
-  `;
-  const thankYouReportingUnavailable = !thankYouTables.available;
-  const [schedulerRuns, events, internalEscalations, confirmations, tenDay, holds, thankYouEvents] = await Promise.all([
-    prisma.deliveryIntervalSchedulerRun.findMany({
-      where: { runDate, interval: { not: REPORT_INTERVAL } },
-      orderBy: [{ interval: "asc" }, { startedAt: "asc" }],
+  const { start, overlap } = operationsCoverageStart(reportDate, previous ? auditObject(previous) : null);
+  if (overlap) coverage.push({ Section: "Coverage overlap", Status: "Informational", Detail: "Previous report lacks an exact cutoff or had incomplete core data. Activity intentionally overlaps to avoid losing evidence." });
+  const window = { gte: start, lt: end };
+  const recent = { updatedAt: window };
+  const pending = ["enqueue_pending", "queued", "processing", "status_check_failed", "failed", "queue_failed", "refused", "enqueue_failed", "live_write_refused"];
+  const sources: Record<string, () => Promise<unknown[]>> = {
+    runs: () => prisma.deliveryIntervalSchedulerRun.findMany({
+      where: { interval: { not: REPORT_INTERVAL }, runDate: { lte: dateFromKey(reportDate) }, OR: [
+        { runDate: { gte: dateFromKey(start.toLocaleDateString("en-CA", { timeZone: "America/Denver" })) } }, { status: { in: ["FAILED", "RUNNING"] } },
+      ] }, orderBy: { startedAt: "asc" }, take: LIMIT + 1,
     }),
-    prisma.notificationEvent.findMany({
-      where: { scheduledAt: runDate },
-      orderBy: [{ intervalType: "asc" }, { orderType: "asc" }, { orderNumber: "asc" }],
-      include: {
-        attempts: { orderBy: { attemptNumber: "desc" }, take: 1 },
-        order: { select: { lastSyncedAt: true } },
-      },
+    events: () => prisma.notificationEvent.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { createdAt: window }, { status: { in: ["FAILED", "SCHEDULED", "PENDING"] } },
+        { attempts: { some: { OR: [{ updatedAt: window }, { status: { in: ["FAILED", "CREATED"] } }, { channel: "SMS", status: "SUBMITTED" }] } } },
+        { notificationGroupMember: { group: { attempts: { some: { OR: [{ updatedAt: window }, { status: { in: ["FAILED", "SUBMITTING", "RECONCILIATION_REQUIRED", "SUBMITTED"] } }] } } } } },
+      ] }, include: { notificationGroupMember: groupEvidenceSelect, attempts: { orderBy: { createdAt: "asc" } }, order: { select: { lastSyncedAt: true } } }, orderBy: { createdAt: "asc" }, take: LIMIT + 1,
     }),
-    prisma.internalNotificationEvent.findMany({
-      where: {
-        purpose: InternalNotificationPurpose.DELIVERY_CONFIRMATION_NO_RESPONSE,
-        createdAt: window,
-      },
-      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+    confirmations: () => prisma.deliveryConfirmation.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { confirmedAt: window }, { requestedNewDateAt: window },
+        { confirmationWritebackStatus: { in: pending } }, { requestedDateWritebackStatus: { in: pending } },
+      ] }, include: { notificationEvent: true }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1,
     }),
-    prisma.deliveryConfirmation.findMany({
-      where: {
-        OR: [
-          { confirmationWritebackQueuedAt: window },
-          { confirmationWritebackCheckedAt: window },
-          { requestedDateWritebackQueuedAt: window },
-          { requestedDateWritebackCheckedAt: window },
-        ],
-      },
-      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+    tenDay: () => prisma.deliveryGroupTenDayConfirmation.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { acumaticaWritebackStatus: { in: ["QUEUED", "FAILED", "REFUSED"] } }] }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1,
     }),
-    prisma.deliveryGroupTenDayConfirmation.findMany({
-      where: { updatedAt: window },
-      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+    holds: () => prisma.deliveryOrderHoldAction.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { status: { in: ["PENDING", "QUEUED", "FAILED"] } }] }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1,
     }),
-    prisma.deliveryOrderHoldAction.findMany({
-      where: { updatedAt: window },
-      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
+    internal: () => prisma.internalNotificationEvent.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { sentAt: window }, { status: { in: ["PENDING", "FAILED"] } }] }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1,
     }),
-    thankYouReportingUnavailable ? Promise.resolve([]) : prisma.orderThankYouEvent.findMany({
-      where: { OR: [{ createdAt: window }, { updatedAt: window }] },
-      orderBy: [{ orderType: "asc" }, { orderNumber: "asc" }],
-      include: { attempts: { orderBy: { attemptNumber: "desc" }, take: 1 } },
+    contacts: () => prisma.contactOptInWritebackAction.findMany({
+      where: { createdAt: { lt: end }, OR: [recent, { status: { in: ["PENDING", "QUEUED", "FAILED"] } }] }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1,
     }),
-  ]);
-
-  const eventRows: Array<{
-    interval: string;
-    order: string;
-    deliveryDate: string;
-    channel: string;
-    eventStatus: string;
-    attemptStatus: string;
-    providerAccepted: string;
-    lastSyncedAt: string;
-  }> = events.map((event) => {
-    const attempt = event.attempts[0];
-    return {
-      interval: deliveryOperationsIntervalLabel(event),
-      order: `${event.orderType} ${event.orderNumber}`,
-      deliveryDate: dateKey(event.deliveryDate),
-      channel: event.selectedChannel ?? "none",
-      eventStatus: event.status,
-      attemptStatus: attempt?.status ?? "none",
-      providerAccepted: attempt?.success === true ? "yes" : attempt ? "no" : "n/a",
-      lastSyncedAt: event.order.lastSyncedAt?.toISOString() ?? "missing",
-    };
-  });
-  for (const event of internalEscalations.filter((row) => happenedOnDenverDate(row.createdAt, reportDate))) {
-    eventRows.push({
-      interval: "39",
-      order: `${event.orderType} ${event.orderNumber}`,
-      deliveryDate: dateKey(event.deliveryDate),
-      channel: "internal email",
-      eventStatus: event.status,
-      attemptStatus: event.status,
-      providerAccepted: event.providerMessageId ? "yes" : event.status === "FAILED" ? "no" : "n/a",
-      lastSyncedAt: "see 39-day state refresh",
-    });
-  }
-  eventRows.sort((a, b) => Number(b.interval.replace(/\D/g, "")) - Number(a.interval.replace(/\D/g, "")) || a.order.localeCompare(b.order));
-
-  const writebacks: Array<{ order: string; kind: string; target: string; jobId: string; status: string; success: string; error: string }> = [];
-  for (const row of confirmations) {
-    if (
-      happenedOnDenverDate(row.confirmationWritebackQueuedAt, reportDate) ||
-      happenedOnDenverDate(row.confirmationWritebackCheckedAt, reportDate)
-    ) {
-      const payload = objectValue(row.confirmationWritebackPayload);
-      writebacks.push({
-        order: `${row.orderType} ${row.orderNumber}`,
-        kind: "42 confirmation",
-        target: `CONFIRMVIA=${payload.confirmedVia ?? "?"}; CONFIRMWTH=${payload.confirmedWith ?? "?"}`,
-        jobId: row.confirmationWritebackJobId ?? "none",
-        status: row.confirmationWritebackStatus ?? "unknown",
-        success: deliveryWritebackSucceeded("confirmation", row.confirmationWritebackStatus) ? "yes" : "no",
-        error: row.confirmationWritebackError ?? "",
-      });
-    }
-    if (
-      happenedOnDenverDate(row.requestedDateWritebackQueuedAt, reportDate) ||
-      happenedOnDenverDate(row.requestedDateWritebackCheckedAt, reportDate)
-    ) {
-      const payload = objectValue(row.requestedDateWritebackPayload);
-      const lineNumbers = Array.isArray(payload.lineNumbers) ? payload.lineNumbers.join(",") : "?";
-      const requestedDate = payload.requestedDeliveryDate
-        ? String(payload.requestedDeliveryDate)
-        : row.requestedNewDate
-          ? dateKey(row.requestedNewDate)
-          : "?";
-      writebacks.push({
-        order: `${row.orderType} ${row.orderNumber}`,
-        kind: "42 requested date",
-        target: `Details[].RequestedOn=${requestedDate}; lines=${lineNumbers}`,
-        jobId: row.requestedDateWritebackJobId ?? "none",
-        status: row.requestedDateWritebackStatus ?? "unknown",
-        success: deliveryWritebackSucceeded("requestedDate", row.requestedDateWritebackStatus) ? "yes" : "no",
-        error: row.requestedDateWritebackError ?? "",
-      });
-    }
-  }
-  for (const row of tenDay.filter((item) => happenedOnDenverDate(item.updatedAt, reportDate))) {
-    if (!row.acumaticaWritebackStatus && !row.acumaticaWritebackJobId) continue;
-    writebacks.push({
-      order: `${row.orderType} ${row.orderNumber}`,
-      kind: `${row.sourceInterval?.replace("DAY_", "") ?? "14/12/10/8"} ten-day confirmation`,
-      target: "ONEWEEKCON=true",
-      jobId: row.acumaticaWritebackJobId ?? "none",
-      status: row.acumaticaWritebackStatus ?? "unknown",
-      success: ["WRITTEN", "ALREADY_TRUE"].includes(row.acumaticaWritebackStatus ?? "") ? "yes" : "no",
-      error: row.acumaticaWritebackError ?? "",
-    });
-  }
-  for (const row of holds.filter((item) => happenedOnDenverDate(item.updatedAt, reportDate))) {
-    writebacks.push({
-      order: `${row.orderType} ${row.orderNumber}`,
-      kind: "8-day hold",
-      target: "Hold=true",
-      jobId: row.queueJobId ?? "none",
-      status: row.status,
-      success: row.status === "SUCCEEDED" ? "yes" : "no",
-      error: row.errorMessage ?? "",
-    });
-  }
-  const thankYouRows = thankYouEvents.map((event) => {
-    const attempt = event.attempts[0];
-    return [
-      `${event.orderType} ${event.orderNumber}`,
-      event.classification,
-      event.selectedChannel ?? "none",
-      event.status,
-      attempt?.status ?? "none",
-      attempt?.success ? "yes" : attempt ? "no" : "n/a",
-      event.acumaticaWritebackStatus ?? "not queued",
-      event.acumaticaWritebackJobId ?? "none",
-      event.reasonSkipped ?? event.reasonFailed ?? event.acumaticaWritebackError ?? "",
-    ];
-  });
-  const thankYouWritebackFailures = thankYouEvents.filter((event) =>
-    ["failed", "enqueue_failed", "status_check_failed"].includes(event.acumaticaWritebackStatus ?? "")
-  ).length;
-
-  const schedulerRows = schedulerRuns.map((run) => {
-    const health = importHealth(run.resultSummary);
-    return [run.interval, run.status, health.refreshed, health.failed, run.errorMessage ?? ""];
-  });
-  const latestSchedulerByInterval = new Map<string, (typeof schedulerRuns)[number]>();
-  for (const run of schedulerRuns) latestSchedulerByInterval.set(run.interval, run);
-  const qualificationSummaryRows = REPORT_LIFECYCLE_INTERVALS.map((interval) => {
-    const schedulerInterval = ["41", "40"].includes(interval) ? "39" : interval;
-    const schedulerRun = latestSchedulerByInterval.get(schedulerInterval);
-    const health = schedulerRun ? importHealth(schedulerRun.resultSummary) : null;
-    const matchingEvents = eventRows.filter((row) => row.interval === interval);
-    return [
-      interval,
-      matchingEvents.length,
-      matchingEvents.filter((row) => row.attemptStatus !== "none").length,
-      schedulerRun?.status ?? "MISSING",
-      health?.refreshed ?? "n/a",
-      health?.failed ?? "n/a",
-    ];
-  });
-  const failedWritebacks = writebacks.filter((row) => row.success !== "yes" && !["queued", "processing"].includes(row.status)).length;
-  const pendingWritebacks = writebacks.filter((row) => ["queued", "processing"].includes(row.status)).length;
-  const totalWritebackFailures = failedWritebacks + thankYouWritebackFailures;
-  const subject = `[MLD Delivery] Daily operations report ${reportDate} - ${totalWritebackFailures ? `${totalWritebackFailures} writeback failure(s)` : thankYouReportingUnavailable ? "Thank-you reporting unavailable" : "OK"}`;
-  const htmlBody = `
-    <div style="font:14px Arial,sans-serif;color:#1f2933;max-width:1200px">
-      <h1 style="font-size:20px">Delivery operations report - ${escapeHtml(reportDate)}</h1>
-      <p><strong>Qualifying notification rows:</strong> ${eventRows.length} &nbsp; <strong>Writebacks:</strong> ${writebacks.length} &nbsp; <strong>Pending:</strong> ${pendingWritebacks} &nbsp; <strong>Failed:</strong> ${failedWritebacks}</p>
-      <h2 style="font-size:16px">Daily interval qualification summary</h2>
-      ${table(["Interval", "Qualified", "Attempts", "Scheduler status", "ERP refreshed", "Import failures"], qualificationSummaryRows)}
-      <h2 style="font-size:16px">Interval runs and fresh-import health</h2>
-      ${table(["Interval", "Run status", "ERP refreshed", "Import failures", "Error"], schedulerRows)}
-      <h2 style="font-size:16px">Qualifying orders and notification results</h2>
-      ${table(["Interval", "Order", "Delivery date", "Channel", "Event", "Attempt", "Provider accepted", "Order last synced"], eventRows.map((row) => [row.interval, row.order, row.deliveryDate, row.channel, row.eventStatus, row.attemptStatus, row.providerAccepted, row.lastSyncedAt]))}
-      <h2 style="font-size:16px">Acumatica writebacks</h2>
-      ${table(["Order", "Lifecycle", "Value written", "Queue job", "Status", "Successful", "Error"], writebacks.map((row) => [row.order, row.kind, row.target, row.jobId, row.status, row.success, row.error]))}
-      <h2 style="font-size:16px">Order thank-you notifications</h2>
-      ${thankYouReportingUnavailable ? "<p>Thank-you reporting unavailable: its database migration has not been applied. Interval notification results are included above.</p>" : ""}
-      ${table(["Order", "Type", "Channel", "Event", "Attempt", "Provider accepted", "THANKYOU writeback", "Queue job", "Reason/error"], thankYouRows)}
-    </div>`;
-
-  return {
-    subject,
-    textBody: `Delivery operations report ${reportDate}: ${eventRows.length} qualifying notification rows, ${writebacks.length} writebacks, ${pendingWritebacks} pending, ${failedWritebacks} failed.`,
-    htmlBody,
-    summary: {
-      reportDate,
-      schedulerRuns: schedulerRuns.length,
-      qualifyingOrders: eventRows.length,
-      writebacks: writebacks.length,
-      pendingWritebacks,
-      failedWritebacks,
-      thankYouEvents: thankYouRows.length,
-      thankYouWritebackFailures,
-      thankYouReportingUnavailable,
+    inbound: () => prisma.twilioInboundMessage.findMany({ where: { receivedAt: window }, include: { notificationEvent: true, deliveryConfirmation: true }, orderBy: { receivedAt: "asc" }, take: LIMIT + 1 }),
+    thankYou: async () => {
+      const [available] = await prisma.$queryRaw<Array<{ available: boolean }>>`
+        SELECT to_regclass('public.order_thank_you_events') IS NOT NULL AND to_regclass('public.order_thank_you_attempts') IS NOT NULL AS available`;
+      if (!available.available) throw new Error("Thank-you tables unavailable; migration pending");
+      return prisma.orderThankYouEvent.findMany({ where: { createdAt: { lt: end }, OR: [recent,
+        { acumaticaWritebackStatus: { in: pending } }, { status: { in: ["PENDING", "FAILED"] } }] },
+        include: { attempts: true }, orderBy: { updatedAt: "asc" }, take: LIMIT + 1 });
     },
   };
+  const collected: Record<string, AuditRecord[]> = {};
+  await Promise.all(Object.entries(sources).map(async ([name, query]) => {
+    try {
+      const rows = await query();
+      collected[name] = rows.slice(0, LIMIT).map(auditObject);
+      coverage.push({ Section: name, Status: rows.length > LIMIT ? "Truncated" : "Complete", Detail: rows.length > LIMIT ? `${name} exceeds ${LIMIT} rows; review remaining rows separately` : `${rows.length} records loaded` });
+    } catch (error) {
+      collected[name] = [];
+      coverage.push({ Section: name, Status: "Unavailable", Detail: `${name}: ${error instanceof Error ? error.message : String(error)}`.slice(0, 800) });
+    }
+  }));
+  const groupIds = [...new Set([...collected.tenDay, ...collected.holds].map(row => str(row.orderDeliveryGroupId)).filter(Boolean))];
+  if (groupIds.length) {
+    try {
+      const history = await prisma.notificationEvent.findMany({ where: { deliveryGroupId: { in: groupIds }, createdAt: { lt: end } },
+        include: { notificationGroupMember: groupEvidenceSelect, attempts: true, order: { select: { lastSyncedAt: true } } }, take: LIMIT + 1 });
+      const existing = new Map(collected.events.map(row => [row.id, row]));
+      for (const row of history.slice(0, LIMIT)) existing.set(row.id, auditObject(row));
+      collected.events = [...existing.values()];
+      coverage.push({ Section: "Writeback notification evidence", Status: history.length > LIMIT ? "Truncated" : "Complete", Detail: `${Math.min(history.length, LIMIT)} historical events inspected` });
+    } catch (error) { coverage.push({ Section: "Writeback notification evidence", Status: "Unavailable", Detail: String(error).slice(0, 500) }); }
+  }
+  const jobs: Record<string, AuditRecord> = {};
+  const jobIds = [...new Set(Object.values(collected).flat().flatMap(row =>
+    [row.confirmationWritebackJobId, row.requestedDateWritebackJobId, row.acumaticaWritebackJobId, row.queueJobId].map(str).filter(Boolean)))];
+  let index = 0;
+  const maxJobs = 500;
+  if (jobIds.length > maxJobs) coverage.push({ Section: "Queue lookup", Status: "Truncated", Detail: `Only first ${maxJobs} of ${jobIds.length} jobs checked; remaining writebacks show local status only` });
+  await Promise.all(Array.from({ length: 4 }, async () => {
+    while (index < Math.min(jobIds.length, maxJobs)) {
+      const id = jobIds[index++];
+      try { jobs[id] = await (options.queueLookup ?? fetchQueueJob)(id); }
+      catch (error) { jobs[id] = { lookupError: error instanceof Error ? error.message : String(error) }; }
+    }
+  }));
+  const input: OperationsAuditInput = { reportDate, start, end, generatedAt: now, coverage, jobs,
+    runs: collected.runs, events: collected.events, confirmations: collected.confirmations, tenDay: collected.tenDay,
+    holds: collected.holds, internal: collected.internal, contacts: collected.contacts, thankYou: collected.thankYou, inbound: collected.inbound };
+  const report = buildOperationsAudit(input);
+  const workbook = await operationsWorkbook(report.sheets);
+  if (workbook.length > 2500000) throw new Error("Report workbook exceeds email attachment budget; use --preview export and review locally");
+  const subject = `[MLD Delivery] ${reportDate} recap - ${report.summary.attentionItems ? `${report.summary.attentionItems} attention items` : "No detected failures"}`;
+  const compactSends = report.sheets.Notifications.map(row => ({ Order: row.Order, Interval: row.Interval, Channel: row.Channel,
+    Status: row.Status, "Sent at UTC": row["Sent at UTC"], "Provider accepted": row["Provider accepted"] }));
+  const compactIssues = report.sheets.Attention.map(row => ({ Order: row.Order, Interval: row.Interval, Problem: `${row.Category}: ${row.Detail}`, "Next action": row["Next action"] }));
+  const compactWrites = report.sheets.Writebacks.map(row => ({ Order: row.Order, Lifecycle: row.Lifecycle, "Intended change": row["Intended value / scope"], Status: row["Business status"], "ERP verification": row["ERP verification"] }));
+  const localTime = (date: Date) => new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", dateStyle: "medium", timeStyle: "short" }).format(date);
+  const htmlBody = `<div style="font:14px Arial;color:#18232a;max-width:1100px"><h1>Delivery recap: ${reportDate}</h1>
+    <p>Coverage: ${localTime(start)} to ${localTime(end)} (exclusive), America/Denver. Exact UTC timestamps are in the workbook.</p>
+    <p>${report.summary.attentionItems} attention items; ${report.summary.notificationsAccepted} sends accepted in coverage; ${report.summary.customerResponses} response records; ${report.summary.writebacks} writeback records.</p>
+    <h2>Needs your attention</h2>${auditTable(compactIssues)}
+    <h2>Orders and notifications</h2>${auditTable(compactSends)}
+    <h2>Customer responses</h2>${auditTable(report.sheets["Customer Responses"])}
+    <h2>Writebacks to check in ERP</h2>${auditTable(compactWrites)}
+    <h2>Interval execution</h2>${auditTable(report.sheets["Interval Runs"])}
+    <h2>Coverage and limitations</h2>${auditTable(report.sheets.Coverage)}
+    <p>The Excel attachment includes complete order lists, skipped orders, import results, provider IDs and queue job IDs. Provider acceptance does not establish delivery. Queue success does not establish ERP verification.</p></div>`;
+  return { ...report, subject, htmlBody, workbook,
+    textBody: `${subject}. ${report.summary.notificationsAccepted} accepted notifications, ${report.summary.customerResponses} responses, ${report.summary.writebacks} writebacks. See attached workbook for all orders and verification evidence.`,
+    attachments: [{ name: `delivery-recap-${reportDate}.xlsx`, contentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", contentBytes: workbook.toString("base64") }] };
 }
 
 async function acquireReportLock(reportDate: string, retryFailed = false) {
   const lockKey = `delivery_operations_report:${reportDate}`;
   const existing = await prisma.deliveryIntervalSchedulerRun.findUnique({ where: { lockKey } });
-  if (existing?.status === "SUCCESS") return { acquired: false, row: existing };
-  if (existing?.status === "RUNNING" && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) {
-    return { acquired: false, row: existing };
-  }
-  if (existing?.status === "FAILED" && !retryFailed && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) {
-    return { acquired: false, row: existing };
-  }
   if (existing) {
-    return {
-      acquired: true,
-      row: await prisma.deliveryIntervalSchedulerRun.update({
-        where: { id: existing.id },
-        data: { status: "RUNNING", retryCount: { increment: 1 }, startedAt: new Date(), failedAt: null, errorMessage: null },
-      }),
-    };
+    if (existing.status === "SUCCESS" || existing.status === "RUNNING") return { acquired: false, row: existing };
+    if (!retryFailed && Date.now() - existing.updatedAt.getTime() < 10 * 60 * 1000) return { acquired: false, row: existing };
+    const claimed = await prisma.deliveryIntervalSchedulerRun.updateMany({ where: { id: existing.id, status: "FAILED", updatedAt: existing.updatedAt },
+      data: { status: "RUNNING", retryCount: { increment: 1 }, startedAt: new Date(), failedAt: null, errorMessage: null } });
+    return { acquired: claimed.count === 1, row: existing };
   }
-  return {
-    acquired: true,
-    row: await prisma.deliveryIntervalSchedulerRun.create({
-      data: {
-        lockKey,
-        interval: REPORT_INTERVAL,
-        runDate: dateFromKey(reportDate),
-        timezone: REPORT_TIMEZONE,
-        expectedLocalTime: "17:00",
-        actualLocalTime: new Intl.DateTimeFormat("en-US", { timeZone: REPORT_TIMEZONE, hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()),
-        delegatedArgs: { reportDate },
-      },
-    }),
-  };
+  try {
+    return { acquired: true, row: await prisma.deliveryIntervalSchedulerRun.create({ data: {
+      lockKey, interval: REPORT_INTERVAL, runDate: dateFromKey(reportDate), timezone: "America/Denver",
+      expectedLocalTime: "17:00", actualLocalTime: new Intl.DateTimeFormat("en-US", { timeZone: "America/Denver", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date()), delegatedArgs: { reportDate },
+    } }) };
+  } catch (error) {
+    if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002")
+      return { acquired: false, row: await prisma.deliveryIntervalSchedulerRun.findUniqueOrThrow({ where: { lockKey } }) };
+    throw error;
+  }
 }
-
-export async function runDeliveryOperationsReport(params: { reportDate: string; recipient?: string | null; retryFailed?: boolean }): Promise<ReportResult> {
+export async function runDeliveryOperationsReport(params: { reportDate: string; recipient?: string | null; retryFailed?: boolean }) {
   const reportDate = dateKey(params.reportDate);
-  const recipient = params.recipient?.trim() || process.env.DELIVERY_OPERATIONS_REPORT_EMAIL?.trim() || DEFAULT_REPORT_RECIPIENT;
+  const recipient = params.recipient?.trim() || process.env.DELIVERY_OPERATIONS_REPORT_EMAIL?.trim() || "james@mld.com";
   const lock = await acquireReportLock(reportDate, params.retryFailed);
   if (!lock.acquired) return { ok: true, phase: "skipped_already_reported_or_running", reportDate, recipient, schedulerRunId: lock.row.id };
-
+  let providerAccepted = false;
   try {
     const report = await buildDeliveryOperationsReport(reportDate);
-    const providerResult = await createDeliveryNotificationProvider().sendEmail({
-      to: recipient,
-      subject: report.subject,
-      textBody: report.textBody,
-      htmlBody: report.htmlBody,
-    });
-    await prisma.deliveryIntervalSchedulerRun.update({
-      where: { id: lock.row.id },
-      data: {
-        status: "SUCCESS",
-        completedAt: new Date(),
-        resultSummary: { ...report.summary, providerRequestIdPresent: Boolean(providerResult.externalMessageId) },
-      },
-    });
-    return { ok: true, phase: "sent", recipient, schedulerRunId: lock.row.id, ...report.summary, providerRequestIdPresent: Boolean(providerResult.externalMessageId) };
+    const result = await createDeliveryNotificationProvider().sendEmail({ to: recipient, subject: report.subject,
+      textBody: report.textBody, htmlBody: report.htmlBody, attachments: report.attachments });
+    providerAccepted = true;
+    await prisma.deliveryIntervalSchedulerRun.update({ where: { id: lock.row.id }, data: { status: "SUCCESS", completedAt: new Date(),
+      resultSummary: { ...report.summary, providerRequestIdPresent: Boolean(result.externalMessageId) } } });
+    return { ok: true, phase: "sent", recipient, schedulerRunId: lock.row.id, ...report.summary, providerRequestIdPresent: Boolean(result.externalMessageId) };
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    await prisma.deliveryIntervalSchedulerRun.update({
-      where: { id: lock.row.id },
-      data: { status: "FAILED", failedAt: new Date(), errorMessage: message.slice(0, 1024), resultSummary: { ok: false, error: message.slice(0, 1024) } },
-    });
+    const message = (error instanceof Error ? error.message : String(error)).slice(0, 1024);
+    await prisma.deliveryIntervalSchedulerRun.update({ where: { id: lock.row.id }, data: {
+      status: providerAccepted ? "RUNNING" : "FAILED", failedAt: providerAccepted ? null : new Date(),
+      errorMessage: providerAccepted ? `Email accepted; finalize failed. Inspect before retry: ${message}`.slice(0, 1024) : message,
+      resultSummary: { ok: false, providerAccepted, error: message },
+    } });
     throw error;
   }
 }

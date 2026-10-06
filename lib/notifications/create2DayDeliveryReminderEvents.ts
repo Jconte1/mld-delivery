@@ -51,6 +51,7 @@ import {
   type DeliveryOrderScopeReport,
 } from "@/lib/notifications/orderScope";
 import { prisma } from "@/lib/prisma";
+import { recipientContactSelect, selectDeliveryRecipient } from "./deliveryRecipient";
 
 export const DELIVERY_REMINDER_2_DAY_INTERVAL_DAYS = 2;
 export const DELIVERY_REMINDER_2_DAY_REQUESTED_ON_TIME = "09:19:00.000Z";
@@ -99,6 +100,9 @@ export type DeliveryReminder2DayEventReport = {
   tenDayConfirmationStatus?: string | null;
   tenDayConfirmationMismatchReason?: string | null;
   tenDayConfirmationLocalConfirmed?: boolean | null;
+  recipientContactId?: string;
+  recipientContactRole?: string;
+  recipientFallbackReason?: string | null;
 };
 
 export type Create2DayDeliveryReminderEventsSummary = {
@@ -337,6 +341,10 @@ export async function find2DayDeliveryReminderTargetGroups(
           salespersonNumber: true,
           customerDescription: true,
           locationDescription: true,
+          deliveryContactId: true,
+          deliveryContactSyncStatus: true,
+          primaryContactFetchSucceeded: true,
+          deliveryContact: { select: recipientContactSelect },
           address: {
             select: {
               addressLine1: true,
@@ -695,14 +703,16 @@ export async function create2DayDeliveryReminderEvents(
       continue;
     }
 
-    const channelRepair = await selectNotificationChannelWithOptOutRepair({
+    const recipient = selectDeliveryRecipient("DAY_2", order, activeOptOutAddresses);
+    const selectedContact = recipient.contact;
+    const channelRepair = recipient.channel.selectedChannel ? await selectNotificationChannelWithOptOutRepair({
       client,
-      contact: order.contact,
+      contact: selectedContact,
       optOutState: mergeNotificationOptOutAddresses(activeOptOutAddresses, {
-        activeSmsOptOutPhones: order.contact.smsOptOuts.map((optOut) => optOut.phone),
-        activeEmailOptOutEmails: order.contact.emailOptOuts.map((optOut) => optOut.email),
+        activeSmsOptOutPhones: selectedContact.smsOptOuts.map((optOut) => optOut.phone),
+        activeEmailOptOutEmails: selectedContact.emailOptOuts.map((optOut) => optOut.email),
       }),
-    });
+    }) : { channel: recipient.channel };
     const channel = channelRepair.channel;
 
     if (channel.selectedChannel === null) {
@@ -723,7 +733,7 @@ export async function create2DayDeliveryReminderEvents(
 
     summary.eligibleDeliveryGroups += 1;
 
-    const contactName = formatContactName(order.contact);
+    const contactName = formatContactName(selectedContact);
     const jobName = formatJobName({
       customerDescription: order.customerDescription,
       locationDescription: order.locationDescription,
@@ -786,6 +796,9 @@ export async function create2DayDeliveryReminderEvents(
     if (dryRun) {
       summary.eventsWouldCreate += 1;
       summary.eventReports.push({
+        recipientContactId: selectedContact.contactId,
+        recipientContactRole: recipient.role,
+        recipientFallbackReason: recipient.fallbackReason,
         orderType: order.orderType,
         orderNumber: order.orderNumber,
         deliveryGroupId: deliveryGroup.id,
@@ -812,7 +825,9 @@ export async function create2DayDeliveryReminderEvents(
         data: {
           orderId: order.id,
           deliveryGroupId: deliveryGroup.id,
-          contactId: order.contact.contactId,
+          contactId: selectedContact.contactId,
+          recipientContactRole: recipient.role,
+          recipientFallbackReason: recipient.fallbackReason,
           orderType: order.orderType,
           orderNumber: order.orderNumber,
           deliveryDate: deliveryGroup.deliveryDate,
@@ -854,6 +869,9 @@ export async function create2DayDeliveryReminderEvents(
         deliveryDate: dateKey(deliveryGroup.deliveryDate),
         eventId: event.id,
         dedupeKey: event.dedupeKey,
+        recipientContactId: selectedContact.contactId,
+        recipientContactRole: recipient.role,
+        recipientFallbackReason: recipient.fallbackReason,
         status: event.status,
         selectedChannel: event.selectedChannel,
         reasonSkipped: event.reasonSkipped,

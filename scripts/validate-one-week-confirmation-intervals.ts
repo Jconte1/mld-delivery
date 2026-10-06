@@ -96,6 +96,7 @@ function group(params: { id: string; orderNumber: string; deliveryDate: string }
     status: "Open",
     order: {
       id: `order_${params.id}`,
+      contactId: `contact_${params.id}`,
       orderType: "SO",
       orderNumber: params.orderNumber,
       status: "Open",
@@ -137,8 +138,18 @@ function group(params: { id: string; orderNumber: string; deliveryDate: string }
   };
 }
 
-function fakeClient(groups: unknown[]) {
+function fakeClient(groups: ReturnType<typeof group>[], sent = true, optedOut = false) {
   return {
+    order: { findUnique: async ({ where }: { where: { id: string } }) => groups.find(g => g.orderId === where.id)?.order ?? null },
+    smsOptOut: { findMany: async () => optedOut ? [{ phone: "8015551212" }] : [] },
+    emailOptOut: { findMany: async () => [] },
+    notificationAttempt: {
+      findMany: async ({ where }: { where: { success: boolean; notificationEvent: { orderId: string; deliveryGroupId: string; contactId: string } } }) => {
+        const g = groups.find(row => row.orderId === where.notificationEvent.orderId && row.id === where.notificationEvent.deliveryGroupId);
+        if (!sent || !g || !where.success || g.order.contactId !== where.notificationEvent.contactId) return [];
+        return [{ channel: "SMS", recipient: g.order.contact.phone1, realSmsOptIn: true, realEmailOptIn: false }];
+      },
+    },
     orderDeliveryGroup: {
       findMany: async () => groups,
     },
@@ -271,6 +282,19 @@ async function main() {
   assert(summary8.paymentDueCount === 0, "8-day no-balance group does not enter enforcement", failures);
   assert(summary8.eventReports[0]?.renderedMessagePreview === "no_balance_due", "8-day no-balance report remains clear", failures);
   assert(summary8.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN", "8-day dry-run reports ONEWEEKCON dry-run", failures);
+
+  // Payment clearance alone must not authorize a writeback without a real eligible send.
+  const { evaluateAndRecordDeliveryTenDayConfirmation } = await import("../lib/notifications/deliveryTenDayConfirmation");
+  for (const sourceInterval of ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] as const) {
+    const g = group({ id: "evidence", orderNumber: "SO-EVIDENCE", deliveryDate: "2026-08-03" });
+    for (const [sent, optedOut, expected] of [[false, false, "AWAITING_NOTIFICATION"], [true, true, "AWAITING_NOTIFICATION"], [true, false, "DRY_RUN"]] as const) {
+      const result = await evaluateAndRecordDeliveryTenDayConfirmation({
+        deliveryGroup: g, payment: payment(), sourceInterval, dryRun: true,
+        prismaClient: fakeClient([g], sent, optedOut) as never,
+      });
+      assert(result.acumaticaWritebackStatus === expected, `${sourceInterval} sent=${sent} optedOut=${optedOut}: ${result.acumaticaWritebackStatus}`, failures);
+    }
+  }
 
   if (failures.length > 0) {
     console.error("One-week confirmation interval integration validation failed:");

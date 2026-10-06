@@ -78,6 +78,10 @@ function targetGroup(overrides: Record<string, unknown> = {}) {
       mismatchReason: null,
     },
     order: {
+      primaryContactFetchSucceeded: true,
+      deliveryContactId: null,
+      deliveryContactSyncStatus: "missing",
+      deliveryContact: null,
       id: "order_2",
       orderType: "SO",
       orderNumber: "SO2",
@@ -433,6 +437,22 @@ async function validateMockedRuntimeBehavior(
       ]),
   });
   const emailReport = emailSummary.eventReports[0];
+  for (const available of [true, false]) {
+    const candidate = withOrder(targetGroup(), {
+      deliveryContactId: "delivery_only",
+      deliveryContactSyncStatus: available ? "fetched" : "unavailable",
+      deliveryContact: { ...targetGroup().order.contact, contactId: "delivery_only", smsOptIn: false },
+    });
+    const summary = await create2DayDeliveryReminderEvents({
+      runDate: "2026-07-20", dryRun: true,
+      prismaClient: fakeClient([candidate], { queried: false, dedupeChecked: false }) as never,
+      importSalesOrders: async () => importResult(), getSalespersonContactMap: async () => new Map(),
+    });
+    const report = summary.eventReports[0];
+    assert(report?.recipientContactId === (available ? "delivery_only" : "contact_2"), "creator chooses fresh delivery contact or primary fallback", failures);
+    assert(report?.selectedChannel === (available ? "EMAIL" : "SMS"), "creator uses selected contact's own channel", failures);
+    assert(report?.recipientContactRole === (available ? "DELIVERY" : "PRIMARY"), "creator reports recipient role", failures);
+  }
   assert(emailReport?.selectedChannel === "EMAIL", "email fallback is used when SMS is unavailable", failures);
   assert(
     emailReport?.subject?.startsWith("Final Delivery Reminder:"),

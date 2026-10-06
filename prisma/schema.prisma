@@ -158,7 +158,8 @@ model Contact {
   updatedAt      DateTime  @updatedAt
   lastSyncedAt   DateTime?
 
-  orders                Order[]
+  orders                Order[] @relation("PrimaryOrderContact")
+  deliveryOrders        Order[] @relation("DeliveryOrderContact")
   notificationEvents    NotificationEvent[]
   smsOptOuts            SmsOptOut[]
   emailOptOuts          EmailOptOut[]
@@ -262,6 +263,9 @@ model Order {
   customerId                String?                      @db.VarChar(64)
   customerDescription       String?                      @db.VarChar(256)
   contactId                 String                       @db.VarChar(64)
+  deliveryContactId         String?                      @db.VarChar(64)
+  deliveryContactSyncStatus String                       @default("not_fetched") @db.VarChar(32)
+  primaryContactFetchSucceeded Boolean                   @default(false)
   locationId                String?                      @db.VarChar(64)
   locationDescription       String?                      @db.VarChar(256)
   turnInDate                DateTime?                    @db.Date
@@ -277,7 +281,8 @@ model Order {
   updatedAt                 DateTime                     @updatedAt
   lastSyncedAt              DateTime?
 
-  contact                          Contact                           @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
+  contact                          Contact                           @relation("PrimaryOrderContact", fields: [contactId], references: [contactId], onDelete: Restrict)
+  deliveryContact                  Contact?                          @relation("DeliveryOrderContact", fields: [deliveryContactId], references: [contactId], onDelete: Restrict)
   total                            OrderTotal?
   lines                            OrderLine[]
   deliveryGroupLines               OrderDeliveryGroupLine[]
@@ -296,6 +301,7 @@ model Order {
   @@index([contactId])
   @@index([customerId])
   @@index([headerRequestedOn])
+  @@index([deliveryContactId])
   @@index([status])
   @@index([internalLifecycleStatus])
   @@index([buyerGroup])
@@ -724,6 +730,8 @@ model NotificationEvent {
   dedupeKey         String                   @unique @db.VarChar(512)
   selectedChannel   NotificationChannel?
   channelReason     String?                  @db.VarChar(256)
+  recipientContactRole String                @default("PRIMARY") @db.VarChar(16)
+  recipientFallbackReason String?            @db.VarChar(128)
   recipientEmail    String?                  @db.VarChar(256)
   recipientPhone    String?                  @db.VarChar(32)
   status            NotificationEventStatus  @default(PENDING)
@@ -743,6 +751,7 @@ model NotificationEvent {
   contact                       Contact                       @relation(fields: [contactId], references: [contactId], onDelete: Restrict)
   detailsLink                   DeliveryDetailsLink?          @relation("NotificationEventDetailsLink", fields: [detailsLinkId], references: [id], onDelete: SetNull)
   attempts                      NotificationAttempt[]
+  notificationGroupMember       DeliveryNotificationGroupMember?
   deliveryConfirmations         DeliveryConfirmation[]
   twilioInboundMessages         TwilioInboundMessage[]
   twilioStatusCallbacks         TwilioMessageStatusCallback[]
@@ -762,6 +771,72 @@ model NotificationEvent {
   @@index([sentAt])
   @@index([detailsLinkId])
   @@map("notification_events")
+}
+
+// Additive foundation only; production dispatch does not use these tables yet.
+model DeliveryNotificationGroup {
+  id              String @id @default(cuid())
+  linkToken       String @unique @default(uuid()) @db.VarChar(128)
+  responseAction  String? @db.VarChar(32)
+  responseDate    DateTime? @db.Date
+  responseAt      DateTime?
+  membershipKey   String @unique @db.VarChar(64)
+  compatibilityKey String @db.VarChar(64)
+  runId           String @db.VarChar(128)
+  deliveryDate    DateTime @db.Date
+  intervalType    NotificationIntervalType
+  actionType      NotificationActionType
+  stage           String @db.VarChar(64)
+  channel         NotificationChannel
+  contactId       String @db.VarChar(64)
+  addressKey      String? @db.VarChar(64)
+  status          String @default("PREPARED") @db.VarChar(32)
+  claimedAt       DateTime?
+  createdAt       DateTime @default(now())
+  members         DeliveryNotificationGroupMember[]
+  attempts        DeliveryNotificationGroupAttempt[]
+
+  @@index([runId])
+  @@index([compatibilityKey])
+  @@map("delivery_notification_groups")
+}
+
+// One row per actual shared provider call, never one fabricated attempt per member.
+model DeliveryNotificationGroupAttempt {
+  productionEligibilityVerified Boolean @default(false)
+  id                String @id @default(cuid())
+  groupId           String
+  attemptNumber     Int
+  channel           NotificationChannel
+  recipient         String @db.VarChar(256)
+  status            String @default("SUBMITTING") @db.VarChar(32)
+  provider          String @db.VarChar(64)
+  externalMessageId String? @db.VarChar(256)
+  providerCode      String? @db.VarChar(128)
+  errorMessage      String? @db.VarChar(1024)
+  submittedAt       DateTime?
+  deliveredAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+  group             DeliveryNotificationGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  callbacks         TwilioMessageStatusCallback[]
+
+  @@unique([groupId, attemptNumber])
+  @@unique([provider, externalMessageId], map: "delivery_group_attempt_provider_message_key")
+  @@map("delivery_notification_group_attempts")
+}
+
+model DeliveryNotificationGroupMember {
+  deliveryConfirmationId String?
+  id                    String @id @default(cuid())
+  groupId               String
+  notificationEventId   String @unique
+  createdAt             DateTime @default(now())
+  group                 DeliveryNotificationGroup @relation(fields: [groupId], references: [id], onDelete: Restrict)
+  notificationEvent     NotificationEvent @relation(fields: [notificationEventId], references: [id], onDelete: Restrict)
+
+  @@index([groupId])
+  @@map("delivery_notification_group_members")
 }
 
 model NotificationAttempt {
@@ -1114,6 +1189,7 @@ model TwilioMessageStatusCallback {
   deliveryConfirmationId String?
   orderThankYouEventId   String?
   orderThankYouAttemptId String?
+  groupAttemptId         String?
   matchStatus            String    @default("UNPROCESSED") @db.VarChar(64)
   rawPayload             Json
   receivedAt             DateTime  @default(now())
@@ -1124,8 +1200,10 @@ model TwilioMessageStatusCallback {
   deliveryConfirmation DeliveryConfirmation? @relation(fields: [deliveryConfirmationId], references: [id], onDelete: SetNull)
   orderThankYouEvent   OrderThankYouEvent?   @relation(fields: [orderThankYouEventId], references: [id], onDelete: SetNull)
   orderThankYouAttempt OrderThankYouAttempt? @relation(fields: [orderThankYouAttemptId], references: [id], onDelete: SetNull)
+  groupAttempt        DeliveryNotificationGroupAttempt? @relation(fields: [groupAttemptId], references: [id], onDelete: Restrict)
 
   @@index([messageSid])
+  @@index([groupAttemptId])
   @@index([messageStatus])
   @@index([errorCode])
   @@index([toPhone])

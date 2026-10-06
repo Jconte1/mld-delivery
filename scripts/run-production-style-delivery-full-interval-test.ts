@@ -2,6 +2,7 @@ import ExcelJS from "exceljs";
 import { mkdir } from "fs/promises";
 import path from "path";
 
+import { selectDeliveryRecipient } from "../lib/notifications/deliveryRecipient";
 import {
   DeliveryConfirmationStatus,
   DeliveryOrderHoldActionReason,
@@ -672,6 +673,10 @@ async function loadDeliveryGroupsForTargetDate(targetDeliveryDate: string) {
         include: {
           address: true,
           total: true,
+          deliveryContact: { include: {
+            smsOptOuts: { where: { isActive: true }, select: { phone: true } },
+            emailOptOuts: { where: { isActive: true }, select: { email: true } },
+          } },
           contact: {
             include: {
               smsOptOuts: {
@@ -1049,7 +1054,8 @@ async function evaluateGroup(params: {
 }): Promise<CandidateRows & { selectable: Array<{ channel: ChannelKey; rowIndex: number; tags: string[] }> }> {
   const { config, group, options } = params;
   const order = group.order;
-  const contact = order.contact;
+  const recipient = selectDeliveryRecipient(config.intervalType, order, params.globalOptOuts);
+  const contact = recipient.contact;
   const deliveryDate = dateKey(group.deliveryDate);
   const ineligible = !isGroupProductionActive(group);
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(group.deliveryDate);
@@ -1063,6 +1069,7 @@ async function evaluateGroup(params: {
   const existingEvent = await readExistingEvent(config, group, dedupeKey);
   const optOutState = contactOptOutState(contact, params.globalOptOuts);
   const channelPreview = contactChannelPreview(contact, optOutState);
+  if (config.intervalType === "DAY_2") channelPreview.production = recipient.channel;
   const payment = await paymentReportForInterval(config, group);
   const readiness = await getDeliveryGroupReadiness(group.id);
   const salesperson = order.salespersonNumber
@@ -2019,10 +2026,12 @@ async function loadDeliveryGroupForApply(params: {
 }
 
 function selectApplyRecipient(params: {
+  intervalType: string;
   group: DeliveryGroupRecord;
   channel: ChannelKey;
   globalOptOuts: ActiveNotificationOptOutAddresses;
 }) {
+  if (params.intervalType === "DAY_2") return selectDeliveryRecipient("DAY_2", params.group.order, params.globalOptOuts).channel;
   const optOutState = contactOptOutState(params.group.order.contact, params.globalOptOuts);
   return selectNotificationChannel(
     {
@@ -2043,6 +2052,7 @@ function controlledSendCommand(params: { testRunId: string; eventId: string; cha
 }
 
 async function createSelectedNotificationEvent(params: {
+  globalOptOuts: ActiveNotificationOptOutAddresses;
   config: IntervalConfig;
   row: Row;
   channel: ChannelKey;
@@ -2053,10 +2063,13 @@ async function createSelectedNotificationEvent(params: {
   const deliveryDate = dateFromKey(params.row.deliveryDate as string);
   const scheduledAt = dateFromKey(params.options.runDate);
   const dedupeKey = params.row.dedupeKey as string;
+  const recipient = selectDeliveryRecipient(params.config.intervalType, params.group.order, params.globalOptOuts);
   const eventData = {
     orderId: params.group.order.id,
     deliveryGroupId: params.group.id,
-    contactId: params.group.order.contact.contactId,
+    contactId: recipient.contact.contactId,
+    recipientContactRole: recipient.role,
+    recipientFallbackReason: recipient.fallbackReason,
     orderType: params.group.order.orderType,
     orderNumber: params.group.order.orderNumber,
     deliveryDate,
@@ -2293,6 +2306,7 @@ async function applySelectedRuntimeEvents(params: {
     }
 
     const selectedChannel = selectApplyRecipient({
+      intervalType: config.intervalType,
       group,
       channel: candidate.channel,
       globalOptOuts: params.globalOptOuts,
@@ -2313,6 +2327,7 @@ async function applySelectedRuntimeEvents(params: {
     }
 
     const created = await createSelectedNotificationEvent({
+      globalOptOuts: params.globalOptOuts,
       config,
       row: candidate.row,
       channel: candidate.channel,

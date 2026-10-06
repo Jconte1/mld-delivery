@@ -1,6 +1,5 @@
 import {
   InternalNotificationPurpose,
-  NotificationAttemptStatus,
   NotificationChannel,
   NotificationEventStatus,
   NotificationIntervalType,
@@ -9,10 +8,6 @@ import {
   run42DayDeliveryConfirmationNoResponse,
   type DeliveryConfirmationNoResponseRunSummary,
 } from "../lib/notifications/deliveryConfirmationNoResponse";
-import {
-  dispatchDeliveryNotifications,
-  type DeliveryDispatchSummary,
-} from "../lib/notifications/deliveryNotificationDispatcher";
 import { addDays, dateFromKey, dateKey } from "../lib/notifications/helpers";
 import {
   deliveryOrderMatchesScope,
@@ -21,6 +16,9 @@ import {
   type DeliveryOrderScope,
 } from "../lib/notifications/orderScope";
 import { prisma } from "../lib/prisma";
+import { dispatchCurrentRunGroups } from "../lib/notifications/dispatchCurrentRunGroups";
+import { prepareFreshDeliveryIntervalImport } from "../lib/notifications/freshDeliveryIntervalImport";
+import { importSalesOrdersForLineRequestedOn } from "../lib/erp/importSalesOrders";
 
 const REAL_NO_RESPONSE_CONFIRM_PHRASE = "RUN REAL 42 DAY NO RESPONSE FOLLOW UPS";
 
@@ -193,12 +191,6 @@ function redactRecipient(channel: NotificationChannel | string | null, value: st
   return channel === NotificationChannel.SMS || channel === "SMS" ? redactPhone(value) : redactEmail(value);
 }
 
-function redactProviderId(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  if (trimmed.length <= 8) return "<redacted-provider-id>";
-  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
-}
 
 function redactSensitiveText(value: string | null | undefined) {
   if (!value) return null;
@@ -341,6 +333,7 @@ async function currentRunEvents(eventIds: string[]) {
       selectedChannel: true,
       recipientEmail: true,
       recipientPhone: true,
+      deliveryDate: true,
       _count: { select: { attempts: true } },
     },
   });
@@ -388,120 +381,6 @@ function assertRowsWithinOrderScope(
   }
 }
 
-function assertDispatcherPreviewSafe(reports: DeliveryDispatchSummary["reports"]) {
-  const failures: string[] = [];
-  for (const report of reports) {
-    if (report.outcome !== "previewed") {
-      failures.push(`${report.eventId}: preview outcome ${report.outcome}: ${report.reason ?? "no reason"}`);
-    }
-    if (report.controlledRecipientMode) {
-      failures.push(`${report.eventId}: controlled-recipient mode was enabled`);
-    }
-    if (report.forcedContactEligibility) {
-      failures.push(`${report.eventId}: forced contact eligibility was enabled`);
-    }
-    if (report.finalRecipientKind !== "customer") {
-      failures.push(`${report.eventId}: final recipient was not the customer`);
-    }
-    if (report.realRecipientSuppressed) {
-      failures.push(`${report.eventId}: real recipient was suppressed`);
-    }
-    if (report.finalRecipientIsTestRecipient) {
-      failures.push(`${report.eventId}: dispatcher resolved to the configured test recipient`);
-    }
-  }
-
-  if (failures.length > 0) {
-    throw new Error(`Dispatcher preview safety check failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
-  }
-}
-
-async function dispatchPreviewForEvents(eventIds: string[], testRunId: string) {
-  const attemptsBefore = await prisma.notificationAttempt.count();
-  const reports: DeliveryDispatchSummary["reports"] = [];
-
-  for (const eventId of eventIds) {
-    const summary = await dispatchDeliveryNotifications({
-      preview: true,
-      send: false,
-      controlledRecipientSend: false,
-      testRunId: `${testRunId}_preview`,
-      eventId,
-      limit: 1,
-    });
-    reports.push(...summary.reports);
-  }
-
-  assertDispatcherPreviewSafe(reports);
-  const attemptsAfter = await prisma.notificationAttempt.count();
-  if (attemptsAfter !== attemptsBefore) {
-    throw new Error("Dispatcher preview created NotificationAttempt rows; refusing to send.");
-  }
-
-  return reports;
-}
-
-async function dispatchSendForEvents(eventIds: string[], testRunId: string) {
-  const summaries: DeliveryDispatchSummary[] = [];
-  for (const eventId of eventIds) {
-    summaries.push(
-      await dispatchDeliveryNotifications({
-        preview: false,
-        send: true,
-        controlledRecipientSend: false,
-        testRunId,
-        eventId,
-        limit: 1,
-      })
-    );
-  }
-  return summaries;
-}
-
-async function attemptsForReports(reports: DeliveryDispatchSummary["reports"]) {
-  const attemptIds = reports.flatMap((report) =>
-    [report.attemptId, report.fallbackAttemptId].filter((id): id is string => Boolean(id))
-  );
-  if (attemptIds.length === 0) return [];
-
-  return prisma.notificationAttempt.findMany({
-    where: { id: { in: attemptIds } },
-    orderBy: [{ createdAt: "asc" }, { attemptNumber: "asc" }],
-    select: {
-      id: true,
-      notificationEventId: true,
-      channel: true,
-      status: true,
-      provider: true,
-      providerCode: true,
-      externalMessageId: true,
-      recipient: true,
-      suppressedRecipient: true,
-      controlledRecipientMode: true,
-      forcedContactEligibility: true,
-      success: true,
-      errorMessage: true,
-    },
-  });
-}
-
-function summarizeAttempts(attempts: Awaited<ReturnType<typeof attemptsForReports>>) {
-  return attempts.map((attempt) => ({
-    id: attempt.id,
-    notificationEventId: attempt.notificationEventId,
-    channel: attempt.channel,
-    status: attempt.status,
-    provider: attempt.provider,
-    providerCode: attempt.providerCode,
-    externalMessageIdMasked: redactProviderId(attempt.externalMessageId),
-    recipientMasked: redactRecipient(attempt.channel, attempt.recipient),
-    suppressedRecipientMasked: redactRecipient(attempt.channel, attempt.suppressedRecipient),
-    controlledRecipientMode: attempt.controlledRecipientMode,
-    forcedContactEligibility: attempt.forcedContactEligibility,
-    success: attempt.success,
-    errorMessage: redactSensitiveText(attempt.errorMessage),
-  }));
-}
 
 async function scopedNoResponseDiagnostic(scope: DeliveryOrderScope | null, runDate: string) {
   if (!scope) return null;
@@ -643,29 +522,35 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
   assertRowsWithinOrderScope(options.orderScope, events, "No-response dispatchable events");
 
   const oldScheduledDay42 = await oldScheduledDay42Events(createdEventIds);
-  let previewReports: DeliveryDispatchSummary["reports"] = [];
-  let dispatchReports: DeliveryDispatchSummary["reports"] = [];
-  let attempts: Awaited<ReturnType<typeof attemptsForReports>> = [];
+  const groupedResults: Awaited<ReturnType<typeof dispatchCurrentRunGroups>>[] = [];
 
   if (options.mode === "send" && createdEventIds.length > 0) {
-    previewReports = await dispatchPreviewForEvents(createdEventIds, testRunId);
-    const dispatchSummaries = await dispatchSendForEvents(createdEventIds, testRunId);
-    dispatchReports = dispatchSummaries.flatMap((dispatchSummary) => dispatchSummary.reports);
-    attempts = await attemptsForReports(dispatchReports);
+    for (const targetDate of new Set(events.map(e => dateKey(e.deliveryDate)))) {
+      const scopedEvents = events.filter(e => dateKey(e.deliveryDate) === targetDate);
+      const started = new Date();
+      const freshImport = await prepareFreshDeliveryIntervalImport({ targetDeliveryDate: targetDate, dryRun: false,
+        requireQueueBackedImport: true, importSalesOrders: requestedOn => importSalesOrdersForLineRequestedOn(requestedOn, {
+          orderLookups: scopedEvents.map(e => ({ orderType: e.orderType, orderNumber: e.orderNumber })), includeUnqualifiedOrderLookups: true,
+        }) });
+      groupedResults.push(await dispatchCurrentRunGroups({ eventIds: scopedEvents.map(e => e.id), freshImport,
+        runStartedAt: started, runId: testRunId, now: dateFromKey(runDate) }));
+    }
   }
 
   const after = await runtimeCounts();
-  const smsAttemptsCreated = attempts.filter((attempt) => attempt.channel === NotificationChannel.SMS).length;
-  const emailAttemptsCreated = attempts.filter((attempt) => attempt.channel === NotificationChannel.EMAIL).length;
-  const providerAcceptedCount = attempts.filter((attempt) => attempt.success === true).length;
-  const providerFailedCount = attempts.filter(
-    (attempt) => attempt.status === NotificationAttemptStatus.FAILED || attempt.success === false
-  ).length;
+  const smsAttemptsCreated = groupedResults.reduce((n, r) => n + r.smsAttemptsCreated, 0);
+  const emailAttemptsCreated = groupedResults.reduce((n, r) => n + r.emailAttemptsCreated, 0);
+  const providerAcceptedCount = groupedResults.reduce((n, r) => n + r.providerAcceptedCount, 0);
+  const providerFailedCount = groupedResults.reduce((n, r) => n + r.providerFailedCount, 0);
+  const attempts = groupedResults.flatMap(r => r.attempts);
+  const dispatchReports = groupedResults.flatMap(r => r.reports);
 
   return {
+        groupedDispatch: groupedResults,
+        notificationGroupAttemptsCreated: groupedResults.reduce((n, r) => n + r.notificationGroupAttemptsCreated, 0),
         ok:
           options.mode !== "send" ||
-          dispatchReports.every((report) => report.outcome === "submitted"),
+          groupedResults.every(r => r.ok),
         mode: options.mode,
         sendModeRequiresExactConfirmPhrase: REAL_NO_RESPONSE_CONFIRM_PHRASE,
         runDate,
@@ -673,7 +558,7 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
         noResponseTouchLifecycle: {
           day41: "state-machine customer touch: initial catch-up when original 42 touch is missing, otherwise first reminder",
           day40: "state-machine customer touch: initial catch-up, first reminder, or final reminder based on completed touch history",
-          day39: "state-machine internal escalation: normal no-response only after three completed touches, otherwise incomplete-touch escalation",
+          day39: "send the next missing customer touch; escalate only after three completed touches or when customer touches cannot safely continue",
           confirmationFollowUpCountSourceOfTruth: false,
           sourceOfTruth: "NotificationEvent/NotificationAttempt touch history plus current confirmation/order state",
         },
@@ -732,36 +617,9 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
           oldScheduledRowsTouched: 0,
           oldScheduledRowsDeleted: 0,
         },
-        dispatchPreviewReports: previewReports.map((report) => ({
-          eventId: report.eventId,
-          orderType: report.orderType,
-          orderNumber: report.orderNumber,
-          intervalType: report.intervalType,
-          actionType: report.actionType,
-          outcome: report.outcome,
-          reason: redactSensitiveText(report.reason),
-          selectedChannel: report.selectedChannel,
-          finalRecipientKind: report.finalRecipientKind,
-          finalRecipientMasked: report.finalRecipientMasked,
-          finalRecipientIsTestRecipient: report.finalRecipientIsTestRecipient,
-          realRecipientSuppressed: report.realRecipientSuppressed,
-        })),
-        dispatchReports: dispatchReports.map((report) => ({
-          eventId: report.eventId,
-          orderType: report.orderType,
-          orderNumber: report.orderNumber,
-          outcome: report.outcome,
-          reason: redactSensitiveText(report.reason),
-          selectedChannel: report.selectedChannel,
-          attemptId: report.attemptId,
-          fallbackAttemptId: report.fallbackAttemptId,
-          finalRecipientKind: report.finalRecipientKind,
-          finalRecipientMasked: report.finalRecipientMasked,
-          finalRecipientIsTestRecipient: report.finalRecipientIsTestRecipient,
-          realRecipientSuppressed: report.realRecipientSuppressed,
-          externalMessageIdPresent: report.externalMessageIdPresent,
-        })),
-        attempts: summarizeAttempts(attempts),
+        dispatchPreviewReports: groupedResults.flatMap(r => r.previewReports),
+        dispatchReports,
+        attempts,
         productionRunReport: {
           smsSendsAttempted: smsAttemptsCreated,
           emailSendsAttempted: emailAttemptsCreated,
@@ -771,27 +629,16 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
           notificationAttemptsCreated: after.notificationAttempts - before.notificationAttempts,
           twilioMessageSidsMasked: attempts
             .filter((attempt) => attempt.channel === NotificationChannel.SMS)
-            .map((attempt) => redactProviderId(attempt.externalMessageId))
+            .map((attempt) => attempt.externalMessageIdMasked)
             .filter((value): value is string => Boolean(value)),
           graphIdsMasked: attempts
             .filter((attempt) => attempt.channel === NotificationChannel.EMAIL)
-            .map((attempt) => redactProviderId(attempt.externalMessageId))
+            .map((attempt) => attempt.externalMessageIdMasked)
             .filter((value): value is string => Boolean(value)),
-          optOutBlockedCount: dispatchReports.filter(
-            (report) =>
-              report.outcome === "skipped" &&
-              (report.localSmsOptOutActive ||
-                report.localEmailOptOutActive ||
-                report.globalSmsOptOutActive ||
-                report.globalEmailOptOutActive)
-          ).length,
+          reconciliationRequiredCount: groupedResults.reduce((n, r) => n + r.reconciliationRequiredCount, 0),
           dedupeSkippedCount: summary.reminderEventsDeduped + summary.internalEscalationsDeduped,
-          errors: dispatchReports
-            .filter((report) => report.outcome === "failed")
-            .map((report) => ({
-              eventId: report.eventId,
-              reason: redactSensitiveText(report.reason),
-            })),
+          errors: dispatchReports.filter(report => report.outcome !== "submitted")
+            .map(report => ({ eventIds: report.eventIds, outcome: report.outcome })),
           exactNextOperationalAction:
             options.mode === "send"
               ? "Review provider callbacks and customer replies before running the next no-response pass."

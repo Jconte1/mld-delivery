@@ -623,7 +623,7 @@ async function main() {
       includes(productionIntervalRunner, "create10DayDeliveryPaymentRequestEvents") &&
       includes(productionIntervalRunner, "create8DayPaymentEnforcementEvents") &&
       includes(productionIntervalRunner, "create2DayDeliveryReminderEvents") &&
-      includes(productionIntervalRunner, "dispatchDeliveryNotifications") &&
+      includes(productionIntervalRunner, "dispatchCurrentRunGroups") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_180") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_90") &&
       includes(productionIntervalRunner, "NotificationIntervalType.DAY_60") &&
@@ -657,9 +657,9 @@ async function main() {
       includes(productionIntervalRunner, "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST") &&
       includes(productionIntervalRunner, "DEMO_NOTIFICATION_SEND_ENABLED") &&
       includes(productionIntervalRunner, "TWILIO_WEBHOOK_VALIDATE_SIGNATURES") &&
-      includes(productionIntervalRunner, "finalRecipientIsTestRecipient") &&
-      includes(productionIntervalRunner, "finalRecipientKind !== \"customer\"") &&
-      includes(productionIntervalRunner, "attemptsAfter !== attemptsBefore"),
+      includes(productionIntervalRunner, "dispatchCurrentRunGroups") &&
+      includes(dispatcher, "grouped_dispatch_requires_real_eligibility") &&
+      includes(dispatcher, "grouped_production_recipient_matches_configured_test_recipient"),
     "production interval runner must reject controlled/test routing and forced eligibility before real sends",
     failures
   );

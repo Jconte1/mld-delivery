@@ -42,11 +42,12 @@ import { dateFromKey, dateKey } from "@/lib/notifications/helpers";
 import { normalizeSmsPhoneForOptOut } from "@/lib/notifications/notificationAddressNormalization";
 import { prisma } from "@/lib/prisma";
 import type { TwilioFormPayload } from "@/lib/notifications/twilioWebhook";
+import { groupCustomerInclude, respondToNotificationGroup, type CustomerResponsePorts } from "./deliveryNotificationGroupCustomer";
 
 type DeliveryTwilioInboundClient = Pick<
   typeof prisma,
   "twilioInboundMessage" | "deliveryConfirmation" | "smsOptOut" | "contact" | "orderDeliveryGroupLine"
->;
+> & Partial<Pick<typeof prisma, "deliveryNotificationGroup">>;
 
 type InboundCandidate = Awaited<ReturnType<typeof findActiveDeliveryConfirmationCandidates>>[number];
 
@@ -853,6 +854,7 @@ export async function handleTwilioInboundSms(params: {
     EnqueueDeliveryRequestedDateWritebackOptions;
   contactOptInWriteback?: ContactOptInWritebackDispatchOptions;
   currentStateRefresher?: SmsCurrentStateRefresher;
+  groupResponsePorts?: CustomerResponsePorts;
 }): Promise<HandleTwilioInboundSmsResult> {
   const client = params.prismaClient ?? prisma;
   const now = params.now ?? new Date();
@@ -997,6 +999,48 @@ export async function handleTwilioInboundSms(params: {
         matchStatus: "UNMATCHED",
         responseMessage,
       });
+    }
+
+    // Multiple confirmations are unambiguous only when they are exactly the members
+    // of one successfully sent SMS group. Never infer grouping from phone alone.
+    if (candidates.length > 1 && client.deliveryNotificationGroup) {
+      const ids = new Set(candidates.map(c => c.id));
+      const groups = await client.deliveryNotificationGroup.findMany({ where: {
+        intervalType: "DAY_42", channel: "SMS", responseAt: null,
+        members: { some: { deliveryConfirmationId: { in: [...ids] } } },
+      }, include: groupCustomerInclude, orderBy: { createdAt: "desc" } });
+      const matching = groups.filter(g => g.members.length === ids.size &&
+        g.members.every(m => m.deliveryConfirmationId && ids.has(m.deliveryConfirmationId)) &&
+        ["SUBMITTED", "DELIVERED"].includes(g.attempts[0]?.status ?? "") &&
+        phonesMatch(g.attempts[0]?.recipient, fromPhone));
+      const group = matching[0];
+      if (group) {
+        let responseMessage = "MLD: Reply Y to confirm these orders, or N to request a new date.";
+        let error: string | null = null;
+        let requestedDate: string | undefined;
+        if (parsedIntent === "REQUESTED_DATE") {
+          const validation = validateRequestedDeliveryDate({ rawValue: body ?? "", currentDeliveryDate: group.deliveryDate,
+            address: group.members[0].notificationEvent.order.address, now });
+          if (validation.valid) requestedDate = validation.dateKey;
+          else responseMessage = validation.responseMessage;
+        }
+        if (parsedIntent === "CONFIRM" || parsedIntent === "CHANGE_REQUEST" || requestedDate) {
+          try {
+            const response = await respondToNotificationGroup({ client: client as typeof prisma, token: group.linkToken,
+              action: parsedIntent === "CONFIRM" ? "CONFIRM" : requestedDate ? "REQUEST_DATE" : "CHANGE_REQUEST",
+              requestedDate, source: "SMS", rawResponse: body ?? undefined, now, ports: params.groupResponsePorts });
+            error = response.jobs.filter(j => j.error).map(j => `${j.order}: ${j.error}`).join("; ") || null;
+            responseMessage = error ? "MLD: Your response was saved, but some order updates need attention. Please contact MLD to verify." :
+              parsedIntent === "CONFIRM" ? `MLD: Thank you. Orders ${group.members.map(m => m.notificationEvent.orderNumber).join(", ")} are confirmed.` :
+              requestedDate ? "MLD: Your requested delivery date was saved for these orders. Updates are processing." : getSmsChangeRequestedNextStepMessage();
+          } catch (cause) {
+            error = cause instanceof Error ? cause.message : String(cause);
+            responseMessage = "MLD: We could not verify all orders for this response. Please use your latest delivery link or contact MLD.";
+          }
+        }
+        await finishInboundMessage({ client, id: inbound.id, parsedIntent, matchStatus: "MATCHED", responseMessage, error, now });
+        return result({ inboundMessageId: inbound.id, messageSid, parsedIntent, matchStatus: "MATCHED", responseMessage, writebackError: error });
+      }
     }
 
     if (candidates.length > 1) {

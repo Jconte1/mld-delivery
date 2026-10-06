@@ -80,6 +80,7 @@ const ORDER_FIELDS: ChangeFieldDefinition[] = [
   { fieldName: "customerId", changeType: ERP_CHANGE_TYPES.CUSTOMER_CHANGED },
   { fieldName: "customerDescription", changeType: ERP_CHANGE_TYPES.CUSTOMER_CHANGED },
   { fieldName: "contactId", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED },
+  { fieldName: "deliveryContactId", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED },
   { fieldName: "locationId", changeType: ERP_CHANGE_TYPES.LOCATION_CHANGED },
   { fieldName: "locationDescription", changeType: ERP_CHANGE_TYPES.LOCATION_CHANGED },
   { fieldName: "buyerGroup", changeType: ERP_CHANGE_TYPES.BUYER_GROUP_CHANGED },

@@ -1,0 +1,327 @@
+DELIVERY NOTIFICATION EXAMPLES FOR POWERPOINT
+
+Instructions for ChatGPT creating the slides:
+Create one example slide per numbered section, with an SMS mockup and an email mockup side by side. Preserve paragraph spacing. Include the email subject. Presenter notes are not customer-facing copy. Do not treat these as real sent notifications.
+
+All examples use sample data only. No order/contact fetch, provider send, database update, or ERP write was performed. These are alternative lifecycle examples, not a claim that this order actually received every message.
+
+Order: SO38056
+Customer/job: Ben Devenport Construction / James Test
+Contact: James Conte (greeted as James by the normal first-name formatter)
+Address: 2345 S Main Street, Salt Lake City, UT 84109
+Fictional delivery date: Monday, November 30, 2026
+Fictional applicable balance: $1,250.00
+Links: illustrative placeholders, not working customer links.
+Buyer-group description and optional salesperson footer omitted for these examples.
+Emails shown as readable text rather than HTML markup.
+
+========================================================================
+1. 180 / 90 / 60 DAY - ONE REPRESENTATIVE EXAMPLE (90 DAY)
+========================================================================
+
+SMS
+
+MLD: Order SO38056: Hello James, we are 3 months out! This is a reminder that your delivery for Ben Devenport Construction / James Test at 2345 S Main Street, Salt Lake City, UT 84109 is scheduled for Monday, November 30, 2026.
+
+EMAIL SUBJECT
+Delivery reminder: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James, we are 3 months out! This is a reminder that your delivery for Ben Devenport Construction / James Test at 2345 S Main Street, Salt Lake City, UT 84109 is scheduled for Monday, November 30, 2026.
+
+Order: SO38056
+
+PRESENTER NOTE (not part of the message)
+The 180-day introduction is 'we are still a ways out, but wanted to remind you that'; the 60-day introduction is 'we are 2 months out! This is a reminder that'. The current early-reminder SMS template has no link or STOP footer; this example preserves the current wording.
+
+========================================================================
+2. 42 DAY - CONFIRM DELIVERY
+========================================================================
+
+SMS
+
+MLD: Order# SO38056:
+
+Hello James, we are 6 weeks out! Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Reply Y to confirm or N to request a different delivery date.
+
+For Delivery Details: https://www.mld.com/delivery/c/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+ACTION REQUIRED: Delivery confirmation: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+We are 6 weeks out! Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Delivery address: 2345 S Main Street, Salt Lake City, UT 84109
+Order: SO38056
+
+To confirm/change delivery and view order details, click here:
+https://www.mld.com/delivery/confirm/EXAMPLE-NOT-A-LIVE-LINK
+
+This is an automated no-reply email. Please do not reply directly to this message.
+
+Thank you.
+
+PRESENTER NOTE (not part of the message)
+No payment language. Email uses the full confirmation link; SMS uses the short /c/ link.
+
+========================================================================
+3. 30 DAY - DELIVERY REMINDER
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Payment may be needed before delivery.
+
+Please review details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+Delivery reminder: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+Job address: 2345 S Main Street, Salt Lake City, UT 84109
+Order: SO38056
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Payment
+Balance owed prior to scheduling Delivery: $1,250.00
+
+PRESENTER NOTE (not part of the message)
+Example shows the payment-due branch. The SMS mentions possible payment without an amount; the email includes the amount. Payment language is omitted when not applicable.
+
+========================================================================
+4. 14 DAY - DELIVERY / PAYMENT REMINDER
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Balance owed prior to scheduling Delivery: $1,250.00
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+Delivery reminder: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+Job address: 2345 S Main Street, Salt Lake City, UT 84109
+Order: SO38056
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Payment
+Balance owed prior to scheduling Delivery: $1,250.00
+
+PRESENTER NOTE (not part of the message)
+Example shows a prepayment customer with a balance due. The payment line is omitted when not applicable.
+
+========================================================================
+5. 12 / 10 DAY - ONE REPRESENTATIVE EXAMPLE (12 DAY)
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+This is your second balance reminder.
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Balance owed prior to scheduling Delivery: $1,250.00
+Your balance must be handled by Sunday, November 22, 2026.
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+Balance Reminder: Delivery reminder: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+This is your second balance reminder.
+
+Your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+Job address: 2345 S Main Street, Salt Lake City, UT 84109
+Order: SO38056
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Payment
+Balance owed prior to scheduling Delivery: $1,250.00
+Your balance must be handled by Sunday, November 22, 2026.
+
+PRESENTER NOTE (not part of the message)
+For the 10-day version, replace 'This is your second balance reminder.' with 'This is your final balance reminder.' in both SMS and email. The deadline is eight calendar days before the example delivery date.
+
+========================================================================
+6. 8 DAY - CUSTOMER PAYMENT-HOLD NOTICE
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+Your delivery for Ben Devenport Construction / James Test is currently on hold because payment was not received by the required deadline.
+
+Balance owed prior to scheduling Delivery: $1,250.00
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+Attention: Delivery Order On Hold - Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+Your delivery for Ben Devenport Construction / James Test at 2345 S Main Street, Salt Lake City, UT 84109 was scheduled for Monday, November 30, 2026.
+Order: SO38056
+
+Your delivery is currently on hold because payment was not received by the required deadline.
+
+Balance owed prior to scheduling Delivery: $1,250.00
+
+Please use the link below to review your delivery details:
+View Delivery Details: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Thank you,
+MLD
+
+PRESENTER NOTE (not part of the message)
+This illustrates the customer on-hold notice, not the separate internal salesperson escalation. It assumes the on-hold scenario; no hold was actually placed.
+
+========================================================================
+7. 2 DAY - FINAL DELIVERY REMINDER
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+Final reminder - your delivery for Ben Devenport Construction / James Test is scheduled for Monday, November 30, 2026.
+
+Review delivery details here: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+Final Delivery Reminder: Ben Devenport Construction / James Test - Monday, November 30, 2026
+
+EMAIL BODY
+
+Hello James,
+
+This is your final reminder that your delivery for Ben Devenport Construction / James Test at 2345 S Main Street, Salt Lake City, UT 84109 is scheduled for Monday, November 30, 2026.
+Order: SO38056
+
+Please use the link below to review your delivery details:
+View Delivery Details: https://www.mld.com/delivery/details/EXAMPLE-NOT-A-LIVE-LINK
+
+Thank you,
+MLD
+
+PRESENTER NOTE (not part of the message)
+No balance or payment language.
+
+========================================================================
+8. THANK YOU - ORDER RECEIVED
+========================================================================
+
+SMS
+
+MLD: Thank you for your purchase. Order #SO38056 has been received.
+
+Current requested delivery date: Monday, November 30, 2026.
+
+We will send reminders as your delivery approaches. About six weeks before delivery, we will ask you to confirm your delivery date or request a later date.
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+MLD | Order SO38056 | Thank you for your purchase
+
+EMAIL BODY
+
+Thank you for your purchase
+
+We have received order #SO38056.
+
+Current requested delivery date
+Monday, November 30, 2026
+
+What happens next
+We will send reminders as your delivery approaches. About six weeks before delivery, we will ask you to confirm your delivery date or request a later date.
+
+If you have questions, please contact your salesperson.
+
+This is an automated message from MLD.
+
+PRESENTER NOTE (not part of the message)
+Email text here represents the visible HTML email. This example assumes the requested delivery date is more than six weeks away.
+
+========================================================================
+9. ORDER COMPLETE - PROPOSED COPY, NOT A VERIFIED CURRENT TEMPLATE
+========================================================================
+
+SMS
+
+MLD: Order SO38056:
+
+Your order for Ben Devenport Construction / James Test is complete.
+
+Thank you for choosing MLD. If you have any questions about your order, please contact your salesperson.
+
+Reply STOP to opt out.
+
+EMAIL SUBJECT
+MLD | Order SO38056 | Order complete
+
+EMAIL BODY
+
+Hello James,
+
+Your order SO38056 for Ben Devenport Construction / James Test is complete.
+
+Delivery address: 2345 S Main Street, Salt Lake City, UT 84109
+
+Thank you for choosing MLD. If you have any questions about your order, please contact your salesperson.
+
+Thank you,
+MLD
+
+PRESENTER NOTE (not part of the message)
+No order-complete customer SMS/email template was found in the delivery notification code inspected. Label this slide 'Proposed' rather than presenting it as an existing automated notification.
+

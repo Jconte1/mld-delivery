@@ -18,6 +18,7 @@ import {
   type EnqueueDeliveryTenDayConfirmationWritebackParams,
 } from "@/lib/notifications/deliveryTenDayConfirmationWritebackQueue";
 import { prisma } from "@/lib/prisma";
+import { sharedAttemptEvidence } from "./deliveryNotificationGroupEvidence";
 
 export const DELIVERY_TEN_DAY_CONFIRMATION_REASONS = {
   nonPrepayTermsCleared: "non_prepay_terms_cleared",
@@ -95,7 +96,13 @@ export async function hasQualifyingTenDayNotification(
     },
     orderBy: { createdAt: "desc" },
   });
-  return attempts.some(attempt => {
+  const grouped = client.deliveryNotificationGroupAttempt ? await client.deliveryNotificationGroupAttempt.findMany({ where: {
+    productionEligibilityVerified: true, status: { in: ["SUBMITTED", "DELIVERED"] }, submittedAt: { not: null },
+    group: { contactId: order.contactId!, deliveryDate: dateFromKey(group.deliveryDate),
+      intervalType: { in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] },
+      members: { some: { notificationEvent: { orderId: group.order.id, deliveryGroupId: group.id, contactId: order.contactId! } } } },
+  } }) : [];
+  return [...attempts, ...grouped.map(sharedAttemptEvidence)].some(attempt => {
     const sms = attempt.channel === "SMS";
     if (!sms && attempt.channel !== "EMAIL") return false;
     if (sms ? attempt.realSmsOptIn !== true : attempt.realEmailOptIn !== true) return false;

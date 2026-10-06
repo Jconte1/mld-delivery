@@ -19,6 +19,14 @@ export async function POST(request: Request) {
   }
 
   try {
+    const groupAttemptId = new URL(request.url).searchParams.get("groupAttemptId");
+    if (groupAttemptId) {
+      const { handleTwilioGroupMessageStatus } = await import("@/lib/notifications/handleTwilioGroupMessageStatus");
+      const { prisma } = await import("@/lib/prisma");
+      const result = await handleTwilioGroupMessageStatus({ client: prisma, groupAttemptId, payload });
+      console.info("[twilio][group-message-status] processed", result);
+      return new Response("OK", { status: 200 });
+    }
     const result = await handleTwilioMessageStatus({ payload });
     console.info("[twilio][message-status] processed", {
       messageSid: result.messageSid,

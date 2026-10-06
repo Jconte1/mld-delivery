@@ -21,6 +21,7 @@ export type DeliveryNotificationProvider = {
     subject: string;
     textBody: string;
     htmlBody?: string | null;
+    attachments?: Array<{ name: string; contentType: string; contentBytes: string }>;
   }): Promise<DeliveryNotificationProviderResult>;
 };
 
@@ -178,6 +179,9 @@ export function createDeliveryNotificationProvider(
             content: input.htmlBody ?? input.textBody,
           },
           toRecipients: [{ emailAddress: { address: input.to } }],
+          ...(input.attachments?.length ? { attachments: input.attachments.map(attachment => ({
+            "@odata.type": "#microsoft.graph.fileAttachment", ...attachment,
+          })) } : {}),
         },
         saveToSentItems: true,
       };

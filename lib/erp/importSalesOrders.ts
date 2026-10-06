@@ -11,7 +11,7 @@ import {
   detectOrderTotalChanges,
   type ErpChangeDetectionResult,
 } from "@/lib/erp/detectErpChanges";
-import { createErpClientFromEnv } from "@/lib/erp/erpClient";
+import { createErpClientFromEnv, type DeliveryErpClient } from "@/lib/erp/erpClient";
 import {
   isDeliverableOrderLineItemType,
   syncOrderDeliveryGroupLineMemberships,
@@ -21,6 +21,7 @@ import { persistOrderReadiness } from "@/lib/delivery-readiness/orderLineReadine
 import { prisma } from "@/lib/prisma";
 
 export type ImportSalesOrdersResult = {
+  deliveryContactWarnings?: Array<{ orderType: string; orderNumber: string; reason: string }>;
   requestedOn: string;
   qualifyingOrdersFetched: number;
   fullOrdersFetched: number;
@@ -96,6 +97,7 @@ export type ImportSalesOrderLookup = {
 };
 
 export type ImportSalesOrdersForLineRequestedOnOptions = {
+  erpClient?: DeliveryErpClient;
   orderLookups?: ImportSalesOrderLookup[];
   includeUnqualifiedOrderLookups?: boolean;
 };
@@ -492,7 +494,7 @@ export async function importSalesOrdersForLineRequestedOn(
 ): Promise<ImportSalesOrdersResult> {
   const requestedOnKey = normalizeRequestedOn(requestedOn);
   const result = emptyResult(requestedOnKey);
-  const client = createErpClientFromEnv();
+  const client = options.erpClient ?? createErpClientFromEnv();
   const transactionTimeoutMs = getPositiveIntegerEnv(
     "ERP_IMPORT_TRANSACTION_TIMEOUT_MS",
     DEFAULT_ERP_IMPORT_TRANSACTION_TIMEOUT_MS
@@ -628,6 +630,20 @@ export async function importSalesOrdersForLineRequestedOn(
         );
       }
 
+      const deliveryContactId = getString(getField(fullOrder, "DeliveryContact"));
+      let deliveryContactRecord: unknown | null = null;
+      let deliveryContactSyncStatus = Object.prototype.hasOwnProperty.call(fullOrder, "DeliveryContact") ? "missing" : "not_exposed";
+      if (deliveryContactId) {
+        try {
+          deliveryContactRecord = deliveryContactId === contactId ? contactRecord : await fetchContactForImport(deliveryContactId);
+          if (getString(getField(deliveryContactRecord, "ContactID")) !== deliveryContactId) deliveryContactRecord = null;
+        } catch { /* Delivery-contact failure must not block primary-contact intervals. */ }
+        deliveryContactSyncStatus = deliveryContactRecord ? "fetched" : "unavailable";
+      }
+      if (deliveryContactSyncStatus !== "fetched") {
+        (result.deliveryContactWarnings ??= []).push({ orderType, orderNumber, reason: deliveryContactSyncStatus });
+      }
+
       try {
         const transactionResult = await prisma.$transaction(
           async (tx) => {
@@ -760,6 +776,23 @@ export async function importSalesOrdersForLineRequestedOn(
             });
             deltas.contactsUpserted += 1;
 
+            if (deliveryContactId && deliveryContactId !== contactId) {
+              const data = deliveryContactRecord ? {
+                status: activeStatusFromContact(deliveryContactRecord),
+                companyName: getString(getField(deliveryContactRecord, "CompanyName")),
+                displayName: getString(getField(deliveryContactRecord, "DisplayName")),
+                firstName: getString(getField(deliveryContactRecord, "FirstName")),
+                lastName: getString(getField(deliveryContactRecord, "LastName")),
+                email: getString(getField(deliveryContactRecord, "Email")),
+                phone1: getString(getField(deliveryContactRecord, "Phone1")),
+                phone2: getString(getField(deliveryContactRecord, "Phone2")),
+                ...mapAcumaticaContactOptIns(deliveryContactRecord), lastSyncedAt: importAt,
+              } : {};
+              await tx.contact.upsert({ where: { contactId: deliveryContactId },
+                create: { contactId: deliveryContactId, ...data }, update: data });
+              deltas.contactsUpserted += 1;
+            }
+
             const existingOrder = await tx.order.findUnique({
               where: {
                 orderType_orderNumber: {
@@ -773,6 +806,7 @@ export async function importSalesOrdersForLineRequestedOn(
                 customerId: true,
                 customerDescription: true,
                 contactId: true,
+                deliveryContactId: true,
                 locationId: true,
                 locationDescription: true,
                 buyerGroup: true,
@@ -784,6 +818,9 @@ export async function importSalesOrdersForLineRequestedOn(
             });
 
             const orderData = {
+              deliveryContactId,
+              deliveryContactSyncStatus,
+              primaryContactFetchSucceeded: Boolean(contactRecord),
               shipVia: getString(getField(fullOrder, "ShipVia")),
               status,
               headerRequestedOn: getDateValue(getField(fullOrder, "RequestedOn")),

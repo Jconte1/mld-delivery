@@ -1,4 +1,5 @@
 import type { ImportSalesOrdersResult } from "@/lib/erp/importSalesOrders";
+import { groupEvidenceSelect, sharedAttemptEvidence } from "./deliveryNotificationGroupEvidence";
 import {
   DeliveryConfirmationStatus,
   InternalNotificationAudienceType,
@@ -190,6 +191,7 @@ type PlanCandidate = {
 };
 
 type NotificationEventRecord = {
+  notificationGroupMember?: { group: { attempts: import("../generated/prisma/client").DeliveryNotificationGroupAttempt[] } } | null;
   id: string;
   dedupeKey: string;
   intervalType: NotificationIntervalType;
@@ -409,6 +411,7 @@ type LegacyReminderSchedule = {
 };
 
 const notificationEventSelect = {
+  notificationGroupMember: groupEvidenceSelect,
   id: true,
   dedupeKey: true,
   intervalType: true,
@@ -470,6 +473,7 @@ const deliveryConfirmationNoResponseSelect = {
   linkExpiredAt: true,
   notificationEvent: {
     select: {
+      notificationGroupMember: groupEvidenceSelect,
       id: true,
       dedupeKey: true,
       intervalType: true,
@@ -1331,7 +1335,8 @@ function resolveTouchRecord(params: {
   touchNumber: DeliveryConfirmationNoResponseTouchNumber;
   events: NotificationEventRecord[];
 }): DeliveryConfirmationNoResponseTouchRecord {
-  const attempts = sortedAttempts(params.events.flatMap((event) => event.attempts ?? []));
+  const attempts = sortedAttempts(params.events.flatMap((event) => [ ...(event.attempts ?? []),
+    ...(event.notificationGroupMember?.group.attempts ?? []).filter(a => a.productionEligibilityVerified).map(sharedAttemptEvidence) ]));
   let latestCompletedIndex = -1;
   let completedAt: Date | null = null;
   attempts.forEach((attempt, index) => {
@@ -1743,7 +1748,7 @@ function reportTouchForCandidate(
 }
 
 function eventHasAttempts(event: NotificationEventRecord | null | undefined) {
-  return (event?.attempts ?? []).length > 0;
+  return (event?.attempts ?? []).length > 0 || (event?.notificationGroupMember?.group.attempts ?? []).length > 0;
 }
 
 function customerActionTouchSummaryKey(action: DeliveryConfirmationNoResponseCustomerAction) {

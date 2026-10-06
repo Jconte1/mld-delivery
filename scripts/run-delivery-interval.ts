@@ -4,8 +4,6 @@ import path from "node:path";
 
 import {
   NotificationActionType,
-  NotificationAttemptStatus,
-  NotificationChannel,
   NotificationEventStatus,
   NotificationIntervalType,
 } from "../lib/generated/prisma/client";
@@ -45,10 +43,7 @@ import {
   create8DayPaymentEnforcementEvents,
   type Create8DayPaymentEnforcementEventsSummary,
 } from "../lib/notifications/create8DayPaymentEnforcementEvents";
-import {
-  dispatchDeliveryNotifications,
-  type DispatcherChannelFilter,
-} from "../lib/notifications/deliveryNotificationDispatcher";
+import type { DispatcherChannelFilter } from "../lib/notifications/deliveryNotificationDispatcher";
 import {
   createFreshImportFailedOrderLookup,
   getFreshImportFailedOrders,
@@ -335,35 +330,6 @@ function addMissingEnvFailure(
   if (!envValue(name, env)) failures.push(`${name} is required for ${purpose}.`);
 }
 
-function redactEmail(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  const [local, domain] = trimmed.split("@");
-  if (!local || !domain) return "<redacted-email>";
-  return `${local.slice(0, 1)}***@${domain}`;
-}
-
-function normalizeDigits(value: string | null | undefined) {
-  return value?.replace(/\D/g, "") ?? "";
-}
-
-function redactPhone(value: string | null | undefined) {
-  const digits = normalizeDigits(value);
-  if (!digits) return null;
-  return `***${digits.slice(-4)}`;
-}
-
-function redactRecipient(channel: NotificationChannel | string | null, value: string | null | undefined) {
-  if (!channel || !value) return null;
-  return channel === NotificationChannel.SMS ? redactPhone(value) : redactEmail(value);
-}
-
-function redactProviderId(value: string | null | undefined) {
-  const trimmed = value?.trim();
-  if (!trimmed) return null;
-  if (trimmed.length <= 8) return "<redacted-provider-id>";
-  return `${trimmed.slice(0, 4)}...${trimmed.slice(-4)}`;
-}
 
 function redactSensitiveText(value: string | null | undefined) {
   if (!value) return null;
@@ -671,133 +637,9 @@ async function countOtherScheduledEventsForInterval(params: {
   });
 }
 
-function assertPreviewSafe(
-  previewReports: Awaited<ReturnType<typeof dispatchDeliveryNotifications>>["reports"]
-) {
-  const failures: string[] = [];
-  for (const report of previewReports) {
-    if (report.outcome !== "previewed") {
-      failures.push(`${report.eventId}: dispatcher preview outcome ${report.outcome}: ${report.reason ?? "no reason"}`);
-    }
-    if (report.controlledRecipientMode) {
-      failures.push(`${report.eventId}: dispatcher preview used controlled-recipient mode`);
-    }
-    if (report.forcedContactEligibility) {
-      failures.push(`${report.eventId}: dispatcher preview used forced contact eligibility`);
-    }
-    if (report.finalRecipientKind !== "customer") {
-      failures.push(`${report.eventId}: dispatcher preview final recipient was not the customer`);
-    }
-    if (report.realRecipientSuppressed) {
-      failures.push(`${report.eventId}: dispatcher preview suppressed a real recipient`);
-    }
-    if (report.finalRecipientIsTestRecipient) {
-      failures.push(`${report.eventId}: dispatcher preview resolved to the configured test recipient`);
-    }
-  }
-
-  if (failures.length > 0) {
-    throw new Error(`Dispatcher preview safety check failed:\n${failures.map((failure) => `- ${failure}`).join("\n")}`);
-  }
-}
-
-async function dispatchPreviewForEvents(
-  eventIds: string[],
-  runId: string,
-  channel: DispatcherChannelFilter
-) {
-  const attemptsBefore = await prisma.notificationAttempt.count();
-  const reports = [];
-  for (const eventId of eventIds) {
-    const summary = await dispatchDeliveryNotifications({
-      preview: true,
-      send: false,
-      controlledRecipientSend: false,
-      testRunId: `${runId}_preview`,
-      eventId,
-      limit: 1,
-      channel,
-    });
-    reports.push(...summary.reports);
-  }
-  assertPreviewSafe(reports);
-  const attemptsAfter = await prisma.notificationAttempt.count();
-  if (attemptsAfter !== attemptsBefore) {
-    throw new Error("Dispatcher preview created NotificationAttempt rows; refusing to send.");
-  }
-  return reports;
-}
-
-async function dispatchSendForEvents(
-  eventIds: string[],
-  runId: string,
-  channel: DispatcherChannelFilter
-) {
-  const summaries = [];
-  for (const eventId of eventIds) {
-    summaries.push(
-      await dispatchDeliveryNotifications({
-        preview: false,
-        send: true,
-        controlledRecipientSend: false,
-        testRunId: runId,
-        eventId,
-        limit: 1,
-        channel,
-      })
-    );
-  }
-  return summaries;
-}
-
-async function attemptsForReports(
-  reports: Awaited<ReturnType<typeof dispatchDeliveryNotifications>>["reports"]
-) {
-  const attemptIds = reports.flatMap((report) =>
-    [report.attemptId, report.fallbackAttemptId].filter((id): id is string => Boolean(id))
-  );
-  if (attemptIds.length === 0) return [];
-
-  return prisma.notificationAttempt.findMany({
-    where: { id: { in: attemptIds } },
-    orderBy: [{ createdAt: "asc" }, { attemptNumber: "asc" }],
-    select: {
-      id: true,
-      notificationEventId: true,
-      channel: true,
-      status: true,
-      provider: true,
-      providerCode: true,
-      externalMessageId: true,
-      recipient: true,
-      suppressedRecipient: true,
-      controlledRecipientMode: true,
-      forcedContactEligibility: true,
-      success: true,
-      errorMessage: true,
-    },
-  });
-}
-
-function summarizeAttempts(attempts: Awaited<ReturnType<typeof attemptsForReports>>) {
-  return attempts.map((attempt) => ({
-    id: attempt.id,
-    notificationEventId: attempt.notificationEventId,
-    channel: attempt.channel,
-    status: attempt.status,
-    provider: attempt.provider,
-    providerCode: attempt.providerCode,
-    externalMessageIdMasked: redactProviderId(attempt.externalMessageId),
-    recipientMasked: redactRecipient(attempt.channel, attempt.recipient),
-    suppressedRecipientMasked: redactRecipient(attempt.channel, attempt.suppressedRecipient),
-    controlledRecipientMode: attempt.controlledRecipientMode,
-    forcedContactEligibility: attempt.forcedContactEligibility,
-    success: attempt.success,
-    errorMessage: redactSensitiveText(attempt.errorMessage),
-  }));
-}
 
 export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
+  const runStartedAt = new Date();
   if (options.runDate) dateFromKey(options.runDate);
   const runDate = options.runDate;
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
@@ -904,142 +746,20 @@ export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
         };
   }
 
-  const previewReports = await dispatchPreviewForEvents(
-    scheduledEvents.map((event) => event.id),
-    runId,
-    options.channel
-  );
+  const { dispatchCurrentRunGroups } = await import("../lib/notifications/dispatchCurrentRunGroups");
+  const grouped = await dispatchCurrentRunGroups({ eventIds: scheduledEvents.map(e => e.id), freshImport, runStartedAt, runId,
+    channel: options.channel });
+  const afterGrouped = await runtimeCounts();
+  return { ...grouped, phase: "complete", interval: config.interval, runDate, targetDeliveryDate: targetDate,
+    confirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled("DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"),
+    tenDayConfirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled("DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"),
+    dedupeSkippedCount: dedupedEventCountForSummary(createSummary),
+    orderScope: options.orderScope, importSummary: freshImport.importResult, failedImportExclusions: createSummary.failedImportExclusions,
+    currentRunCreatedEventIds, otherScheduledEventsForInterval, candidateCount: createSummary.targetDeliveryGroups,
+    productionQualifiedCount: scheduledEvents.length, skippedCountByReason: summarizeSkippedReasons(createSummary.skippedReasons),
+    createEventReports: summarizeCreateEventReports(createSummary), notificationEventsCreated: afterGrouped.notificationEvents - before.notificationEvents,
+    groupedDispatch: true, sensitiveValuesPrinted: false };
 
-  const dispatchSummaries = await dispatchSendForEvents(
-    scheduledEvents.map((event) => event.id),
-    runId,
-    options.channel
-  );
-  const dispatchReports = dispatchSummaries.flatMap((summary) => summary.reports);
-  const attempts = await attemptsForReports(dispatchReports);
-  const after = await runtimeCounts();
-  const smsAttemptsCreated = attempts.filter((attempt) => attempt.channel === NotificationChannel.SMS).length;
-  const emailAttemptsCreated = attempts.filter((attempt) => attempt.channel === NotificationChannel.EMAIL).length;
-  const providerAcceptedCount = attempts.filter((attempt) => attempt.success === true).length;
-  const providerFailedCount = attempts.filter(
-    (attempt) => attempt.status === NotificationAttemptStatus.FAILED || attempt.success === false
-  ).length;
-
-  return {
-        ok: dispatchReports.every((report) => report.outcome === "submitted"),
-        phase: "complete",
-        interval: config.interval,
-        runDate,
-        targetDeliveryDate: targetDate,
-        migrationStatus,
-        controlledRecipientMode: false,
-        forcedContactEligibility: false,
-        realCustomerSendGateRequired: true,
-        realCustomerRecipientsUsed: true,
-        confirmationWritebackDryRun: dryRunOverrideEnabled(
-          "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"
-        ),
-        confirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled(
-          "DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"
-        ),
-        tenDayConfirmationWritebackDryRun: dryRunOverrideEnabled(
-          "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"
-        ),
-        tenDayConfirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled(
-          "DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"
-        ),
-        requestedChannel: options.channel,
-        importSummary: freshImport.importResult,
-        successfullyRefreshedOrders: freshImport.importResult?.successfullyRefreshedOrders ?? [],
-        orderScope: {
-          requested: options.orderScope,
-          summary: summaryOrderScope(createSummary),
-          blastRadiusLimitedOnly: Boolean(options.orderScope),
-          productionEligibilityStillRequired: true,
-          forcedEligibility: false,
-          controlledRecipientMode: false,
-        },
-        failedImportExclusions: createSummary.failedImportExclusions,
-        currentRunCreatedEventIds,
-        otherScheduledEventsForInterval,
-        oldScheduledEventsWarning:
-          config.dispatchOnlyCurrentRunCreatedEvents && otherScheduledEventsForInterval > 0
-            ? `${otherScheduledEventsForInterval} existing ${config.interval}-day SCHEDULED event(s) were not dispatched and still need targeted cleanup/cancel review before scheduler go-live.`
-            : null,
-        candidateCount: createSummary.targetDeliveryGroups,
-        productionQualifiedCount: scheduledEvents.length,
-        skippedCountByReason: summarizeSkippedReasons(createSummary.skippedReasons),
-        createEventReports: summarizeCreateEventReports(createSummary),
-        smsAttemptsCreated,
-        emailAttemptsCreated,
-        providerAcceptedCount,
-        providerFailedCount,
-        notificationEventsCreated: after.notificationEvents - before.notificationEvents,
-        notificationAttemptsCreated: after.notificationAttempts - before.notificationAttempts,
-        twilioMessageSidsMasked: attempts
-          .filter((attempt) => attempt.channel === NotificationChannel.SMS)
-          .map((attempt) => redactProviderId(attempt.externalMessageId))
-          .filter((value): value is string => Boolean(value)),
-        graphIdsMasked: attempts
-          .filter((attempt) => attempt.channel === NotificationChannel.EMAIL)
-          .map((attempt) => redactProviderId(attempt.externalMessageId))
-          .filter((value): value is string => Boolean(value)),
-        realRecipientsMasked: attempts
-          .map((attempt) => redactRecipient(attempt.channel, attempt.recipient))
-          .filter((value): value is string => Boolean(value)),
-        optOutBlockedCount: dispatchReports.filter(
-          (report) =>
-            report.outcome === "skipped" &&
-            (report.localSmsOptOutActive ||
-              report.localEmailOptOutActive ||
-              report.globalSmsOptOutActive ||
-              report.globalEmailOptOutActive)
-        ).length,
-        dedupeSkippedCount: dedupedEventCountForSummary(createSummary),
-        previewReports: previewReports.map((report) => ({
-          eventId: report.eventId,
-          orderType: report.orderType,
-          orderNumber: report.orderNumber,
-          selectedChannel: report.selectedChannel,
-          finalRecipientKind: report.finalRecipientKind,
-          finalRecipientMasked: report.finalRecipientMasked,
-          finalRecipientIsTestRecipient: report.finalRecipientIsTestRecipient,
-          realRecipientSuppressed: report.realRecipientSuppressed,
-        })),
-        dispatchReports: dispatchReports.map((report) => ({
-          eventId: report.eventId,
-          orderType: report.orderType,
-          orderNumber: report.orderNumber,
-          outcome: report.outcome,
-          reason: redactSensitiveText(report.reason),
-          selectedChannel: report.selectedChannel,
-          attemptId: report.attemptId,
-          fallbackAttemptId: report.fallbackAttemptId,
-          finalRecipientKind: report.finalRecipientKind,
-          finalRecipientMasked: report.finalRecipientMasked,
-          finalRecipientIsTestRecipient: report.finalRecipientIsTestRecipient,
-          realRecipientSuppressed: report.realRecipientSuppressed,
-          externalMessageIdPresent: report.externalMessageIdPresent,
-        })),
-        attempts: summarizeAttempts(attempts),
-        countDeltas: {
-          notificationEvents: after.notificationEvents - before.notificationEvents,
-          notificationAttempts: after.notificationAttempts - before.notificationAttempts,
-          twilioCallbacks: after.twilioCallbacks - before.twilioCallbacks,
-          deliveryConfirmations: after.deliveryConfirmations - before.deliveryConfirmations,
-          deliveryDetailsLinks: after.deliveryDetailsLinks - before.deliveryDetailsLinks,
-          holdActions: after.holdActions - before.holdActions,
-        },
-        errors: dispatchReports
-          .filter((report) => report.outcome === "failed")
-          .map((report) => ({
-            eventId: report.eventId,
-            reason: redactSensitiveText(report.reason),
-          })),
-        exactNextOperationalAction:
-          "Review NotificationAttempt statuses and provider callbacks before enabling another interval.",
-        sensitiveValuesPrinted: false,
-      };
 }
 
 async function run() {

@@ -44,3 +44,6 @@ next-env.d.ts
 
 # generated prisma client
 /lib/generated/prisma
+
+# Operational recap exports contain customer/order information.
+/artifacts/delivery-recap-*

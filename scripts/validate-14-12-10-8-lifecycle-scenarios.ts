@@ -72,10 +72,6 @@ function assertIncludes(source: string, pattern: string, message: string, failur
   assert(source.includes(pattern), message, failures);
 }
 
-function assertNotIncludes(source: string, pattern: string, message: string, failures: string[]) {
-  assert(!source.includes(pattern), message, failures);
-}
-
 function done(details: Record<string, unknown>, failures: string[] = []) {
   if (Array.isArray(failures) && failures.length > 0) throw new ScenarioAssertionError(failures);
   return details;
@@ -237,7 +233,7 @@ function sourceGuardScenarios(): Scenario[] {
     {
       group: "Source",
       id: "S1",
-      name: "production runner supports 14/12/10 and intentionally excludes live 8",
+      name: "production runner supports 14/12/10/8 with current-run dispatch",
       severity: "production_blocker",
       run: () => {
         const failures: string[] = [];
@@ -257,13 +253,13 @@ function sourceGuardScenarios(): Scenario[] {
         ]) {
           assertIncludes(runner, text, `runner missing ${text}`, failures);
         }
-        assertNotIncludes(
+        assertIncludes(
           runner,
           "NotificationIntervalType.DAY_8",
-          "8-day must remain out of live unified runner until hold target approval",
+          "8-day must be supported by unified runner",
           failures
         );
-        return done({ live8Blocked: true }, failures);
+        return done({ live8Supported: true }, failures);
       },
     },
     {
@@ -275,7 +271,7 @@ function sourceGuardScenarios(): Scenario[] {
         const failures: string[] = [];
         const dispatcher = read("lib/notifications/deliveryNotificationDispatcher.ts");
         for (const text of [
-          "paymentEvaluationForEvent(event)",
+          "paymentEvaluationForEvent(event, client)",
           "payment_amount_not_due",
           "selectNotificationChannel(",
           "localSmsOptOutActive",
@@ -299,7 +295,7 @@ function sourceGuardScenarios(): Scenario[] {
         const runner = read("scripts/run-delivery-interval.ts");
         assertIncludes(hold, "DELIVERY_PREPAYMENT_HOLD_DRY_RUN", "hold dry-run env missing", failures);
         assertIncludes(hold, "params.dryRun ?? shouldDryRunDeliveryPrepaymentHold()", "hold dry-run payload guard missing", failures);
-        assertNotIncludes(runner, "create8DayPaymentEnforcementEvents", "live runner must not invoke 8-day hold path yet", failures);
+        assertIncludes(runner, "create8DayPaymentEnforcementEvents", "runner must use existing 8-day enforcement logic", failures);
         return done({ holdDryRunGated: true }, failures);
       },
     },

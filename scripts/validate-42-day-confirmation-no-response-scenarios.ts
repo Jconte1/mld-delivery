@@ -1247,11 +1247,12 @@ function validateStaticSafety(failures: Failure[]) {
   assert(noResponse.includes("dispatchableReminderEventIdsCreatedThisRun"), "no-response exposes current-run dispatch ids", failures);
   assert(noResponse.includes("reminderEventsCreatedByTouch"), "no-response reports touch-specific creates", failures);
   assert(runner.includes("RUN REAL 42 DAY NO RESPONSE FOLLOW UPS"), "no-response runner requires exact production phrase", failures);
-  assert(runner.includes("dispatchDeliveryNotifications"), "no-response runner uses shared dispatcher", failures);
+  assert(runner.includes("dispatchCurrentRunGroups"), "no-response runner uses shared dispatcher", failures);
   assert(runner.includes("dispatchableReminderEventIdsCreatedThisRun"), "no-response runner dispatches only created ids", failures);
   assert(runner.includes("oldScheduledDay42Events"), "no-response runner reports old scheduled DAY_42 rows", failures);
-  assert(runner.includes("controlledRecipientSend: false"), "no-response runner does not use controlled routing", failures);
-  assert(runner.includes("finalRecipientKind !== \"customer\""), "no-response runner validates real-customer routing", failures);
+  const dispatcher = readFileSync(join(ROOT, "lib/notifications/deliveryNotificationDispatcher.ts"), "utf8");
+  assert(dispatcher.includes("grouped_dispatch_requires_real_eligibility"), "no-response dispatcher does not use controlled routing", failures);
+  assert(dispatcher.includes("grouped_production_recipient_matches_configured_test_recipient"), "no-response dispatcher validates real-customer routing", failures);
   assert(web.includes("guardDeliveryConfirmationWebAction"), "web actions use server-side guard helper", failures);
   assert(sms.includes("smsCurrentStateBlockMessage"), "SMS inbound uses stale/current-state guard", failures);
 

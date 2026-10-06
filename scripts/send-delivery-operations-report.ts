@@ -1,6 +1,8 @@
 import "dotenv/config";
 
-import { runDeliveryOperationsReport } from "../lib/notifications/deliveryOperationsReport";
+import { buildDeliveryOperationsReport, runDeliveryOperationsReport } from "../lib/notifications/deliveryOperationsReport";
+import { mkdir, writeFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { dateKey } from "../lib/notifications/helpers";
 import { prisma } from "../lib/prisma";
 import { denverDateTimeParts } from "./run-scheduled-delivery-interval";
@@ -15,11 +17,22 @@ function argValue(name: string) {
 }
 
 async function main() {
-  if (!process.argv.slice(2).includes("--send")) {
-    throw new Error("--send is required because this command sends the internal operations report email");
-  }
+  const send = process.argv.slice(2).includes("--send");
+  const preview = process.argv.slice(2).includes("--preview");
+  if (send === preview) throw new Error("Choose exactly one of --preview or --send");
   const today = denverDateTimeParts(new Date(), "America/Denver").date;
   const reportDate = dateKey(argValue("run-date") ?? today);
+  if (preview) {
+    const report = await buildDeliveryOperationsReport(reportDate);
+    const dir = resolve(argValue("output-dir") ?? "artifacts");
+    await mkdir(dir, { recursive: true });
+    const stem = resolve(dir, `delivery-recap-${reportDate}`);
+    await writeFile(`${stem}.xlsx`, report.workbook);
+    await writeFile(`${stem}.html`, report.htmlBody);
+    await writeFile(`${stem}.json`, JSON.stringify({ summary: report.summary, sheets: report.sheets }, null, 2));
+    console.log(JSON.stringify({ ok: true, preview: true, ...report.summary, workbook: `${stem}.xlsx`, html: `${stem}.html`, sends: 0, databaseWrites: 0 }, null, 2));
+    return;
+  }
   const result = await runDeliveryOperationsReport({
     reportDate,
     recipient: argValue("recipient"),

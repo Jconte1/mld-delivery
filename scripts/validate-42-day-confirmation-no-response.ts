@@ -889,8 +889,10 @@ function validateStaticSafety(failures: string[]) {
   assertIncludes(runner, "RUN REAL 42 DAY NO RESPONSE FOLLOW UPS", "runner requires exact send phrase", failures);
   assertIncludes(runner, "dispatchableReminderEventIdsCreatedThisRun", "runner dispatches current-run ids", failures);
   assertIncludes(runner, "oldScheduledDay42Events", "runner reports old scheduled DAY_42 rows", failures);
-  assertIncludes(runner, "controlledRecipientSend: false", "runner disables controlled-recipient send", failures);
-  assertIncludes(runner, "finalRecipientKind !== \"customer\"", "runner verifies customer routing", failures);
+  assertIncludes(runner, "dispatchCurrentRunGroups", "runner uses shared production routing guard", failures);
+  const dispatcher = read("lib/notifications/deliveryNotificationDispatcher.ts");
+  assertIncludes(dispatcher, "grouped_dispatch_requires_real_eligibility", "dispatcher disables controlled-recipient send", failures);
+  assertIncludes(dispatcher, "grouped_production_recipient_matches_configured_test_recipient", "dispatcher verifies customer routing", failures);
   assertIncludes(runner, "DELIVERY_REAL_CUSTOMER_SEND_ENABLED", "runner requires real customer send gate", failures);
   assertIncludes(runner, "DELIVERY_CONTROLLED_RECIPIENT_MODE", "runner refuses controlled-recipient mode", failures);
   assertIncludes(runner, "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST", "runner refuses forced eligibility", failures);

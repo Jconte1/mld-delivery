@@ -1,6 +1,7 @@
 import {
   InternalOrderLifecycleStatus,
   NotificationAttemptStatus,
+  NotificationActionType,
   NotificationChannel,
   NotificationEventStatus,
   NotificationIntervalType,
@@ -79,6 +80,12 @@ import {
   render2DayDeliveryReminderSms,
 } from "@/lib/notifications/deliveryReminder2Day";
 import { renderDeliveryReminderEmailBody } from "@/lib/notifications/deliveryReminderEmail";
+import { planDeliveryNotificationGroups, deliveryAddressGroupingKey, type GroupingCandidate } from "./deliveryNotificationGrouping";
+import { assertGroupStillEligible, executeClaimedGroupSend } from "./deliveryNotificationGroupLifecycle";
+import { claimDeliveryNotificationGroup, markDeliveryNotificationGroupUncertain, reconcileDeliveryNotificationGroupAttempt } from "./deliveryNotificationGroupStore";
+import { freshImportRequiresSuccessfulOrder, isFreshImportSuccessfulOrder, isFreshImportFailedOrder, type DeliveryIntervalFreshImportResult } from "./freshDeliveryIntervalImport";
+import { buildDeliveryNotificationGroupLink } from "./deliveryNotificationGroupCustomer";
+import { recipientContactSelect, selectDeliveryRecipient } from "./deliveryRecipient";
 
 export type DispatcherChannelFilter = "sms" | "email" | "both";
 export type DeliveryDispatchMode =
@@ -205,9 +212,16 @@ const notificationEventInclude = {
   },
   order: {
     select: {
+      contact: { select: recipientContactSelect },
+      deliveryContact: { select: recipientContactSelect },
+      deliveryContactId: true,
+      deliveryContactSyncStatus: true,
+      primaryContactFetchSucceeded: true,
       id: true,
       orderType: true,
       orderNumber: true,
+      contactId: true,
+      lastSyncedAt: true,
       status: true,
       internalLifecycleStatus: true,
       confirmVia: true,
@@ -223,6 +237,7 @@ const notificationEventInclude = {
           city: true,
           state: true,
           postalCode: true,
+          country: true,
         },
       },
     },
@@ -603,6 +618,13 @@ function selectChannelForEvent(params: {
   globalOptOuts: ActiveNotificationOptOutAddresses;
   forceContactEligibility: boolean;
 }) {
+  if (params.event.intervalType === "DAY_2") {
+    const recipient = selectDeliveryRecipient("DAY_2", params.event.order, params.globalOptOuts);
+    if (recipient.contact.contactId !== params.event.contactId) return {
+      selectedChannel: null, channelReason: "recipient_contact_changed_requires_new_evaluation",
+    } as ReturnType<typeof selectNotificationChannel>;
+    return recipient.channel;
+  }
   const contact = params.event.contact;
   const optOutState = mergeNotificationOptOutAddresses(params.globalOptOuts, {
     activeSmsOptOutPhones: contact.smsOptOuts.map((optOut) => optOut.phone),
@@ -813,14 +835,15 @@ function requireConfirmationLink(event: DispatchNotificationEvent) {
   return buildDeliveryConfirmationLink(confirmation.linkToken);
 }
 
-async function paymentEvaluationForEvent(event: DispatchNotificationEvent) {
-  return getDeliveryGroupPaymentEvaluation(event.deliveryGroupId);
+async function paymentEvaluationForEvent(event: DispatchNotificationEvent, client: typeof prisma) {
+  return getDeliveryGroupPaymentEvaluation(event.deliveryGroupId, client);
 }
 
 async function renderForChannel(params: {
   event: DispatchNotificationEvent;
   channel: HelperNotificationChannel;
   client: typeof prisma;
+  groupLink?: string;
 }): Promise<RenderedMessage> {
   const { event, channel, client } = params;
   const common = commonRenderParams(event);
@@ -863,7 +886,7 @@ async function renderForChannel(params: {
   }
 
   if (event.intervalType === NotificationIntervalType.DAY_42) {
-    const link = requireConfirmationLink(event);
+    const link = params.groupLink ?? requireConfirmationLink(event);
     if (event.actionType === "DELIVERY_CONFIRMATION_REMINDER") {
       const touchNumber = deliveryConfirmationReminderTouchNumberFromDedupeKey(event.dedupeKey);
       if (channel === "SMS") {
@@ -934,11 +957,11 @@ async function renderForChannel(params: {
     if (event.actionType !== "DELIVERY_REMINDER") {
       throw new Error("unsupported_event_action_for_interval");
     }
-    const detailsLink = requireDetailsLink(event);
+    const detailsLink = params.groupLink ?? requireDetailsLink(event);
     if (event.order.acumaticaOneWeekConfirmed === true) {
       throw new Error("one_week_confirmation_already_true");
     }
-    const payment = await paymentEvaluationForEvent(event);
+    const payment = await paymentEvaluationForEvent(event, client);
     const input = {
       ...common,
       detailsLink,
@@ -974,8 +997,8 @@ async function renderForChannel(params: {
     if (event.actionType !== "PAYMENT_REQUEST") {
       throw new Error("unsupported_event_action_for_interval");
     }
-    const detailsLink = requireDetailsLink(event);
-    const payment = await paymentEvaluationForEvent(event);
+    const detailsLink = params.groupLink ?? requireDetailsLink(event);
+    const payment = await paymentEvaluationForEvent(event, client);
     const amountDueNowRounded = payment.amountDueNowRounded;
     if (!amountIsMeaningful(amountDueNowRounded)) {
       throw new Error("payment_amount_not_due");
@@ -1012,12 +1035,12 @@ async function renderForChannel(params: {
     if (event.actionType !== "PAYMENT_ENFORCEMENT") {
       throw new Error("unsupported_event_action_for_interval");
     }
-    const detailsLink = requireDetailsLink(event);
+    const detailsLink = params.groupLink ?? requireDetailsLink(event);
     if (event.order.acumaticaOneWeekConfirmed === true) {
       throw new Error("one_week_confirmation_already_true");
     }
     const latestHold = event.paymentEnforcementHoldActions[0];
-    const payment = latestHold ? null : await paymentEvaluationForEvent(event);
+    const payment = latestHold ? null : await paymentEvaluationForEvent(event, client);
     const amountDueNowRounded =
       latestHold?.amountDueAtTrigger?.toString() ?? payment?.amountDueNowRounded ?? null;
     if (!amountIsMeaningful(amountDueNowRounded)) {
@@ -1048,7 +1071,7 @@ async function renderForChannel(params: {
     if (event.actionType !== "DELIVERY_REMINDER") {
       throw new Error("unsupported_event_action_for_interval");
     }
-    const detailsLink = requireDetailsLink(event);
+    const detailsLink = params.groupLink ?? requireDetailsLink(event);
     const input = {
       ...common,
       detailsLink,
@@ -1845,6 +1868,153 @@ async function dispatchOne(params: {
       externalMessageIdPresent: false,
     };
   }
+}
+
+/** Dispatch only fresh, production-qualified events from the current runner invocation. */
+export async function dispatchGroupedDeliveryNotifications(options: DispatchDeliveryNotificationsOptions & {
+  currentRunEventIds: string[];
+  freshImport: DeliveryIntervalFreshImportResult;
+  runStartedAt: Date;
+}) {
+  const env = options.env ?? process.env;
+  const preflight = evaluateDeliveryDispatcherPreflight(options, env);
+  if (!preflight.ok) throw new Error(`Grouped dispatch preflight: ${preflight.failures.join("; ")}`);
+  if (preflight.controlledRecipientMode || preflight.forceContactEligibilityForTest) throw new Error("grouped_dispatch_requires_real_eligibility");
+  const ids = options.currentRunEventIds;
+  if (!ids.length || new Set(ids).size !== ids.length || options.eventId) throw new Error("invalid_grouped_current_run_scope");
+  if (!freshImportRequiresSuccessfulOrder(options.freshImport) || options.freshImport.globalFailed) throw new Error("grouped_fresh_import_required");
+  if (!Number.isFinite(options.runStartedAt.getTime()) || options.runStartedAt > new Date()) throw new Error("invalid_grouped_run_start");
+  const client = options.prismaClient ?? prisma;
+  const provider = options.provider ?? createDeliveryNotificationProvider(env);
+  const scope = new Set(ids);
+  const load = async (eventIds: string[], claimed = false) => {
+    const events = await client.notificationEvent.findMany({ where: { id: { in: eventIds } }, include: notificationEventInclude });
+    if (events.length !== eventIds.length) throw new Error("grouped_event_missing");
+    const optOuts = await loadActiveNotificationOptOutAddresses(client);
+    const members: GroupingCandidate[] = [];
+    const messages = new Map<string, RenderedMessage>();
+    for (const event of events) {
+      if (isDeliveryConfirmationNoResponseManagedEvent(event)) {
+        const guard = await guardDeliveryConfirmationNoResponseDispatch({ client: client as never, event, now: options.now });
+        if (!guard.ok) throw new Error(`no_response_dispatch_guard_${guard.reason}`);
+      }
+      if (event.status !== (claimed ? "PENDING" : "SCHEDULED") || event.attempts.length) throw new Error("grouped_member_already_claimed_or_attempted");
+      const expectedContactId = event.intervalType === "DAY_2"
+        ? selectDeliveryRecipient("DAY_2", event.order, optOuts).contact.contactId : event.order.contactId;
+      if (expectedContactId !== event.contactId) throw new Error("grouped_contact_changed");
+      if (dateKey(event.deliveryDate) !== options.freshImport.targetDate ||
+          !event.order.lastSyncedAt || event.order.lastSyncedAt < options.runStartedAt ||
+          !isFreshImportSuccessfulOrder({ freshImport: options.freshImport, ...event }) ||
+          isFreshImportFailedOrder({ failedOrderLookup: options.freshImport.failedOrderLookup, ...event })) {
+        throw new Error("grouped_fresh_import_not_verified");
+      }
+      const selected = selectChannelForEvent({ event, globalOptOuts: optOuts, forceContactEligibility: false });
+      if (!selected.selectedChannel || !channelMatchesFilter(selected.selectedChannel, options.channel)) throw new Error("grouped_channel_unavailable");
+      const blocked = currentDispatchSafetyBlockReason({ event, selectedChannel: selected.selectedChannel,
+        optOuts: optOutSnapshot(event, optOuts), forceContactEligibility: false });
+      if (blocked) throw new Error(blocked);
+      if (!contactPassesTemporarySendGate(event)) throw new Error("temporary_contact_last_name_gate_not_conte");
+      const recipient = resolveFinalRecipient({ channel: selected.selectedChannel,
+        productionRecipient: selected.selectedChannel === "SMS" ? selected.recipientPhone : selected.recipientEmail,
+        controlledRecipientMode: false, env });
+      if (recipientMatchesConfiguredTestRecipient({ channel: selected.selectedChannel, recipient: recipient.finalRecipient, env })) {
+        throw new Error("grouped_production_recipient_matches_configured_test_recipient");
+      }
+      if (event.intervalType === "DAY_42" && event.order.confirmVia?.trim()) throw new Error("delivery_already_confirmed_in_erp");
+      members.push({ eventId: event.id, orderType: event.orderType, orderNumber: event.orderNumber, contactId: event.contactId,
+        deliveryDate: dateKey(event.deliveryDate)!, interval: event.intervalType, action: event.actionType,
+        stage: event.actionType === "DELIVERY_CONFIRMATION_REMINDER" ? `touch_${deliveryConfirmationReminderTouchNumberFromDedupeKey(event.dedupeKey)}` : "initial",
+        channel: selected.selectedChannel, recipient: recipient.finalRecipient, address: event.order.address,
+        eligible: true, freshlyImported: true, optedOut: false });
+      messages.set(event.id, await renderForChannel({ event, channel: selected.selectedChannel, client }));
+    }
+    return { members, messages, events };
+  };
+  const initial = await load(ids);
+  const planned = planDeliveryNotificationGroups(initial.members, scope);
+  if (planned.excluded.length) throw new Error("grouped_member_excluded");
+  const reports = [];
+  for (const group of planned.groups) {
+    const first = group.members[0];
+    const eventIds = group.members.map(m => m.eventId);
+    let prepared = initial;
+    let claimed = false;
+    let groupId: string | null = null;
+    let groupToken: string | null = null;
+    const report = { orders: group.members.map(m => `${m.orderType}/${m.orderNumber}`), eventIds,
+      channel: first.channel, memberCount: eventIds.length, membershipKey: group.membershipKey };
+    const render = async () => {
+      if (["DAY_180", "DAY_90", "DAY_60", "DAY_42"].includes(first.interval)) {
+        const event = prepared.events.find(e => e.id === first.eventId)!;
+        const combined = await renderForChannel({ event: { ...event, orderNumber: group.members.map(m => m.orderNumber).join(", ") },
+          channel: first.channel, client, groupLink: groupToken ? buildDeliveryNotificationGroupLink(groupToken) : undefined });
+        return { subject: combined.subject ?? `MLD delivery: ${report.orders.join(", ")}`, body: combined.textBody };
+      }
+      if (groupToken) {
+        for (const event of prepared.events) prepared.messages.set(event.id, await renderForChannel({ event, channel: first.channel, client,
+          groupLink: buildDeliveryNotificationGroupLink(groupToken) }));
+      }
+      return ({
+      subject: `MLD delivery reminder: ${report.orders.join(", ")}`,
+      body: group.members.map(m => `Order ${m.orderType}/${m.orderNumber}\n${prepared.messages.get(m.eventId)!.textBody}`).join("\n\n"),
+    }); };
+    if (!preflight.send) { reports.push({ ...report, outcome: "previewed", rendered: await render(), attemptId: null, groupId: null }); continue; }
+    if (eventIds.length === 1) {
+      const single = await dispatchDeliveryNotifications({ ...options, eventId: eventIds[0], limit: 1 });
+      const result = single.reports[0];
+      reports.push({ ...report, outcome: result.outcome, reason: result.reason, attemptId: result.attemptId,
+        fallbackAttemptId: result.fallbackAttemptId, groupId: null });
+      continue;
+    }
+    const result = await executeClaimedGroupSend({
+      revalidate: async () => {
+        prepared = await load(eventIds, claimed);
+        assertGroupStillEligible({ expectedMembershipKey: group.membershipKey, expectedEventIds: eventIds,
+          candidates: prepared.members, currentRunEventIds: scope });
+      },
+      claim: async () => {
+        const stored = await client.deliveryNotificationGroup.upsert({ where: { membershipKey: group.membershipKey }, update: {},
+          create: { membershipKey: group.membershipKey, compatibilityKey: group.key, runId: options.testRunId!,
+            deliveryDate: new Date(first.deliveryDate), intervalType: first.interval as NotificationIntervalType,
+            actionType: first.action as NotificationActionType, stage: first.stage, channel: first.channel, contactId: first.contactId,
+            addressKey: deliveryAddressGroupingKey(first.address), members: { create: eventIds.map(notificationEventId => ({ notificationEventId,
+              deliveryConfirmationId: prepared.events.find(e => e.id === notificationEventId)?.deliveryConfirmations[0]?.id })) } } });
+        groupId = stored.id;
+        groupToken = stored.linkToken;
+        const attemptId = await claimDeliveryNotificationGroup(client, { groupId: stored.id, currentRunEventIds: scope, freshCandidates: prepared.members });
+        claimed = Boolean(attemptId);
+        return attemptId;
+      },
+      send: async attemptId => {
+        const rendered = await render();
+        if (first.channel === "EMAIL") return provider.sendEmail({ to: first.recipient, subject: rendered.subject, textBody: rendered.body });
+        const callback = new URL(buildTwilioStatusCallbackUrl(env));
+        callback.searchParams.set("groupAttemptId", attemptId);
+        return provider.sendSms({ to: first.recipient, body: rendered.body, statusCallbackUrl: callback.toString() });
+      },
+      recordAccepted: async (attemptId, result) => {
+        await reconcileDeliveryNotificationGroupAttempt(client, { attemptId, provider: result.provider,
+          externalMessageId: result.externalMessageId, rawStatus: "SUBMITTED" });
+      },
+      recordUncertain: attemptId => markDeliveryNotificationGroupUncertain(client, attemptId),
+    });
+    const writebacks = [];
+    // Per-order payment clearance is never pooled and never placed in the provider retry boundary.
+    if (result.outcome === "submitted") {
+      for (const event of prepared.events) {
+        if (!["DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(event.intervalType)) continue;
+        try {
+          const payment = await getDeliveryGroupPaymentEvaluation(event.deliveryGroupId, client);
+          const evaluation = await evaluateAndRecordDeliveryTenDayConfirmation({ deliveryGroup: {
+            id: event.deliveryGroupId, orderId: event.orderId, orderType: event.orderType, orderNumber: event.orderNumber,
+            deliveryDate: event.deliveryDate, order: event.order }, payment, sourceInterval: event.intervalType, prismaClient: client });
+          writebacks.push({ eventId: event.id, evaluation });
+        } catch (error) { writebacks.push({ eventId: event.id, error: truncateError(error) }); }
+      }
+    }
+    reports.push({ ...report, ...result, groupId, writebacks });
+  }
+  return { reports, preview: !preflight.send };
 }
 
 export async function dispatchDeliveryNotifications(

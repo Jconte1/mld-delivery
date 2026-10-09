@@ -2,6 +2,7 @@ import { Prisma, type PrismaClient } from "../generated/prisma/client";
 import { deliveryAddressGroupingKey } from "./deliveryNotificationGrouping";
 import { getDeliveryAppBaseUrl } from "./deliveryConfirmationLinks";
 import { dateKey } from "./helpers";
+import { deliveryDetailsExpired } from "./deliveryDetailsExpiration";
 import { parseDateInputValue, validateRequestedDeliveryDateEligibility } from "./deliveryDateEligibility";
 import { enqueueDeliveryConfirmationAttributeWriteback, SMS_CONFIRMED_VIA_VALUE } from "./deliveryConfirmationAttributeWritebackQueue";
 import { enqueueDeliveryRequestedDateWriteback } from "./deliveryRequestedDateWritebackQueue";
@@ -18,7 +19,9 @@ export type CustomerNotificationGroup = Prisma.DeliveryNotificationGroupGetPaylo
 
 export function groupCustomerStateError(group: CustomerNotificationGroup, now = new Date()) {
   if (!group.members.length) return "empty_group";
-  if (dateKey(group.deliveryDate) < dateKey(now)) return "expired";
+  if (group.intervalType === "DAY_42"
+    ? dateKey(group.deliveryDate) < dateKey(now)
+    : deliveryDetailsExpired(group.deliveryDate, null, now)) return "expired";
   if (!["SUBMITTED", "DELIVERED"].includes(group.attempts[0]?.status ?? "")) return "notification_not_sent";
   for (const { notificationEvent: event } of group.members) {
     const delivery = event.orderDeliveryGroup;

@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 
 import {
+  InternalNotificationPurpose,
   NotificationActionType,
   NotificationEventStatus,
   NotificationIntervalType,
@@ -52,6 +53,7 @@ import {
   type DeliveryIntervalFreshImportResult,
 } from "../lib/notifications/freshDeliveryIntervalImport";
 import { prisma } from "../lib/prisma";
+import { dispatchInternalNotifications } from "../lib/notifications/internalNotificationDispatcher";
 
 const SUPPORTED_INTERVALS = ["180", "90", "60", "42", "30", "14", "12", "10", "8", "2"] as const;
 
@@ -195,7 +197,6 @@ export type DeliveryIntervalRunOptions = {
   orderScope: DeliveryOrderScope | null;
   channel: DispatcherChannelFilter;
   verifyPackageAndMigrations: boolean;
-  manualPresentationRun: boolean;
 };
 
 function isSupportedInterval(value: string): value is SupportedInterval {
@@ -226,7 +227,6 @@ function parseArgs(args: string[]): DeliveryIntervalRunOptions {
     orderScope: null,
     channel: "both",
     verifyPackageAndMigrations: true,
-    manualPresentationRun: false,
   };
 
   for (let index = 0; index < args.length; index += 1) {
@@ -527,6 +527,9 @@ function summarizeSkippedReasons(reasons: Record<string, number>) {
 }
 
 function createdEventIdsForCurrentRun(summary: CreateDeliveryIntervalEventsSummary) {
+  if ("currentRunEligibleEventIds" in summary && Array.isArray(summary.currentRunEligibleEventIds)) {
+    return summary.currentRunEligibleEventIds;
+  }
   if ("createdEventIds" in summary && Array.isArray(summary.createdEventIds)) {
     return summary.createdEventIds;
   }
@@ -704,10 +707,22 @@ export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
     );
   }
 
+  // Internal dispatch accepts only IDs explicitly created during this invocation.
+  const explicitInternalIds = "internalEventIdsCreatedThisRun" in createSummary &&
+    Array.isArray(createSummary.internalEventIdsCreatedThisRun)
+    ? createSummary.internalEventIdsCreatedThisRun as string[] : null;
+  const internalDispatch = await dispatchInternalNotifications({
+    eventIds: config.interval === "8" ? explicitInternalIds ?? [] : [],
+    purposes: [InternalNotificationPurpose.PAYMENT_ENFORCEMENT_HOLD_SUCCEEDED,
+      InternalNotificationPurpose.PAYMENT_ENFORCEMENT_HOLD_FAILED],
+    orderScope: options.orderScope,
+  });
+
   if (scheduledEvents.length === 0) {
     const afterNoSend = await runtimeCounts();
     return {
-          ok: true,
+          ok: internalDispatch.ok,
+          internalDispatch,
           phase: "complete_no_dispatchable_events",
           interval: config.interval,
           runDate,
@@ -750,7 +765,8 @@ export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
   const grouped = await dispatchCurrentRunGroups({ eventIds: scheduledEvents.map(e => e.id), freshImport, runStartedAt, runId,
     channel: options.channel });
   const afterGrouped = await runtimeCounts();
-  return { ...grouped, phase: "complete", interval: config.interval, runDate, targetDeliveryDate: targetDate,
+  return { ...grouped, ok: grouped.ok && internalDispatch.ok, internalDispatch,
+    phase: "complete", interval: config.interval, runDate, targetDeliveryDate: targetDate,
     confirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled("DELIVERY_CONFIRMATION_WRITEBACK_DRY_RUN"),
     tenDayConfirmationWritebackLivePayloadsEnabled: !dryRunOverrideEnabled("DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_DRY_RUN"),
     dedupeSkippedCount: dedupedEventCountForSummary(createSummary),

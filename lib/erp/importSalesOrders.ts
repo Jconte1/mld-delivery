@@ -444,11 +444,8 @@ function activeStatusFromContact(contact: unknown) {
 }
 
 function findContactRow(rows: unknown[], contactId: string) {
-  return (
-    rows.find((row) => getString(getField(row, "ContactID")) === contactId) ??
-    rows[0] ??
-    null
-  );
+  const matches = rows.filter((row) => getString(getField(row, "ContactID")) === contactId);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function errorFor(
@@ -621,13 +618,20 @@ export async function importSalesOrdersForLineRequestedOn(
       let contactRecord: unknown | null = null;
       try {
         contactRecord = await fetchContactForImport(contactId);
+        if (!contactRecord) throw new Error("primary_contact_missing_or_ambiguous");
       } catch (error) {
+        await prisma.order.updateMany({
+          where: { orderType, orderNumber },
+          data: { primaryContactFetchSucceeded: false },
+        });
+        result.failedOrders += 1;
         result.errors.push(
-          errorFor(`Contact fetch failed; using SalesOrder contact fallback: ${errorMessage(error)}`, {
+          errorFor(`Primary Contact fetch failed: ${errorMessage(error)}`, {
             orderNumber,
             orderType,
           })
         );
+        continue;
       }
 
       const deliveryContactId = getString(getField(fullOrder, "DeliveryContact"));
@@ -700,46 +704,19 @@ export async function importSalesOrdersForLineRequestedOn(
               ),
               companyName: getString(getField(contactRecord, "CompanyName")),
               displayName: contactDisplayName,
-              firstName: firstString(
-                getString(getField(contactRecord, "FirstName")),
-                getString(getField(fullOrder, "FirstName"))
-              ),
-              lastName: firstString(
-                getString(getField(contactRecord, "LastName")),
-                getString(getField(fullOrder, "LastName"))
-              ),
-              email: firstString(
-                getString(getField(contactRecord, "Email")),
-                getString(getField(fullOrder, "Email"))
-              ),
-              phone1: firstString(
-                getString(getField(contactRecord, "Phone1")),
-                getString(getField(fullOrder, "Phone1"))
-              ),
-              phone2: firstString(
-                getString(getField(contactRecord, "Phone2")),
-                getString(getField(fullOrder, "Phone2"))
-              ),
+              firstName: getString(getField(contactRecord, "FirstName")),
+              lastName: getString(getField(contactRecord, "LastName")),
+              email: getString(getField(contactRecord, "Email")),
+              phone1: getString(getField(contactRecord, "Phone1")),
+              phone2: getString(getField(contactRecord, "Phone2")),
               smsOptIn: importedOptIns?.smsOptIn ?? false,
               emailOptIn: importedOptIns?.emailOptIn ?? false,
               phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? false,
               lastSyncedAt: importAt,
             };
 
-            const contactUpdateData = {
-              status: contactData.status ?? undefined,
-              companyName: contactData.companyName ?? undefined,
-              displayName: contactData.displayName ?? undefined,
-              firstName: contactData.firstName ?? undefined,
-              lastName: contactData.lastName ?? undefined,
-              email: contactData.email ?? undefined,
-              phone1: contactData.phone1 ?? undefined,
-              phone2: contactData.phone2 ?? undefined,
-              smsOptIn: importedOptIns?.smsOptIn ?? undefined,
-              emailOptIn: importedOptIns?.emailOptIn ?? undefined,
-              phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? undefined,
-              lastSyncedAt: importAt,
-            };
+            // A successful contact fetch is authoritative, including cleared recipients.
+            const contactUpdateData = contactData;
 
             if (existingContact) {
               addChangeDeltas(
@@ -750,15 +727,14 @@ export async function importSalesOrdersForLineRequestedOn(
                     status: contactData.status ?? existingContact.status,
                     companyName: contactData.companyName ?? existingContact.companyName,
                     displayName: contactData.displayName ?? existingContact.displayName,
-                    firstName: contactData.firstName ?? existingContact.firstName,
-                    lastName: contactData.lastName ?? existingContact.lastName,
-                    email: contactData.email ?? existingContact.email,
-                    phone1: contactData.phone1 ?? existingContact.phone1,
-                    phone2: contactData.phone2 ?? existingContact.phone2,
-                    smsOptIn: importedOptIns?.smsOptIn ?? existingContact.smsOptIn,
-                    emailOptIn: importedOptIns?.emailOptIn ?? existingContact.emailOptIn,
-                    phoneCallOptIn:
-                      importedOptIns?.phoneCallOptIn ?? existingContact.phoneCallOptIn,
+                    firstName: contactData.firstName,
+                    lastName: contactData.lastName,
+                    email: contactData.email,
+                    phone1: contactData.phone1,
+                    phone2: contactData.phone2,
+                    smsOptIn: contactData.smsOptIn,
+                    emailOptIn: contactData.emailOptIn,
+                    phoneCallOptIn: contactData.phoneCallOptIn,
                   },
                   contactId,
                   entityId: existingContact.id,

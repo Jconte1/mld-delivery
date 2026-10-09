@@ -43,7 +43,7 @@ async function main() {
     const runStartedAt = new Date();
     const prefix = randomUUID();
     const phone = `+1202${sequence++}`;
-    const contact = await db.contact.create({ data: { contactId: prefix, firstName: "Test", lastName: "Conte",
+    const contact = await db.contact.create({ data: { contactId: prefix, firstName: "Test", lastName: "ProductionCustomer",
       email: `${prefix}@example.invalid`, phone1: phone, smsOptIn: sms, emailOptIn: !sms } });
     const primary = interval === "DAY_2" ? await db.contact.create({ data: { contactId: `${prefix}-primary`,
       lastName: "Conte", email: `primary-${prefix}@example.invalid`, emailOptIn: true } }) : contact;

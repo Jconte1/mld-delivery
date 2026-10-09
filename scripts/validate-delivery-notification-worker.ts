@@ -1,4 +1,8 @@
-process.env.DATABASE_URL ??= "postgresql://validation:validation@localhost:5432/validation";
+import { Socket } from "node:net";
+
+process.env.DATABASE_URL = "postgresql://validation:validation@localhost:1/validation";
+Object.defineProperty(Socket.prototype, "connect", { value: () => { throw new Error("Validation forbids network connections"); } });
+globalThis.fetch = async () => { throw new Error("Validation forbids fetch"); };
 
 export {};
 
@@ -81,7 +85,7 @@ function validateScheduleAwareness(worker: WorkerModule, scheduler: SchedulerMod
       intervals,
       localTime: scheduler.DELIVERY_INTERVAL_SCHEDULE["90"].expectedLocalTime,
       bypassLocalTimeGate: false,
-    }).join(",") === "90",
+    }).join(",") === "180,90",
     "Worker should identify interval 90 as due at its configured local time."
   );
   assert(
@@ -97,8 +101,8 @@ function validateScheduleAwareness(worker: WorkerModule, scheduler: SchedulerMod
     "SharePoint stock sync should default to Sunday 03:00 Denver time."
   );
   assert(
-    !worker.isWeeklyStockSyncDue({ weekday: "Sun", localTime: "03:01", env: {} }),
-    "SharePoint stock sync should not run outside its exact minute."
+    worker.isWeeklyStockSyncDue({ weekday: "Sun", localTime: "03:01", env: {} }),
+    "SharePoint stock sync should catch up after its due minute."
   );
   assert(
     !worker.isWeeklyStockSyncDue({
@@ -197,6 +201,100 @@ async function validateInjectedScheduler(worker: WorkerModule, scheduler: Schedu
   }
 }
 
+async function validateCatchup(worker: WorkerModule, scheduler: SchedulerModule) {
+  let now = new Date("2026-10-07T21:30:00Z");
+  const completed = new Set<string>();
+  const ran: string[] = [];
+  const options = worker.parseDeliveryNotificationWorkerArgs([]);
+  const tick = () => worker.runDeliveryNotificationWorkerTick({ ...options, now }, {
+    now,
+    clock: () => now,
+    scheduler: (params) => scheduler.runScheduledDeliveryInterval({
+      ...params,
+      acquireLock: async (lock) => {
+        assert(!lock.allowCompletedRerun && !lock.allowFailedRetry, "Catchup must not enable retries or reruns");
+        const exists = completed.has(lock.lockKey);
+        completed.add(lock.lockKey);
+        return { acquired: !exists, phase: exists ? "skipped_already_completed" : "lock_acquired",
+          previousLockStatus: exists ? "success" : null,
+          row: { id: lock.lockKey, lockKey: lock.lockKey, status: exists ? "success" : "running", retryCount: 0 } } as Awaited<ReturnType<NonNullable<typeof params.acquireLock>>>;
+      },
+      markRun: async () => undefined,
+      runTask: async (payload) => {
+        ran.push(payload.interval);
+        if (payload.interval === "42") now = new Date("2026-10-07T21:42:00Z");
+      },
+    }),
+  });
+  assert((await tick()).ok, "Initial slow-import tick succeeds");
+  assert((await tick()).ok, "Restart/next tick catches missed minutes");
+  assert(ran.join(",") === "180,90,60,42,39,30", "Slow 42 must not lose 39 or rerun completed intervals");
+  await tick();
+  assert(ran.length === 6, "Restart must retain date locks");
+  now = new Date("2026-10-08T06:00:00Z");
+  assert((await tick()).dueIntervals.length === 0, "Midnight must not replay yesterday");
+  let calls = 0;
+  await worker.runDeliveryNotificationWorkerTick({ ...options, now: new Date("2026-10-08T05:59:00Z") }, {
+    clock: () => ++calls === 1 ? new Date("2026-10-08T05:59:00Z") : new Date("2026-10-08T06:00:00Z"),
+    scheduler: async () => { throw new Error("mock failed import"); },
+  });
+  assert(calls === 2, "Cross-midnight tick must stop before the next interval");
+  for (const timestamp of ["2026-03-08T21:36:00Z", "2026-11-01T22:36:00Z"]) {
+    const local = scheduler.denverDateTimeParts(new Date(timestamp));
+    assert(worker.dueIntervalsForLocalTime({ intervals: ["42", "39", "30"], localTime: local.time, bypassLocalTimeGate: false }).join(",") === "42,39", "DST catchup uses Denver wall time");
+  }
+  try {
+    await worker.runDeliveryNotificationWorkerTick({ ...options, allowCompletedRerun: true });
+    throw new Error("Expected completed-rerun rejection");
+  } catch (error) {
+    assert(String(error).includes("require --once and --interval"), "Automatic reruns must fail closed");
+  }
+}
+
+async function validateStockRecovery(worker: WorkerModule) {
+  const { SHAREPOINT_STOCK_SOURCES: sources } = await import("../lib/sharepoint-stock/regionalStockLists");
+  const now = new Date("2026-10-07T18:00:00Z");
+  const success = new Map<string, Date | null>([
+    [sources.utah_wyoming, new Date("2026-09-21T18:00:00Z")],
+    [sources.idaho, new Date("2026-10-05T18:00:00Z")],
+    [sources.southwest, null],
+  ]);
+  const calls: string[] = [];
+  let fail = true;
+  const dependencies = {
+    env: { NODE_ENV: "test" as const },
+    latestSuccess: async (source: string) => ({ completedAt: success.get(source) ?? null }),
+    sync: (async (params: { stockListKey?: keyof typeof sources }) => {
+      const key = params.stockListKey!;
+      calls.push(key);
+      if (key === "utah_wyoming" && fail) throw new Error("mock regional failure");
+      success.set(sources[key], now);
+      return { status: "SUCCESS", stockListKey: key, source: sources[key] };
+    }) as NonNullable<NonNullable<Parameters<typeof worker.runWeeklySharePointStockSync>[1]>["sync"]>,
+  };
+  const run = () => worker.runWeeklySharePointStockSync({ todayInDenver: "2026-10-07", now }, dependencies);
+  const first = await run();
+  assert(first.some((r) => r.status === "FAILED"), "Failure must remain visible");
+  assert(calls.join(",") === "utah_wyoming,southwest", "Startup refreshes only stale/missing regions, despite partial failure");
+  fail = false;
+  await run();
+  await run();
+  assert(calls.join(",") === "utah_wyoming,southwest,utah_wyoming", "Restart skips successful regions and recovers failed region");
+  success.set(sources.idaho, new Date("2026-10-03T18:00:00Z"));
+  await run();
+  assert(calls.at(-1) === "idaho", "Fresh but missed weekly deadline must catch up");
+  success.set(sources.idaho, new Date("2026-10-05T18:00:00Z"));
+  await worker.runWeeklySharePointStockSync({ todayInDenver: "2026-10-07", now }, { ...dependencies, env: { NODE_ENV: "test", SHAREPOINT_STOCK_FRESHNESS_DAYS: "1" } });
+  assert(calls.filter((key) => key === "idaho").length === 2, "Custom freshness cutoff remains enforced");
+  await worker.runWeeklySharePointStockSync({ todayInDenver: "2026-10-07", now }, {
+    env: { NODE_ENV: "test", DELIVERY_SHAREPOINT_STOCK_SYNC_ENABLED: "false" },
+    latestSuccess: async () => { throw new Error("Disabled sync must not query"); },
+  });
+  assert(worker.latestStockSyncDeadline(new Date("2026-03-08T09:30:00Z"), dependencies.env) === "2026-03-08T03:00", "Spring DST deadline");
+  assert(worker.latestStockSyncDeadline(new Date("2026-11-01T08:30:00Z"), dependencies.env) === "2026-10-25T03:00", "Repeated fall hour is before weekly deadline");
+  assert(worker.latestStockSyncDeadline(new Date("2026-11-01T10:01:00Z"), dependencies.env) === "2026-11-01T03:00", "Fall DST missed minute deadline");
+}
+
 async function main() {
   const worker = await import("./delivery-notification-worker");
   const scheduler = await import("./run-scheduled-delivery-interval");
@@ -212,6 +310,8 @@ async function main() {
   validateScheduleAwareness(worker, scheduler);
   await validateDryRunTick(worker);
   await validateInjectedScheduler(worker, scheduler);
+  await validateCatchup(worker, scheduler);
+  await validateStockRecovery(worker);
 
   console.log(
     "Delivery notification worker validation passed. No provider calls, Acumatica writes, deploys, or production data mutations were performed."

@@ -405,7 +405,7 @@ function parseChildJson(output: string) {
   }
 }
 
-async function acquireSchedulerRunLock(params: {
+export async function acquireSchedulerRunLock(params: {
   lockKey: string;
   interval: string;
   runDate: string;
@@ -415,8 +415,8 @@ async function acquireSchedulerRunLock(params: {
   delegatedArgs: string[];
   allowFailedRetry: boolean;
   allowCompletedRerun: boolean;
-}) {
-  const inserted = await prisma.$queryRaw<SchedulerRunRow[]>`
+}, db: Pick<typeof prisma, "$queryRaw"> = prisma) {
+  const inserted = await db.$queryRaw<SchedulerRunRow[]>`
     INSERT INTO "delivery_interval_scheduler_runs"
       ("id", "lockKey", "interval", "runDate", "timezone", "expectedLocalTime", "actualLocalTime", "status", "startedAt", "delegatedArgs", "createdAt", "updatedAt")
     VALUES
@@ -434,7 +434,7 @@ async function acquireSchedulerRunLock(params: {
   }
 
   const existing = (
-    await prisma.$queryRaw<SchedulerRunRow[]>`
+    await db.$queryRaw<SchedulerRunRow[]>`
       SELECT "id", "lockKey", "status"::text AS "status", "retryCount"
       FROM "delivery_interval_scheduler_runs"
       WHERE "lockKey" = ${params.lockKey}
@@ -469,7 +469,7 @@ async function acquireSchedulerRunLock(params: {
   }
 
   const updated = (
-    await prisma.$queryRaw<SchedulerRunRow[]>`
+    await db.$queryRaw<SchedulerRunRow[]>`
       UPDATE "delivery_interval_scheduler_runs"
       SET
         "status" = 'running'::"DeliveryIntervalSchedulerRunStatus",
@@ -485,9 +485,20 @@ async function acquireSchedulerRunLock(params: {
         "errorMessage" = NULL,
         "updatedAt" = now()
       WHERE "lockKey" = ${params.lockKey}
+        AND "status"::text = ${existing.status}
+        AND "retryCount" = ${existing.retryCount}
       RETURNING "id", "lockKey", "status"::text AS "status", "retryCount"
     `
   )[0];
+
+  if (!updated) {
+    return {
+      acquired: false,
+      row: existing,
+      phase: "skipped_lock_active",
+      previousLockStatus: existing.status,
+    };
+  }
 
   return {
     acquired: true,
@@ -561,7 +572,9 @@ export async function runScheduledDeliveryInterval(
     channel,
   });
 
-  if (params.forceLocalTimeCheckBypass !== true && local.time !== expectedLocalTime) {
+  // Automatic catchup is limited to today's schedule, never a prior delivery day.
+  if (params.forceLocalTimeCheckBypass !== true &&
+      (local.time < expectedLocalTime || runDate !== local.date)) {
     return {
       ok: true,
       phase: "skipped_wrong_local_time",

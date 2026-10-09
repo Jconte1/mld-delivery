@@ -1,6 +1,9 @@
 import { readFileSync } from "node:fs";
+import { Socket } from "node:net";
 
-process.env.DATABASE_URL ??= "postgresql://validation:validation@localhost:5432/validation";
+process.env.DATABASE_URL = "postgresql://validation:validation@localhost:1/validation";
+Object.defineProperty(Socket.prototype, "connect", { value: () => { throw new Error("Validation forbids network connections"); } });
+globalThis.fetch = async () => { throw new Error("Validation forbids fetch"); };
 
 type SchedulerModule = typeof import("./run-scheduled-delivery-interval");
 
@@ -295,6 +298,63 @@ function validateStaticFiles(scheduler: SchedulerModule) {
   );
 }
 
+async function validateCatchupAndClaims(scheduler: SchedulerModule) {
+  for (const [timestamp, override, due] of [
+    ["2026-10-07T21:09:00Z", undefined, false],
+    ["2026-10-07T21:11:00Z", undefined, true],
+    ["2026-10-08T05:59:00Z", undefined, true],
+    ["2026-10-08T06:00:00Z", undefined, false],
+    ["2026-10-08T22:00:00Z", "2026-10-07", false],
+  ] as const) {
+    let claimed = false;
+    await scheduler.runScheduledDeliveryInterval({
+      interval: "90", now: new Date(timestamp), runDateOverride: override,
+      acquireLock: async () => {
+        claimed = true;
+        return { acquired: false, phase: "skipped_already_completed", previousLockStatus: "success",
+          row: { id: "mock", lockKey: "mock", status: "success", retryCount: 0 } };
+      },
+      runTask: async () => { throw new Error("Completed job must not run"); },
+    });
+    assert(claimed === due, `Due-at-or-before/date gate at ${timestamp}`);
+  }
+
+  type Row = { id: string; lockKey: string; status: "running" | "success" | "failed"; retryCount: number };
+  for (const initial of [null, "failed", "success", "running"] as const) {
+    let row: Row | null = initial ? { id: "mock", lockKey: "mock", status: initial, retryCount: 0 } : null;
+    const query = async (strings: TemplateStringsArray, ...values: unknown[]) => {
+      const sql = strings.join("?");
+      if (sql.includes("INSERT INTO")) {
+        if (row) return [];
+        row = { id: "mock", lockKey: "mock", status: "running", retryCount: 0 };
+        return [{ ...row }];
+      }
+      if (sql.includes("SELECT")) return row ? [{ ...row }] : [];
+      assert(sql.includes('AND "status"::text =') && sql.includes('AND "retryCount" ='), "Retry update must compare status AND retry generation");
+      const expectedStatus = values.at(-2);
+      const expectedRetry = values.at(-1);
+      if (!row || row.status !== expectedStatus || row.retryCount !== expectedRetry) return [];
+      row = { ...row, status: "running", retryCount: row.retryCount + 1 };
+      return [{ ...row }];
+    };
+    const db = { $queryRaw: query } as unknown as NonNullable<Parameters<typeof scheduler.acquireSchedulerRunLock>[1]>;
+    const params = { lockKey: "mock", interval: "90", runDate: "2026-10-07", timezone: "America/Denver",
+      expectedLocalTime: "15:10", actualLocalTime: "16:00", delegatedArgs: [], allowFailedRetry: false, allowCompletedRerun: false };
+    const ordinary = await scheduler.acquireSchedulerRunLock(params, db);
+    assert(ordinary.acquired === (initial === null), "Automatic claim must skip running, failed and completed rows");
+    if (initial === "failed" || initial === "success") {
+      const results = await Promise.all(Array.from({ length: 5 }, () => scheduler.acquireSchedulerRunLock({
+        ...params, allowFailedRetry: true, allowCompletedRerun: initial === "success",
+      }, db)));
+      assert(results.filter((result) => result.acquired).length === 1, "Concurrent explicit retries/reruns must have exactly one winner");
+    }
+    if (initial === null) {
+      const results = await Promise.all(Array.from({ length: 5 }, () => scheduler.acquireSchedulerRunLock(params, db)));
+      assert(results.every((result) => !result.acquired), "Overlapping automatic replicas must skip active claim");
+    }
+  }
+}
+
 async function main() {
   const scheduler = await import("./run-scheduled-delivery-interval");
   validateTimeZoneHandling(scheduler);
@@ -302,6 +362,7 @@ async function main() {
   validateDelegation(scheduler);
   await validateLockRetryBehavior(scheduler);
   await validateDirectTaskMode(scheduler);
+  await validateCatchupAndClaims(scheduler);
   validateStaticFiles(scheduler);
 
   console.log(

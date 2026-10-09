@@ -1,3 +1,4 @@
+import { currentCustomerPaymentAmount } from "./customerPaymentPresentation";
 import {
   InternalOrderLifecycleStatus,
   NotificationAttemptStatus,
@@ -101,7 +102,6 @@ const FORCE_CONTACT_ELIGIBILITY_FOR_TEST_ENV =
   "DELIVERY_FORCE_CONTACT_CHANNEL_ELIGIBILITY_FOR_TEST";
 const CONTROLLED_RECIPIENT_CONFIRM_PHRASE_ENV =
   "DELIVERY_CONTROLLED_RECIPIENT_CONFIRM_PHRASE";
-const TEMP_ALLOWED_NOTIFICATION_LAST_NAME = "conte";
 
 export type DispatchDeliveryNotificationsOptions = {
   preview?: boolean;
@@ -743,6 +743,14 @@ function currentDispatchSafetyBlockReason(params: {
 }) {
   const event = params.event;
 
+  const deliveryRecipient = event.intervalType === "DAY_2" && event.recipientContactRole === "DELIVERY";
+  if (deliveryRecipient ? event.order.deliveryContactSyncStatus !== "fetched" : event.order.primaryContactFetchSucceeded !== true) {
+    return "recipient_contact_not_freshly_fetched";
+  }
+  if (event.contactId !== (deliveryRecipient ? event.order.deliveryContactId : event.order.contactId)) {
+    return "recipient_contact_assignment_changed";
+  }
+
   if (orderOrGroupStatusIsInactive(event.order.status)) {
     return "current_order_status_ineligible";
   }
@@ -824,7 +832,7 @@ function requireDetailsLink(event: DispatchNotificationEvent) {
   if (!event.detailsLink?.token) {
     throw new Error("delivery_details_link_missing");
   }
-  return buildDeliveryDetailsLink(event.detailsLink.token);
+  return buildDeliveryDetailsLink(event.detailsLink.token, event.id);
 }
 
 function requireConfirmationLink(event: DispatchNotificationEvent) {
@@ -1039,13 +1047,8 @@ async function renderForChannel(params: {
     if (event.order.acumaticaOneWeekConfirmed === true) {
       throw new Error("one_week_confirmation_already_true");
     }
-    const latestHold = event.paymentEnforcementHoldActions[0];
-    const payment = latestHold ? null : await paymentEvaluationForEvent(event, client);
-    const amountDueNowRounded =
-      latestHold?.amountDueAtTrigger?.toString() ?? payment?.amountDueNowRounded ?? null;
-    if (!amountIsMeaningful(amountDueNowRounded)) {
-      throw new Error("payment_amount_not_due");
-    }
+    const payment = await paymentEvaluationForEvent(event, client);
+    const amountDueNowRounded = currentCustomerPaymentAmount(payment);
     const input = {
       ...common,
       detailsLink,
@@ -1154,10 +1157,6 @@ function nonScheduledEventReason(event: DispatchNotificationEvent | null | undef
   return `event_not_scheduled_${String(event.status).toLowerCase()}`;
 }
 
-function contactPassesTemporarySendGate(event: DispatchNotificationEvent) {
-  return event.contact.lastName?.trim().toLowerCase() === TEMP_ALLOWED_NOTIFICATION_LAST_NAME;
-}
-
 async function createAttempt(params: {
   client: typeof prisma;
   event: DispatchNotificationEvent;
@@ -1170,10 +1169,6 @@ async function createAttempt(params: {
   testRunId: string | null;
   fallbackFromAttemptId?: string | null;
 }) {
-  if (!contactPassesTemporarySendGate(params.event)) {
-    throw new Error("temporary_contact_last_name_gate_not_conte");
-  }
-
   return params.client.notificationAttempt.create({
     data: {
       notificationEventId: params.event.id,
@@ -1913,7 +1908,6 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
       const blocked = currentDispatchSafetyBlockReason({ event, selectedChannel: selected.selectedChannel,
         optOuts: optOutSnapshot(event, optOuts), forceContactEligibility: false });
       if (blocked) throw new Error(blocked);
-      if (!contactPassesTemporarySendGate(event)) throw new Error("temporary_contact_last_name_gate_not_conte");
       const recipient = resolveFinalRecipient({ channel: selected.selectedChannel,
         productionRecipient: selected.selectedChannel === "SMS" ? selected.recipientPhone : selected.recipientEmail,
         controlledRecipientMode: false, env });

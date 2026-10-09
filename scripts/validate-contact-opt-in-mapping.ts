@@ -445,18 +445,19 @@ async function main() {
   );
   assertIncludes(
     importer,
-    "smsOptIn: importedOptIns?.smsOptIn ?? undefined",
-    "SMS update only when Contact detail fetched"
+    "const contactUpdateData = contactData",
+    "successful fresh Contact fetch is authoritative for updates"
   );
   assertIncludes(
     importer,
-    "phoneCallOptIn: importedOptIns?.phoneCallOptIn ?? undefined",
-    "phone-call update only when Contact detail fetched"
+    'throw new Error("primary_contact_missing_or_ambiguous")',
+    "missing fresh primary contact fails the order import"
   );
   assertIncludes(importer, "where: { contactId }", "upsert remains keyed by ContactID");
-  assertIncludes(importer, 'getString(getField(fullOrder, "Email"))', "SalesOrder email fallback");
-  assertIncludes(importer, 'getString(getField(fullOrder, "Phone1"))', "SalesOrder phone1 fallback");
-  assertIncludes(importer, 'getString(getField(fullOrder, "Phone2"))', "SalesOrder phone2 fallback");
+  for (const field of ["Email", "Phone1", "Phone2"]) {
+    assertNotIncludes(importer, `getString(getField(fullOrder, "${field}"))`, `no stale SalesOrder ${field} fallback`);
+    assertIncludes(importer, `getString(getField(contactRecord, "${field}"))`, `recipient ${field} uses fresh Contact detail`);
+  }
   assertIncludes(
     detectChanges,
     '{ fieldName: "smsOptIn", changeType: ERP_CHANGE_TYPES.CONTACT_CHANGED, valueType: "boolean" }',
@@ -554,7 +555,7 @@ async function main() {
         notificationChannelEligibilityValidated: true,
         activeSmsOptOutBlocksSms: true,
         activeEmailOptOutBlocksEmail: true,
-        globalContactIdNullOptOutLookupPhase2Todo: true,
+        globalContactlessOptOutCoverage: "validate:contact-opt-out-writeback and validate:opt-out-volume-and-send-gating",
         directFetchCustomFieldsWired: true,
         contactUpsertOptInUpdateWired: true,
         contactChangeDetectionWired: true,

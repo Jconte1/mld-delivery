@@ -96,7 +96,7 @@ function createFakeClient(initialItems: FakeItem[] = []) {
     items.set(key(item.source, item.normalizedInventoryId), { ...item });
   }
 
-  return {
+  const fake = {
     state: {
       runs,
       items,
@@ -105,6 +105,7 @@ function createFakeClient(initialItems: FakeItem[] = []) {
       },
     },
     client: {
+      $queryRaw: async () => [{ locked: true }],
       sharePointStockSyncRun: {
         create: async (args: { data: Record<string, unknown>; select?: Record<string, boolean> }) => {
           const run = {
@@ -191,6 +192,19 @@ function createFakeClient(initialItems: FakeItem[] = []) {
       },
     },
   };
+  return { ...fake, client: { ...fake.client,
+    async $transaction<T>(work: (tx: typeof fake.client) => Promise<T>) {
+      const beforeItems = structuredClone([...items.entries()]);
+      const beforeRuns = structuredClone(runs);
+      try { return await work(fake.client); }
+      catch (error) {
+        items.clear();
+        for (const [key, value] of beforeItems) items.set(key, value);
+        runs.splice(0, runs.length, ...beforeRuns);
+        throw error;
+      }
+    },
+  } };
 }
 
 function extractionFromRows(rows: Array<Array<unknown>>) {

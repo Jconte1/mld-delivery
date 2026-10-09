@@ -1,3 +1,4 @@
+import { dispatchInternalNotifications } from "../lib/notifications/internalNotificationDispatcher";
 import {
   InternalNotificationPurpose,
   NotificationChannel,
@@ -537,6 +538,11 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
     }
   }
 
+  const internalDispatch = await dispatchInternalNotifications({
+    eventIds: options.mode === "send" ? summary.internalEscalationEventIdsCreatedThisRun : [],
+    purposes: [InternalNotificationPurpose.DELIVERY_CONFIRMATION_NO_RESPONSE],
+    orderScope: options.orderScope,
+  });
   const after = await runtimeCounts();
   const smsAttemptsCreated = groupedResults.reduce((n, r) => n + r.smsAttemptsCreated, 0);
   const emailAttemptsCreated = groupedResults.reduce((n, r) => n + r.emailAttemptsCreated, 0);
@@ -550,7 +556,7 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
         notificationGroupAttemptsCreated: groupedResults.reduce((n, r) => n + r.notificationGroupAttemptsCreated, 0),
         ok:
           options.mode !== "send" ||
-          groupedResults.every(r => r.ok),
+          (groupedResults.every(r => r.ok) && internalDispatch.ok),
         mode: options.mode,
         sendModeRequiresExactConfirmPhrase: REAL_NO_RESPONSE_CONFIRM_PHRASE,
         runDate,
@@ -605,7 +611,8 @@ export async function run42DayNoResponseCommand(options: NoResponseCliOptions) {
           ),
         })),
         internalEscalationReviewPath: {
-          senderIntegrated: false,
+          senderIntegrated: true,
+          dispatch: internalDispatch,
           reviewQueueCommand: "npm.cmd run review:42-day-no-response-internal-escalations",
           currentRunInternalEscalationEventIds: summary.internalEscalationEventIdsCreatedThisRun,
           currentRunInternalEscalationEventCount: summary.internalEscalationEventIdsCreatedThisRun.length,

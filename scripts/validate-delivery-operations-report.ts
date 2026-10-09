@@ -135,6 +135,18 @@ async function main() {
   strictAssert.equal(grouped.summary.notificationsAccepted, 1, "one shared provider send is counted once");
   strictAssert.equal(grouped.sheets.Notifications.length, 2, "both member orders remain visible");
   strictAssert.ok(grouped.sheets.Notifications.every(row => row["Shared attempt"] === "yes"));
+  const internal = buildOperationsAudit({ ...input, events: [], internal: [
+    { id: "rejected-internal", orderType: "SO", orderNumber: "REJECTED", purpose: "NO_RESPONSE",
+      status: "FAILED", providerMessageId: "graph-rejected-request-id", sentAt: null, reasonFailed: "graph_rejected_403" },
+    { id: "accepted-internal", orderType: "SO", orderNumber: "ACCEPTED", purpose: "NO_RESPONSE",
+      status: "SENT", providerMessageId: null, sentAt: accepted.sentAt },
+    { id: "uncertain-internal", orderType: "SO", orderNumber: "UNCERTAIN", purpose: "NO_RESPONSE",
+      status: "SCHEDULED", providerMessageId: "graph-request-id", sentAt: null },
+  ] });
+  strictAssert.equal(internal.summary.notificationsAccepted, 1, "Graph request IDs alone are not acceptance evidence");
+  strictAssert.equal(internal.sheets.Notifications.find(row => row.Order === "SO REJECTED")?.["Provider accepted"], "no");
+  strictAssert.equal(internal.sheets.Notifications.find(row => row.Order === "SO UNCERTAIN")?.["Provider accepted"], "no");
+  strictAssert.equal(internal.sheets.Notifications.find(row => row.Order === "SO ACCEPTED")?.["Provider accepted"], "yes", "successful Graph response need not include a request ID");
   const workbookBytes = await operationsWorkbook(audit.sheets);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(workbookBytes as unknown as Parameters<typeof workbook.xlsx.load>[0]);

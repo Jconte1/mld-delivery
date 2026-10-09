@@ -1,5 +1,6 @@
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   importSalesOrdersForLineRequestedOn,
   type ImportSalesOrdersResult,
@@ -100,7 +101,7 @@ export type DeliveryReminder30DayEventReport = {
   tenDayConfirmationLocalConfirmed?: boolean;
 };
 
-export type Create30DayDeliveryReminderEventsSummary = {
+export type Create30DayDeliveryReminderEventsSummary = UnsentEventRecoverySummary & {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
@@ -158,6 +159,8 @@ function emptySummary(params: {
   dryRun: boolean;
 }): Create30DayDeliveryReminderEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     importRequestedOn: params.importRequestedOn,
@@ -429,7 +432,10 @@ export async function create30DayDeliveryReminderEvents(
 export async function createConfirmedDeliveryReminderEvents(
   options: CreateConfirmedDeliveryReminderEventsOptions
 ): Promise<Create30DayDeliveryReminderEventsSummary> {
-  const client = options.prismaClient ?? prisma;
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDate, importResult: summary.importResult,
+  }));
+  const client = recovery.client;
   const runDate = dateKey(options.runDate ?? new Date());
   const dryRun = options.dryRun ?? false;
   const targetDeliveryDate = dateKey(getNotificationTargetDate(runDate, options.intervalDays));
@@ -972,5 +978,8 @@ export async function createConfirmedDeliveryReminderEvents(
     }
   }
 
+  summary.eventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }

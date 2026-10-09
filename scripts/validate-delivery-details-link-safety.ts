@@ -55,9 +55,9 @@ function main() {
     failures
   );
   assertIncludes(
-    helper,
-    "TODO: Decide and enforce delivery details link expiration policy after later interval flows are complete.",
-    "expiration policy TODO is present",
+    read("app/details/[token]/page.tsx"),
+    "deliveryDetailsExpired(detailsLink.deliveryDate, detailsLink.expiresAt)",
+    "details page enforces expiration including legacy links",
     failures
   );
   for (const forbidden of [

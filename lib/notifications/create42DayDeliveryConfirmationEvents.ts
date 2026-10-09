@@ -1,3 +1,4 @@
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
@@ -105,7 +106,7 @@ export type DeliveryConfirmation42DayEventReport = {
   paymentCalculationWarnings: string[];
 };
 
-export type Create42DayDeliveryConfirmationEventsSummary = {
+export type Create42DayDeliveryConfirmationEventsSummary = UnsentEventRecoverySummary & {
   runDate: string;
   targetDeliveryDate: string;
   dryRun: boolean;
@@ -186,6 +187,8 @@ function emptySummary(params: {
   dryRun: boolean;
 }): Create42DayDeliveryConfirmationEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     dryRun: params.dryRun,
@@ -429,19 +432,22 @@ export function is42DayDeliveryGroupEligible(group: DeliveryConfirmation42DayTar
 export async function create42DayDeliveryConfirmationEvents(
   options: Create42DayDeliveryConfirmationEventsOptions = {}
 ): Promise<Create42DayDeliveryConfirmationEventsSummary> {
-  const client = options.prismaClient ?? prisma;
   const runDate = dateKey(options.runDate ?? new Date());
   const now = options.now ?? new Date();
   const dryRun = options.dryRun ?? true;
-  const targetDeliveryDate = dateKey(
+  const targetDeliveryDateKey = dateKey(
     getNotificationTargetDate(runDate, DELIVERY_CONFIRMATION_42_DAY_INTERVAL_DAYS)
   );
-  const summary = emptySummary({ runDate, targetDeliveryDate, dryRun });
+  const summary = emptySummary({ runDate, targetDeliveryDate: targetDeliveryDateKey, dryRun });
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDateKey, freshImport: summary.freshImport,
+  }));
+  const client = recovery.client;
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(
-    targetDeliveryDate
+    targetDeliveryDateKey
   );
   summary.freshImport = await prepareFreshDeliveryIntervalImport({
-    targetDeliveryDate,
+    targetDeliveryDate: targetDeliveryDateKey,
     dryRun,
     deliveryDateSkipReason,
     freshImport: options.freshImport,
@@ -453,7 +459,7 @@ export async function create42DayDeliveryConfirmationEvents(
     addSkippedReason(summary, FRESH_IMPORT_FAILED_SKIP_REASON);
     return summary;
   }
-  const allDeliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDate, client);
+  const allDeliveryGroups = await find42DayDeliveryConfirmationTargetGroups(targetDeliveryDateKey, client);
   const deliveryGroups = filterByDeliveryOrderScope(allDeliveryGroups, options.orderScope);
   summary.orderScope = deliveryOrderScopeReport({
     scope: options.orderScope,
@@ -1057,5 +1063,8 @@ export async function create42DayDeliveryConfirmationEvents(
     });
   }
 
+  summary.eventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }

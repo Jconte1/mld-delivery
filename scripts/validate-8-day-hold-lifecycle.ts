@@ -84,7 +84,9 @@ async function main() {
   assert(!holdQueueResultIsDryRun({ status: "refused" }), "refused result is not dry_run", failures);
 
   delete process.env.DELIVERY_PREPAYMENT_HOLD_DRY_RUN;
-  assert(shouldDryRunDeliveryPrepaymentHold(), "delivery dry-run defaults true", failures);
+  assert(!shouldDryRunDeliveryPrepaymentHold(), "delivery defaults to production writes", failures);
+  process.env.DELIVERY_PREPAYMENT_HOLD_DRY_RUN = "true";
+  assert(shouldDryRunDeliveryPrepaymentHold(), "explicit dry-run disables live writes", failures);
   process.env.DELIVERY_PREPAYMENT_HOLD_DRY_RUN = "false";
   assert(!shouldDryRunDeliveryPrepaymentHold(), "delivery dry-run can be explicitly disabled", failures);
   delete process.env.DELIVERY_PREPAYMENT_HOLD_DRY_RUN;

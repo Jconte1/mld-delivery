@@ -7,6 +7,8 @@ import {
 } from "@/lib/notifications/helpers";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { prisma } from "@/lib/prisma";
+import { deliveryDetailsExpired } from "@/lib/notifications/deliveryDetailsExpiration";
+import { customerPaymentVisible } from "@/lib/notifications/customerPaymentPresentation";
 import { DeliveryInfoState } from "@/app/delivery/components/DeliveryInfoState";
 import { DeliveryItemsForThisDelivery } from "@/app/delivery/components/DeliveryItemsForThisDelivery";
 import { DeliveryPaymentSummary } from "@/app/delivery/components/DeliveryPaymentSummary";
@@ -14,7 +16,11 @@ import { SalespersonContactBlock } from "@/app/delivery/components/SalespersonCo
 
 type PageProps = {
   params: Promise<{ token: string }>;
+  searchParams: Promise<{ event?: string | string[] }>;
 };
+
+export const dynamic = "force-dynamic";
+export const metadata = { robots: { index: false, follow: false } };
 
 function formatLastUpdated(value: Date | null | undefined) {
   if (!value) return "Not available";
@@ -34,6 +40,9 @@ async function loadDetails(token: string) {
   });
 
   if (!detailsLink) return null;
+  if (deliveryDetailsExpired(detailsLink.deliveryDate, detailsLink.expiresAt)) {
+    return { expired: true as const, detailsLink, group: null, salespersonContact: null };
+  }
 
   const group = await prisma.orderDeliveryGroup.findFirst({
     where: {
@@ -57,7 +66,7 @@ async function loadDetails(token: string) {
   return { detailsLink, group, salespersonContact };
 }
 
-export default async function DeliveryDetailsPage({ params }: PageProps) {
+export default async function DeliveryDetailsPage({ params, searchParams }: PageProps) {
   const { token } = await params;
   const loaded = await loadDetails(token);
 
@@ -70,11 +79,15 @@ export default async function DeliveryDetailsPage({ params }: PageProps) {
     );
   }
 
+  if ("expired" in loaded && loaded.expired) {
+    return <DeliveryInfoState title="This delivery link has expired" message="Please contact MLD for current delivery details." />;
+  }
+
   if (!loaded.group) {
     return (
       <DeliveryInfoState
-        title="Delivery details unavailable"
-        message="This delivery is not currently available. Please contact Mountain Land Design if you need current delivery details."
+        title="This delivery date has changed"
+        message="Please contact MLD for current delivery details."
       />
     );
   }
@@ -92,8 +105,22 @@ export default async function DeliveryDetailsPage({ params }: PageProps) {
   }
 
   // Keep this details page read-only during render; do not update lastViewedAt here.
+  const requestedEvent = (await searchParams).event;
+  const event = await prisma.notificationEvent.findFirst({
+    where: {
+      detailsLinkId: loaded.detailsLink.id,
+      orderId: order.id,
+      deliveryGroupId: group.id,
+      deliveryDate: loaded.detailsLink.deliveryDate,
+      // Invalid explicit context never falls back to an unrelated interval.
+      id: requestedEvent === undefined ? undefined : typeof requestedEvent === "string" ? requestedEvent : "",
+    },
+    orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+    select: { intervalType: true },
+  });
+  const showPayment = customerPaymentVisible(event?.intervalType);
   const readiness = await getDeliveryGroupReadiness(group.id);
-  const payment = await getDeliveryGroupPaymentEvaluation(group.id);
+  const payment = showPayment ? await getDeliveryGroupPaymentEvaluation(group.id) : null;
   const scheduledDateLabel = formatCustomerFriendlyDate(group.deliveryDate);
   const jobName = formatJobName({
     customerDescription: order.customerDescription,
@@ -124,7 +151,7 @@ export default async function DeliveryDetailsPage({ params }: PageProps) {
           <SalespersonContactBlock contact={loaded.salespersonContact} />
         </div>
 
-        <div className="grid gap-6 lg:grid-cols-[1.5fr_1fr]">
+        <div className={payment ? "grid gap-6 lg:grid-cols-[1.5fr_1fr]" : "grid gap-6"}>
           <section className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
             <h2 className="text-lg font-semibold">Delivery Details</h2>
             <dl className="mt-4 grid gap-4 text-sm sm:grid-cols-2">
@@ -151,7 +178,7 @@ export default async function DeliveryDetailsPage({ params }: PageProps) {
             </dl>
           </section>
 
-          <DeliveryPaymentSummary payment={payment} />
+          {payment ? <DeliveryPaymentSummary payment={payment} /> : null}
         </div>
 
         <DeliveryItemsForThisDelivery

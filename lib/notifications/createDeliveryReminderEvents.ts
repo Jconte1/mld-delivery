@@ -1,3 +1,4 @@
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
@@ -61,7 +62,7 @@ export type MessagePreview = {
   body: string;
 };
 
-export type CreateDeliveryReminderEventsSummary = {
+export type CreateDeliveryReminderEventsSummary = UnsentEventRecoverySummary & {
   runDate: string;
   targetDeliveryDate: string;
   eligibleDeliveryGroups: number;
@@ -113,6 +114,8 @@ function emptySummary(params: {
   dryRun: boolean;
 }): CreateDeliveryReminderEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     eligibleDeliveryGroups: 0,
@@ -210,7 +213,10 @@ function renderSubject(params: {
 export async function createDeliveryReminderEvents(
   options: CreateDeliveryReminderEventsOptions
 ): Promise<CreateDeliveryReminderEventsSummary> {
-  const client = options.prismaClient ?? prisma;
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDateKey, freshImport: summary.freshImport,
+  }));
+  const client = recovery.client;
   const runDate = dateKey(options.runDate ?? new Date());
   const targetDeliveryDate = getNotificationTargetDate(runDate, options.intervalDays);
   const targetDeliveryDateKey = dateKey(targetDeliveryDate);
@@ -549,5 +555,8 @@ export async function createDeliveryReminderEvents(
     }
   }
 
+  summary.eventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }

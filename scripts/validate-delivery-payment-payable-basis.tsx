@@ -278,8 +278,8 @@ async function validateIntervalNoBalanceBranches(failures: string[]) {
     failures
   );
   assert(
-    summary12.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "12-day no-balance branch triggers ONEWEEKCON dry-run path",
+    summary12.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "12-day no-balance branch requires real notification evidence",
     failures
   );
 
@@ -305,8 +305,8 @@ async function validateIntervalNoBalanceBranches(failures: string[]) {
     failures
   );
   assert(
-    summary10.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "10-day no-balance branch triggers ONEWEEKCON dry-run path",
+    summary10.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "10-day no-balance branch requires real notification evidence",
     failures
   );
 
@@ -332,8 +332,8 @@ async function validateIntervalNoBalanceBranches(failures: string[]) {
     failures
   );
   assert(
-    summary8.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "8-day no-balance branch triggers ONEWEEKCON dry-run path",
+    summary8.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "8-day no-balance branch requires real notification evidence",
     failures
   );
 }

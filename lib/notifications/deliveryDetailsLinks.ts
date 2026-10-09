@@ -22,8 +22,9 @@ export function newDeliveryDetailsLinkToken() {
   return `dd_${randomBytes(24).toString("hex")}`;
 }
 
-export function buildDeliveryDetailsLink(token: string) {
-  return `${getDeliveryAppBaseUrl()}/details/${encodeURIComponent(token)}`;
+export function buildDeliveryDetailsLink(token: string, eventId?: string) {
+  const link = `${getDeliveryAppBaseUrl()}/details/${encodeURIComponent(token)}`;
+  return eventId ? `${link}?event=${encodeURIComponent(eventId)}` : link;
 }
 
 function normalizeOptionalDate(value: Date | string | null | undefined) {
@@ -113,4 +114,5 @@ export async function markDeliveryDetailsLinkCreatedFromEvent(
   });
 }
 
-// TODO: Decide and enforce delivery details link expiration policy after later interval flows are complete.
+// Read-time expiry is capped at delivery date + 30 Denver calendar days, even
+// for legacy links with no expiresAt. See deliveryDetailsExpiration.ts.

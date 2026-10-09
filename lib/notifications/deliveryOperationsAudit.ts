@@ -176,7 +176,7 @@ export function buildOperationsAudit(input: OperationsAuditInput) {
   for (const row of input.internal) {
     const interval = str(row.purpose).includes("NO_RESPONSE") ? "39" : "8";
     sends.push({ Order: order(row), Interval: interval, Action: str(row.purpose), Channel: "INTERNAL EMAIL", Recipient: mask(row.recipientEmail),
-      Status: str(row.status), "Provider accepted": row.providerMessageId ? "yes" : "no", "Delivery evidence": "Not verified",
+      Status: str(row.status), "Provider accepted": row.status === "SENT" && row.sentAt ? "yes" : "no", "Delivery evidence": "Not verified",
       "Sent at UTC": str(row.sentAt), "Sent in coverage": within(row.sentAt) ? "yes" : "no", "Provider ID": str(row.providerMessageId), "Event ID": str(row.id), Error: str(row.reasonFailed ?? row.reasonSkipped) });
     if (row.status !== "SENT") issue("Internal escalation", order(row), interval, str(row.reasonFailed ?? row.reasonSkipped ?? row.status), "Check salesperson/internal recipient and dispatch", str(row.id), age(row.createdAt));
   }

@@ -172,6 +172,53 @@ model Contact {
   @@map("contacts")
 }
 
+enum OrderCompleteAttemptStatus {
+  CLAIMED
+  SUBMITTED
+  REVIEW
+}
+
+model OrderCompleteEvent {
+  id             String   @id @default(cuid())
+  orderType      String   @db.VarChar(16)
+  orderNumber    String   @db.VarChar(64)
+  completedAt    DateTime
+  discoveryJobId String   @db.VarChar(128)
+  createdAt      DateTime @default(now())
+  attempt        OrderCompleteAttempt?
+
+  @@unique([orderType, orderNumber])
+  @@map("order_complete_events")
+}
+
+model OrderCompleteAttempt {
+  id                String                     @id @default(cuid())
+  eventId           String                     @unique
+  contactId         String                     @db.VarChar(64)
+  channel           NotificationChannel
+  recipient         String                     @db.VarChar(256)
+  status            OrderCompleteAttemptStatus @default(CLAIMED)
+  realSmsOptIn      Boolean
+  realEmailOptIn    Boolean
+  optOutCheckedAt   DateTime
+  freshErpCheckedAt DateTime
+  provider          String?                    @db.VarChar(64)
+  externalMessageId String?                    @db.VarChar(256)
+  providerRequestId String?                    @db.VarChar(256)
+  providerCode      String?                    @db.VarChar(128)
+  httpStatus        Int?
+  reason            String?                    @db.VarChar(1024)
+  submittedAt       DateTime?
+  createdAt         DateTime                   @default(now())
+  updatedAt         DateTime                   @updatedAt
+  event             OrderCompleteEvent         @relation(fields: [eventId], references: [id], onDelete: Restrict)
+
+  @@index([status])
+  @@index([externalMessageId])
+  @@index([providerRequestId])
+  @@map("order_complete_attempts")
+}
+
 model OrderThankYouEvent {
   id                           String                       @id @default(cuid())
   orderType                    String                       @db.VarChar(16)

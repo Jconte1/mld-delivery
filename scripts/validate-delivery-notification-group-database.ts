@@ -98,6 +98,7 @@ async function main() {
     for (const candidate of scoped.candidates) {
       const event = await db.notificationEvent.update({ where: { id: candidate.eventId }, data: { intervalType: "DAY_90", selectedChannel: "SMS" } });
       await db.order.update({ where: { id: event.orderId }, data: { status: "Open", lastSyncedAt: new Date(),
+        primaryContactFetchSucceeded: true,
         address: { create: { addressLine1: "1 Test St", city: "Test", state: "UT", country: "US", postalCode: "84000" } } } });
       const line = await db.orderLine.create({ data: { orderId: event.orderId, orderType: event.orderType, orderNumber: event.orderNumber, lineNbr: 1, requestedOn: new Date(targetDate) } });
       await db.orderDeliveryGroupLine.create({ data: { orderDeliveryGroupId: event.deliveryGroupId, orderId: event.orderId, orderType: event.orderType,

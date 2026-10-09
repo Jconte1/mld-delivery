@@ -14,7 +14,8 @@ import {
   type SharePointStockWorkbookExtraction,
 } from "@/lib/sharepoint-stock/sharepointStockWorkbook";
 
-type SharePointStockSyncClient = {
+type StockTransaction = {
+  $queryRaw: Prisma.TransactionClient["$queryRaw"];
   sharePointStockSyncRun: Pick<
     Prisma.TransactionClient["sharePointStockSyncRun"],
     "create" | "update"
@@ -24,6 +25,14 @@ type SharePointStockSyncClient = {
     "findMany" | "upsert" | "updateMany"
   >;
 };
+
+type SharePointStockSyncClient = Pick<StockTransaction, "sharePointStockSyncRun"> & {
+  $transaction<T>(work: (tx: StockTransaction) => Promise<T>, options?: { maxWait?: number; timeout?: number }): Promise<T>;
+};
+
+// Stable two-part advisory keys, shared by all worker replicas and manual syncs.
+const STOCK_LOCK_NAMESPACE = 731904;
+const STOCK_LOCK_REGION: Record<SharePointStockListKey, number> = { utah_wyoming: 1, idaho: 2, southwest: 3 };
 
 export type SharePointStockSyncSummary = {
   syncRunId: string;
@@ -82,7 +91,7 @@ function workbookLastModifiedAt(value: string | null) {
 export async function syncSharePointStockItems(
   options: SyncSharePointStockItemsOptions = {}
 ): Promise<SharePointStockSyncSummary> {
-  const client = options.client ?? prisma;
+  const client: SharePointStockSyncClient = options.client ?? prisma;
   const startedAt = options.now ?? new Date();
   const stockListKey = options.stockListKey ?? "utah_wyoming";
   const stockConfig = REGIONAL_STOCK_LIST_CONFIGS[stockListKey];
@@ -102,108 +111,116 @@ export async function syncSharePointStockItems(
   });
 
   try {
-    const workbook = await loadWorkbook();
-    const skippedRowsByReason = countSkippedRowsByReason(workbook.skippedRows);
-    const seenIds = workbook.rows.map((row) => row.normalizedInventoryId);
-    const existing = await client.externalStockItem.findMany({
-      where: {
-        source,
-        normalizedInventoryId: { in: seenIds },
-      },
-      select: {
-        normalizedInventoryId: true,
-      },
-    });
-    const existingIds = new Set(existing.map((item) => item.normalizedInventoryId));
-    let itemsCreated = 0;
-    let itemsUpdated = 0;
-
-    for (const row of workbook.rows) {
-      const exists = existingIds.has(row.normalizedInventoryId);
-      await client.externalStockItem.upsert({
+    return await client.$transaction(async (tx) => {
+      const [lock] = await tx.$queryRaw<Array<{ locked: boolean }>>`
+        SELECT pg_try_advisory_xact_lock(${STOCK_LOCK_NAMESPACE}::int, ${STOCK_LOCK_REGION[stockListKey]}::int) AS locked
+      `;
+      if (!lock?.locked) throw new Error("stock_sync_already_running_for_region");
+      // Acquire before download so a slow older download cannot overwrite a newer sync.
+      const workbook = await loadWorkbook();
+      if (!workbook.rows.length) throw new Error("stock_sync_empty_workbook");
+      const skippedRowsByReason = countSkippedRowsByReason(workbook.skippedRows);
+      const seenIds = workbook.rows.map((row) => row.normalizedInventoryId);
+      const existing = await tx.externalStockItem.findMany({
         where: {
-          source_normalizedInventoryId: {
-            source,
-            normalizedInventoryId: row.normalizedInventoryId,
-          },
-        },
-        create: {
-          inventoryId: row.inventoryId,
-          normalizedInventoryId: row.normalizedInventoryId,
           source,
-          sourceRowNumber: row.rowNumber,
-          sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
-          lastSeenAt: startedAt,
-          lastSyncedAt: startedAt,
-          isActive: true,
+          normalizedInventoryId: { in: seenIds },
         },
-        update: {
-          inventoryId: row.inventoryId,
-          sourceRowNumber: row.rowNumber,
-          sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
-          lastSeenAt: startedAt,
-          lastSyncedAt: startedAt,
+        select: {
+          normalizedInventoryId: true,
+        },
+      });
+      const existingIds = new Set(existing.map((item) => item.normalizedInventoryId));
+      let itemsCreated = 0;
+      let itemsUpdated = 0;
+
+      for (const row of workbook.rows) {
+        const exists = existingIds.has(row.normalizedInventoryId);
+        await tx.externalStockItem.upsert({
+          where: {
+            source_normalizedInventoryId: {
+              source,
+              normalizedInventoryId: row.normalizedInventoryId,
+            },
+          },
+          create: {
+            inventoryId: row.inventoryId,
+            normalizedInventoryId: row.normalizedInventoryId,
+            source,
+            sourceRowNumber: row.rowNumber,
+            sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
+            lastSeenAt: startedAt,
+            lastSyncedAt: startedAt,
+            isActive: true,
+          },
+          update: {
+            inventoryId: row.inventoryId,
+            sourceRowNumber: row.rowNumber,
+            sourceWorkbookId: workbook.metadata.id ?? env.SHAREPOINT_FILE_ID?.trim() ?? null,
+            lastSeenAt: startedAt,
+            lastSyncedAt: startedAt,
+            isActive: true,
+          },
+        });
+
+        if (exists) itemsUpdated += 1;
+        else itemsCreated += 1;
+      }
+
+      const deactivated = await tx.externalStockItem.updateMany({
+        where: {
+          source,
           isActive: true,
+          normalizedInventoryId: { notIn: seenIds },
+        },
+        data: {
+          isActive: false,
+          lastSyncedAt: startedAt,
+        },
+      });
+      const validationErrors: string[] = [];
+
+      await tx.sharePointStockSyncRun.update({
+        where: { id: run.id },
+        data: {
+          status: SharePointStockSyncRunStatus.SUCCESS,
+          completedAt: options.now ?? new Date(),
+          workbookName: workbook.metadata.name,
+          workbookETag: workbook.metadata.eTag ?? workbook.metadata.cTag,
+          workbookLastModifiedAt: workbookLastModifiedAt(workbook.metadata.lastModifiedDateTime),
+          rowsRead: workbook.rowsRead,
+          itemsCreated,
+          itemsUpdated,
+          itemsDeactivated: deactivated.count,
+          itemsSkipped: workbook.skippedRows.length,
+          errorsJson: errorsJson({
+            duplicateCount: workbook.duplicateCount,
+            skippedRowsByReason,
+            validationErrors,
+          }),
         },
       });
 
-      if (exists) itemsUpdated += 1;
-      else itemsCreated += 1;
-    }
-
-    const deactivated = await client.externalStockItem.updateMany({
-      where: {
+      return {
+        syncRunId: run.id,
+        stockListKey,
         source,
-        isActive: true,
-        normalizedInventoryId: { notIn: seenIds },
-      },
-      data: {
-        isActive: false,
-        lastSyncedAt: startedAt,
-      },
-    });
-    const validationErrors: string[] = [];
-
-    await client.sharePointStockSyncRun.update({
-      where: { id: run.id },
-      data: {
-        status: SharePointStockSyncRunStatus.SUCCESS,
-        completedAt: startedAt,
+        status: "SUCCESS" as const,
         workbookName: workbook.metadata.name,
-        workbookETag: workbook.metadata.eTag ?? workbook.metadata.cTag,
-        workbookLastModifiedAt: workbookLastModifiedAt(workbook.metadata.lastModifiedDateTime),
+        worksheetName: workbook.worksheetName,
+        inventoryIdColumn: workbook.inventoryIdColumn,
         rowsRead: workbook.rowsRead,
         itemsCreated,
         itemsUpdated,
         itemsDeactivated: deactivated.count,
         itemsSkipped: workbook.skippedRows.length,
-        errorsJson: errorsJson({
-          duplicateCount: workbook.duplicateCount,
-          skippedRowsByReason,
-          validationErrors,
-        }),
-      },
-    });
-
-    return {
-      syncRunId: run.id,
-      stockListKey,
-      source,
-      status: "SUCCESS",
-      workbookName: workbook.metadata.name,
-      worksheetName: workbook.worksheetName,
-      inventoryIdColumn: workbook.inventoryIdColumn,
-      rowsRead: workbook.rowsRead,
-      itemsCreated,
-      itemsUpdated,
-      itemsDeactivated: deactivated.count,
-      itemsSkipped: workbook.skippedRows.length,
-      duplicateCount: workbook.duplicateCount,
-      skippedRowsByReason,
-      validationErrors,
-      metadataEndpointWorked: workbook.metadataEndpointWorked,
-      contentEndpointWorked: workbook.contentEndpointWorked,
-    };
+        duplicateCount: workbook.duplicateCount,
+        skippedRowsByReason,
+        validationErrors,
+        metadataEndpointWorked: workbook.metadataEndpointWorked,
+        contentEndpointWorked: workbook.contentEndpointWorked,
+      };
+    }, { maxWait: 5_000, timeout: 120_000 });
   } catch (error) {
     const validationErrors = safeSharePointStockWorkbookErrors(error);
     const skippedRowsByReason: Record<string, number> = {};
@@ -212,7 +229,7 @@ export async function syncSharePointStockItems(
       where: { id: run.id },
       data: {
         status: SharePointStockSyncRunStatus.FAILED,
-        completedAt: startedAt,
+        completedAt: options.now ?? new Date(),
         errorsJson: errorsJson({
           duplicateCount: 0,
           skippedRowsByReason,

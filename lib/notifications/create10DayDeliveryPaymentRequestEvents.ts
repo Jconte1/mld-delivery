@@ -1,3 +1,4 @@
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   getDeliveryGroupPaymentEvaluation,
   isMeaningfulDeliveryPaymentAmount,
@@ -121,7 +122,7 @@ export type DeliveryPaymentRequest10DayEventReport = {
   tenDayConfirmationLocalConfirmed?: boolean;
 };
 
-export type Create10DayDeliveryPaymentRequestEventsSummary = {
+export type Create10DayDeliveryPaymentRequestEventsSummary = UnsentEventRecoverySummary & {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
@@ -171,6 +172,8 @@ function emptySummary(params: {
   dryRun: boolean;
 }): Create10DayDeliveryPaymentRequestEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     importRequestedOn: params.importRequestedOn,
@@ -458,7 +461,10 @@ const notificationEventSelect = {
 export async function create10DayDeliveryPaymentRequestEvents(
   options: Create10DayDeliveryPaymentRequestEventsOptions = {}
 ): Promise<Create10DayDeliveryPaymentRequestEventsSummary> {
-  const client = options.prismaClient ?? prisma;
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDate, importResult: summary.importResult,
+  }));
+  const client = recovery.client;
   const importSalesOrders = options.importSalesOrders ?? importSalesOrdersForLineRequestedOn;
   const loadPayment = options.getPaymentEvaluation ?? getDeliveryGroupPaymentEvaluation;
   const loadReadiness = options.getReadiness ?? getDeliveryGroupReadiness;
@@ -914,6 +920,9 @@ export async function create10DayDeliveryPaymentRequestEvents(
     }
   }
 
+  summary.eventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }
 

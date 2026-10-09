@@ -35,6 +35,7 @@ async function main() {
   let assigned: unknown = v(d);
   let failDelivery = false;
   let wrongDeliveryId = false;
+  let primaryMode: "fresh" | "empty" | "wrong" | "failed" | "blank" | "opted_out" = "fresh";
   const reads: string[] = [];
   const erpClient = {
     fetchQualifyingSalesOrdersByLineRequestedOn: async () => [{ OrderType: v("TEST"), OrderNbr: v(id) }],
@@ -42,6 +43,13 @@ async function main() {
       ContactID: v(p), DeliveryContact: assigned, ShipVia: v("DELIVERY"), Details: [], Totals: {} }],
     fetchDeliveryContactByContactId: async (contactId: string) => {
       reads.push(contactId);
+      if (contactId === p && primaryMode === "failed") throw new Error("primary_fetch_failure");
+      if (contactId === p && primaryMode === "empty") return [];
+      if (contactId === p && primaryMode === "wrong") return [{ ContactID: v("wrong-primary") }];
+      if (contactId === p && primaryMode === "blank") return [{ ContactID: v(p), Phone1: {}, Phone2: {}, Email: {},
+        custom: { Contact: { AttributeCONTEXT: v("Opt-In"), AttributeCONEMAIL: v("Opt-In") } } }];
+      if (contactId === p && primaryMode === "opted_out") return [{ ContactID: v(p), Phone1: v("8015550100"), Email: v("new@example.invalid"),
+        custom: { Contact: { AttributeCONTEXT: v("Opt-Out"), AttributeCONEMAIL: {}, AttributeCONPHONE: v("Opt-Out") } } }];
       if (contactId === d && failDelivery) throw new Error("simulated_read_failure");
       return [{ ContactID: v(contactId === d && wrongDeliveryId ? "unexpected-contact" : contactId), FirstName: v("Test"), LastName: v("Conte"), Email: v(`${contactId}@example.invalid`),
         Phone1: v("8015550100"), custom: { Contact: { AttributeCONTEXT: v("Opt-In"), AttributeCONEMAIL: v("Opt-In"), AttributeCONPHONE: v("Opt-In") } } }];
@@ -71,8 +79,26 @@ async function main() {
     assert.equal(selectDeliveryRecipient("DAY_2", removed).role, "PRIMARY");
     assigned = v(p);
     const same = await run(); assert.equal(same.deliveryContactId, p); assert.deepEqual(reads, [p]);
+    for (const mode of ["empty", "wrong", "failed"] as const) {
+      primaryMode = mode;
+      const result = await importSalesOrdersForLineRequestedOn("2030-01-07", { erpClient });
+      assert.equal(result.failedOrders, 1, mode);
+      assert.equal(result.successfullyRefreshedOrders?.length, 0, mode);
+      const stale = await db.order.findUniqueOrThrow({ where: { id: same.id } });
+      assert.equal(stale.primaryContactFetchSucceeded, false);
+      assert(result.errors.some(e => e.reason.includes("Primary Contact fetch failed")));
+    }
+    primaryMode = "blank";
+    const cleared = await run();
+    assert.equal(cleared.contact.email, null); assert.equal(cleared.contact.phone1, null); assert.equal(cleared.contact.phone2, null);
+    assert.equal(selectDeliveryRecipient("DAY_2", cleared).channel.selectedChannel, null);
+    primaryMode = "opted_out";
+    const optedOut = await run();
+    assert.equal(optedOut.contact.smsOptIn, false); assert.equal(optedOut.contact.emailOptIn, false);
+    assert.equal(optedOut.contact.email, "new@example.invalid");
     console.log(JSON.stringify({ ok: true, pureRouting: true, realLocalImport: true, staleDeliveryContactBlocked: true,
       removalClearsAssignment: true, sharedIdFetchedOnce: true, otherIntervalsUsePrimary: true,
+      primaryMissingWrongOrFailedExcluded: true, clearedRecipientsRemoved: true, optInsFresh: true,
       actualProviderCalls: 0, actualQueueJobs: 0, productionDatabaseUsed: false }, null, 2));
   } finally { await db.$disconnect(); }
 }

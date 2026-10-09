@@ -1,4 +1,5 @@
 import { importSalesOrdersForLineRequestedOn, type ImportSalesOrdersResult } from "@/lib/erp/importSalesOrders";
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   InternalOrderLifecycleStatus,
   NotificationActionType,
@@ -105,7 +106,7 @@ export type DeliveryReminder2DayEventReport = {
   recipientFallbackReason?: string | null;
 };
 
-export type Create2DayDeliveryReminderEventsSummary = {
+export type Create2DayDeliveryReminderEventsSummary = UnsentEventRecoverySummary & {
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
@@ -157,6 +158,8 @@ function emptySummary(params: {
   dryRun: boolean;
 }): Create2DayDeliveryReminderEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     importRequestedOn: params.importRequestedOn,
@@ -484,7 +487,10 @@ async function skipDeliveryGroup(params: {
 export async function create2DayDeliveryReminderEvents(
   options: Create2DayDeliveryReminderEventsOptions = {}
 ): Promise<Create2DayDeliveryReminderEventsSummary> {
-  const client = options.prismaClient ?? prisma;
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDate, importResult: summary.importResult,
+  }));
+  const client = recovery.client;
   const importSalesOrders = options.importSalesOrders ?? importSalesOrdersForLineRequestedOn;
   const loadSalespersonContactMap =
     options.getSalespersonContactMap ?? getActiveSalespersonContactMap;
@@ -890,5 +896,8 @@ export async function create2DayDeliveryReminderEvents(
     }
   }
 
+  summary.eventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }

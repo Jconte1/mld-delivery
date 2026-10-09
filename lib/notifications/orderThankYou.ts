@@ -178,7 +178,8 @@ function fullOrderMatch(rows: unknown[], candidate: ThankYouCandidate) {
 }
 
 function contactMatch(rows: unknown[], contactId: string) {
-  return rows.find((row) => text(field(row, "ContactID")) === contactId) ?? rows[0] ?? null;
+  const matches = rows.filter((row) => text(field(row, "ContactID")) === contactId);
+  return matches.length === 1 ? matches[0] : null;
 }
 
 function fullOrderRequestedDate(order: unknown, fallback: Date | null) {
@@ -239,14 +240,7 @@ async function upsertFreshContact(contactId: string, contact: unknown, now: Date
       lastSyncedAt: now,
     },
     update: {
-      status: data.status ?? undefined,
-      companyName: data.companyName ?? undefined,
-      displayName: data.displayName ?? undefined,
-      firstName: data.firstName ?? undefined,
-      lastName: data.lastName ?? undefined,
-      email: data.email ?? undefined,
-      phone1: data.phone1 ?? undefined,
-      phone2: data.phone2 ?? undefined,
+      ...data,
       smsOptIn: data.smsOptIn,
       emailOptIn: data.emailOptIn,
       phoneCallOptIn: data.phoneCallOptIn,
@@ -427,8 +421,8 @@ export async function reconcileOrderThankYouWritebacks(now = new Date()) {
 
 export async function runOrderThankYou(options: RunOrderThankYouOptions) {
   const now = options.now ?? new Date();
-  if (options.send && process.env.DELIVERY_REAL_CUSTOMER_SEND_ENABLED?.trim().toLowerCase() !== "true") {
-    throw new Error("DELIVERY_REAL_CUSTOMER_SEND_ENABLED must be exactly true for thank-you sends");
+  if (options.send && process.env.DELIVERY_REAL_CUSTOMER_SEND_ENABLED?.trim().toLowerCase() === "false") {
+    throw new Error("DELIVERY_REAL_CUSTOMER_SEND_ENABLED is explicitly false for thank-you sends");
   }
   const report = await fetchThankYouReportRows();
   const parsed = report.rows.map(parseThankYouCandidate).filter((row): row is ThankYouCandidate => Boolean(row));

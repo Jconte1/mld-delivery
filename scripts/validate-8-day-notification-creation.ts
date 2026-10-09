@@ -526,6 +526,10 @@ async function validateMockedRuntime(
   assert(successSummary.eventReports[0]?.detailsLinkUrl?.includes("/delivery/details/"), "details link uses /delivery/details/[token]", failures);
   assert(!successSummary.eventReports[0]?.detailsLinkUrl?.includes("/delivery/confirm/"), "details link does not use confirmation URL", failures);
   assert(successSummary.internalEventsCreated === 1, "hold success creates internal notification event", failures);
+  assert(successSummary.internalEventIdsCreatedThisRun.length === 1,
+    "hold success exposes exactly one current-run internal event ID", failures);
+  assert(successSummary.internalEventIdsCreatedThisRun[0] === successStore.state.internalNotificationEvents[0]?.id,
+    "current-run internal event ID matches the created row", failures);
   assert(
     successStore.state.internalNotificationEvents[0]?.purpose ===
       InternalNotificationPurpose.PAYMENT_ENFORCEMENT_HOLD_SUCCEEDED,
@@ -560,6 +564,8 @@ async function validateMockedRuntime(
   assert(refusedSummary.holdActionsFailed === 1, "refused queue result marks FAILED", failures);
   assert(refusedSummary.customerEventsCreated === 0, "refused hold does not create customer event", failures);
   assert(refusedSummary.internalEventsCreated === 1, "hold failure creates internal failure notification event", failures);
+  assert(refusedSummary.internalEventIdsCreatedThisRun.length === 1,
+    "hold failure exposes exactly one current-run internal event ID", failures);
   assert(
     refusedStore.state.internalNotificationEvents[0]?.purpose ===
       InternalNotificationPurpose.PAYMENT_ENFORCEMENT_HOLD_FAILED,

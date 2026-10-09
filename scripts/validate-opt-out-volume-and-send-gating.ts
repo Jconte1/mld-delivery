@@ -55,6 +55,42 @@ const RUN_ID = `optout_volume_test_${new Date().toISOString().replace(/\D/g, "")
 const TEST_SOURCE = RUN_ID.slice(0, 64);
 const TEST_REASON = RUN_ID;
 const TEST_TO_PHONE = "+18015550100";
+const isolatedFixtures = process.argv.includes("--isolated-fixtures");
+const fixtureContactIds: string[] = [];
+
+async function createIsolatedFixtures() {
+  const url = new URL(process.env.DATABASE_URL ?? "");
+  if (process.env.TEST_DELIVERY_GROUP_DATABASE_URL !== process.env.DATABASE_URL ||
+      !["localhost", "127.0.0.1"].includes(url.hostname) || url.port !== "25439" ||
+      url.pathname !== "/delivery_group_validation_contacts") {
+    throw new Error("Isolated fixtures require the explicit local validation database");
+  }
+  const existing = await prisma.contact.findMany({ select: { phone1: true, phone2: true } });
+  const existingPhones = new Set(existing.flatMap(row => [phoneKey(row.phone1), phoneKey(row.phone2)]));
+  const area = [202, 303, 385, 435, 720].find(candidate =>
+    Array.from({ length: 100 }, (_, i) => `${candidate}555${String(100 + i).padStart(4, "0")}`)
+      .every(phone => !existingPhones.has(phoneKey(phone))));
+  if (!area) throw new Error("No unused fictional phone block available for isolated fixtures");
+  // Enough distinct addresses for 40 STOPs, 40 email opt-outs, controls and globals.
+  const data = Array.from({ length: 96 }, (_, i) => ({
+    contactId: `${RUN_ID}_${i}`,
+    phone1: `${area}555${String(100 + i).padStart(4, "0")}` as string | null,
+    email: `${RUN_ID}_${i}@example.invalid` as string | null,
+    smsOptIn: true,
+    emailOptIn: true,
+    phoneCallOptIn: true,
+  }));
+  for (const [offset, kind] of [[100, "sms"], [102, "email"]] as const) {
+    for (let i = 0; i < 2; i++) data.push({
+      contactId: `${RUN_ID}_${offset + i}`,
+      phone1: kind === "sms" ? `${area}5550196` : null,
+      email: kind === "email" ? `${RUN_ID}_shared@example.invalid` : null,
+      smsOptIn: true, emailOptIn: true, phoneCallOptIn: true,
+    });
+  }
+  await prisma.contact.createMany({ data });
+  fixtureContactIds.push(...data.map(row => row.contactId));
+}
 
 function createFakeContactOptInWritebackEnqueue(runId: string) {
   const payloads: Array<ReturnType<typeof buildContactOptInWritebackPayload>> = [];
@@ -485,6 +521,7 @@ async function main() {
 
   try {
     const contacts = await prisma.contact.findMany({
+      where: isolatedFixtures ? { contactId: { in: fixtureContactIds } } : undefined,
       select: {
         contactId: true,
         smsOptIn: true,
@@ -941,6 +978,18 @@ async function main() {
     if (emailOptOutCohort.length !== EMAIL_OPT_OUT_TARGET) {
       blockers.push("insufficient_email_opt_out_candidates");
     }
+    if (smsControlCohort.length !== CONTROL_TARGET || emailControlCohort.length !== CONTROL_TARGET) {
+      blockers.push("insufficient_control_candidates");
+    }
+    if (smsControlsWouldReachGate !== CONTROL_TARGET || emailControlsWouldReachGate !== CONTROL_TARGET) {
+      blockers.push("opted_in_controls_blocked");
+    }
+    if (globalSmsCohort.length !== 1 || globalEmailCohort.length !== 1) {
+      blockers.push("insufficient_global_optout_candidates");
+    }
+    if (isolatedFixtures && (duplicateSmsCohort.length !== 2 || duplicateEmailCohort.length !== 2)) {
+      blockers.push("insufficient_duplicate_address_fixtures");
+    }
     if (smsStopPayloadsProcessed !== smsOptOutCohort.length) {
       blockers.push("sms_stop_payloads_not_fully_processed");
     }
@@ -1181,11 +1230,25 @@ async function main() {
   }
 
   console.log(JSON.stringify({ ...summary, cleanup: cleanupSummary }, null, 2));
-  await prisma.$disconnect();
+  if (summary?.validationStatus !== "passed" ||
+      !cleanupSummary?.contactFlagsRestored || !cleanupSummary?.activeSmsOptOutSnapshotRestored ||
+      !cleanupSummary?.activeEmailOptOutSnapshotRestored || !cleanupSummary?.notificationEventCountUnchanged ||
+      !cleanupSummary?.notificationAttemptCountUnchanged) {
+    throw new Error("Opt-out volume validation incomplete or cleanup checks failed");
+  }
 }
 
-main().catch(async (error) => {
-  await prisma.$disconnect().catch(() => undefined);
+async function run() {
+  try {
+    if (isolatedFixtures) await createIsolatedFixtures();
+    await main();
+  } finally {
+    if (fixtureContactIds.length) await prisma.contact.deleteMany({ where: { contactId: { in: fixtureContactIds } } });
+    await prisma.$disconnect();
+  }
+}
+
+run().catch((error) => {
   console.error(error instanceof Error ? error.message : error);
   process.exitCode = 1;
 });

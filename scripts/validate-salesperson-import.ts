@@ -86,7 +86,7 @@ async function main() {
   const queueFullFetch = functionSegment(queueClient, "fetchDeliverySalesOrderFull");
 
   assert(
-    schema.includes("salespersonNumber       String?") &&
+    /salespersonNumber\s+String\?/.test(schema) &&
       schema.includes("model SalespersonContact"),
     "schema should define Order.salespersonNumber and SalespersonContact"
   );

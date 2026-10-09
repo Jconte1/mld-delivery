@@ -10,9 +10,11 @@ import { DeliveryItemsForThisDelivery } from "@/app/delivery/components/Delivery
 import { DeliveryPaymentSummary } from "@/app/delivery/components/DeliveryPaymentSummary";
 import { SalespersonContactBlock } from "@/app/delivery/components/SalespersonContactBlock";
 import { DeliveryInfoState } from "@/app/delivery/components/DeliveryInfoState";
+import { customerPaymentVisible } from "@/lib/notifications/customerPaymentPresentation";
 import { DeliveryConfirmationActions } from "@/app/confirm/[token]/DeliveryConfirmationActions";
 
 export const metadata = { robots: { index: false, follow: false } };
+export const dynamic = "force-dynamic";
 
 async function respond(form: FormData, action: "CONFIRM" | "REQUEST_DATE") {
   "use server";
@@ -37,10 +39,11 @@ export default async function GroupDeliveryPage({ params, searchParams }: {
   const group = await loadCustomerNotificationGroup(prisma, token);
   if (!group) return <DeliveryInfoState title="Delivery link not found" message="Please contact MLD for current delivery details." />;
   const stateError = groupCustomerStateError(group);
+  if (stateError === "expired") return <DeliveryInfoState title="This delivery link has expired" message="Please contact MLD for current delivery details." />;
   if (stateError) return <DeliveryInfoState title="Delivery details have changed" message="This link is no longer current. Please use your latest delivery link or contact MLD." />;
   const first = group.members[0].notificationEvent.order;
   const isConfirmation = group.intervalType === "DAY_42";
-  const showPayment = ["DAY_30", "DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(group.intervalType);
+  const showPayment = customerPaymentVisible(group.intervalType);
   const nextDay = new Date(group.deliveryDate); nextDay.setUTCDate(nextDay.getUTCDate() + 1);
   const confirmations = isConfirmation ? await prisma.deliveryConfirmation.findMany({
     where: { id: { in: group.members.flatMap(m => m.deliveryConfirmationId ? [m.deliveryConfirmationId] : []) } },

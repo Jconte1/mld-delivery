@@ -1,3 +1,4 @@
+import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
   getDeliveryGroupPaymentEvaluation,
   isMeaningfulDeliveryPaymentAmount,
@@ -161,7 +162,8 @@ export type DeliveryPaymentEnforcement8DayEventReport = {
   tenDayConfirmationLocalConfirmed?: boolean;
 };
 
-export type Create8DayPaymentEnforcementEventsSummary = {
+export type Create8DayPaymentEnforcementEventsSummary = UnsentEventRecoverySummary & {
+  internalEventIdsCreatedThisRun: string[];
   runDate: string;
   targetDeliveryDate: string;
   importRequestedOn: string;
@@ -252,6 +254,9 @@ function emptySummary(params: {
   retryFailedHoldActions: boolean;
 }): Create8DayPaymentEnforcementEventsSummary {
   return {
+    recoveredEventIds: [],
+    currentRunEligibleEventIds: [],
+    internalEventIdsCreatedThisRun: [],
     runDate: params.runDate,
     targetDeliveryDate: params.targetDeliveryDate,
     importRequestedOn: params.importRequestedOn,
@@ -820,6 +825,9 @@ async function createOrReuseInternalNotification(params: {
   });
 
   params.summary.internalEventsCreated += 1;
+  if (event.status === InternalNotificationStatus.PENDING) {
+    params.summary.internalEventIdsCreatedThisRun.push(event.id);
+  }
   return event;
 }
 
@@ -1177,7 +1185,10 @@ function appendInternalEventReport(
 export async function create8DayPaymentEnforcementEvents(
   options: Create8DayPaymentEnforcementEventsOptions = {}
 ): Promise<Create8DayPaymentEnforcementEventsSummary> {
-  const client = options.prismaClient ?? prisma;
+  const recovery = createUnsentEventRecovery(options.prismaClient ?? prisma, () => ({
+    dryRun, targetDeliveryDate: targetDeliveryDate, importResult: summary.importResult,
+  }));
+  const client = recovery.client;
   const importSalesOrders = options.importSalesOrders ?? importSalesOrdersForLineRequestedOn;
   const loadPayment = options.getPaymentEvaluation ?? getDeliveryGroupPaymentEvaluation;
   const loadSalespersonContactMap =
@@ -1638,5 +1649,8 @@ export async function create8DayPaymentEnforcementEvents(
     summary.eventReports.push(report);
   }
 
+  summary.customerEventsCreated -= recovery.replacedEventIds.length;
+  summary.recoveredEventIds = recovery.recoveredEventIds;
+  summary.currentRunEligibleEventIds = recovery.currentRunEligibleEventIds;
   return summary;
 }

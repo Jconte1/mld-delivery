@@ -383,8 +383,8 @@ async function validateBranchScenarios(failures: string[], summaries: ScenarioSu
   assert(
     summary12NoBalance.eventsSkipped === 1 &&
       summary12NoBalance.eventReports[0]?.reasonSkipped === "no_balance_due" &&
-      summary12NoBalance.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "17. 12-day amount due <= 2 skips payment request and invokes ONEWEEKCON dry-run path",
+      summary12NoBalance.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "17. 12-day cleared payment cannot authorize ONEWEEKCON without a real notification",
     failures
   );
 
@@ -434,8 +434,8 @@ async function validateBranchScenarios(failures: string[], summaries: ScenarioSu
   assert(
     summary10NoBalance.eventsSkipped === 1 &&
       summary10NoBalance.eventReports[0]?.reasonSkipped === "no_balance_due" &&
-      summary10NoBalance.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "18. 10-day amount due <= 2 skips payment request and invokes ONEWEEKCON dry-run path",
+      summary10NoBalance.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "18. 10-day cleared payment cannot authorize ONEWEEKCON without a real notification",
     failures
   );
 
@@ -498,8 +498,8 @@ async function validateBranchScenarios(failures: string[], summaries: ScenarioSu
   assert(
     summary8NoBalance.paymentDueCount === 0 &&
       (noHoldCounters.holdCreate ?? 0) === 0 &&
-      summary8NoBalance.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN",
-    "19. 8-day amount due <= 2 creates no hold and invokes ONEWEEKCON dry-run path",
+      summary8NoBalance.eventReports[0]?.tenDayConfirmationStatus === "AWAITING_NOTIFICATION",
+    "19. 8-day cleared payment creates no hold and requires real notification evidence",
     failures
   );
 

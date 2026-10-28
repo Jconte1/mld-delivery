@@ -1,6 +1,6 @@
 # Order Thank-You Production Rollout
 
-The delivery worker owns order thank-you orchestration. The existing mld-queue thank-you report and mark-sent jobs remain the ERP boundary. Will Call account and registration URL creation remain owned by mld-willcall-backend.
+The delivery worker owns order thank-you orchestration. The existing mld-queue thank-you report and mark-sent jobs remain the ERP boundary. Will Call thank-you messages acknowledge the order and tell the customer MLD will notify them when it is ready for pickup. They do not create invites or link to a customer dashboard.
 
 ## Runtime flow
 
@@ -20,14 +20,11 @@ The delivery worker owns order thank-you orchestration. The existing mld-queue t
 New values:
 
 - `DELIVERY_THANK_YOU_ENABLED=true` only at final cutover. Leave unset/false during shadow verification.
-- `WILLCALL_BACKEND_URL=<deployed mld-willcall-backend base URL>`
-- `WILLCALL_INVITE_TOKEN=<same secret as mld-willcall-backend INTERNAL_INVITE_TOKEN>`
 
 Optional values:
 
 - `DELIVERY_THANK_YOU_WILL_CALL_SHIP_VIAS=WILL CALL,WILL CALL BO,WILL CALL JX,WILL CALL PR,WILL CALL SLC,TRANS BOISE,TRANS JACKSON,TRANS PROVO,TRANS SLC`
 - `DELIVERY_THANK_YOU_WRITEBACK_MAX_ATTEMPTS=10`
-- `WILLCALL_FRONTEND_URL=https://mld.com/willcall` (preview rendering only)
 
 Existing required values:
 
@@ -40,12 +37,9 @@ Existing required values:
 - Twilio credentials and a messaging service SID or from number
 - Microsoft Graph tenant/client/secret/from-email values
 
-### mld-willcall-backend
+### Will Call dependencies
 
-- `INTERNAL_INVITE_TOKEN=<same secret as delivery worker WILLCALL_INVITE_TOKEN>`
-- `FRONTEND_URL=https://mld.com/willcall`
-- `WILLCALL_SMS_PREFILL_SECRET=<existing signing secret>`
-- `WILLCALL_SMS_PREFILL_TTL_HOURS=24` (optional)
+The delivery thank-you flow no longer requires a Will Call backend, invite token, frontend URL, customer email address, or billing ZIP for SMS. Email sends still require an eligible email address. Historical `willCallUrl` database values remain for audit purposes; new or retried sends store no link. Do not remove secrets from the legacy application or Will Call backend while those systems still need them.
 
 ### mld-delivery-queue-worker-prod / mld-queue gateway
 
@@ -82,7 +76,7 @@ npm.cmd run run:order-thank-you -- --send --order-type SO --order-number SO12345
 ## Cutover order
 
 1. Apply the delivery database migration.
-2. Deploy mld-willcall-backend with the finalized registration URL response.
+2. Verify Will Call thank-you copy contains order/customer details and no registration or dashboard links. No Will Call backend deployment is required for this flow.
 3. Deploy the delivery Vercel app and delivery worker image.
 4. Keep `DELIVERY_THANK_YOU_ENABLED` unset/false.
 5. Run report and scoped previews and compare against the legacy application.

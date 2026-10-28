@@ -1,4 +1,5 @@
 import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
+import { paymentLifecycleBlockReason } from "./paymentLifecycleEligibility";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import {
@@ -140,6 +141,10 @@ export type Create30DayDeliveryReminderEventsOptions = {
   now?: Date;
   prismaClient?: DeliveryReminder30DayClient;
   orderScope?: DeliveryOrderScope | null;
+  importSalesOrders?: typeof importSalesOrdersForLineRequestedOn;
+  getReadiness?: typeof getDeliveryGroupReadiness;
+  getPaymentEvaluation?: typeof getDeliveryGroupPaymentEvaluation;
+  getSalespersonContactMap?: typeof getActiveSalespersonContactMap;
 };
 
 export type CreateConfirmedDeliveryReminderEventsOptions =
@@ -241,6 +246,7 @@ function paymentReminderApplies(
 ) {
   return (
     payment.paymentStatus === "balance_due" &&
+    payment.hasDeliverableItems !== false &&
     amountIsMeaningful(payment.amountDueNowRounded) &&
     payment.calculationWarnings.length === 0
   );
@@ -332,6 +338,7 @@ export async function find30DayDeliveryReminderTargetGroups(
           internalLifecycleStatus: true,
           buyerGroup: true,
           confirmVia: true,
+          confirmWith: true,
           acumaticaOneWeekConfirmed: true,
           salespersonNumber: true,
           customerDescription: true,
@@ -449,7 +456,7 @@ export async function createConfirmedDeliveryReminderEvents(
 
   const deliveryDateSkipReason = getDeliveryDateCustomerNotificationSkipReason(targetDeliveryDate);
   if (!deliveryDateSkipReason) {
-    summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn);
+    summary.importResult = await (options.importSalesOrders ?? importSalesOrdersForLineRequestedOn)(importRequestedOn);
     summary.failedImportExclusions = getFreshImportFailedOrders(summary.importResult);
   }
 
@@ -468,7 +475,7 @@ export async function createConfirmedDeliveryReminderEvents(
 
   const salespersonContactsByNumber = deliveryDateSkipReason
     ? new Map()
-    : await getActiveSalespersonContactMap(
+    : await (options.getSalespersonContactMap ?? getActiveSalespersonContactMap)(
         deliveryGroups.map((deliveryGroup) => deliveryGroup.order.salespersonNumber),
         client
       );
@@ -684,11 +691,14 @@ export async function createConfirmedDeliveryReminderEvents(
     summary.eligibleDeliveryGroups += 1;
 
     const acumaticaConfirmVia = normalize30DayConfirmVia(order.confirmVia);
-    if (!acumaticaConfirmVia) {
+    const lifecycleBlock = options.intervalType === NotificationIntervalType.DAY_14
+      ? paymentLifecycleBlockReason(order) : null;
+    if (!acumaticaConfirmVia || lifecycleBlock) {
+      const reason = lifecycleBlock ?? DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON;
       summary.deliveryGroupsSkippedNotConfirmedInAcumatica += 1;
       summary.eventsSkipped += 1;
       summary.eventsWouldCreate += dryRun ? 1 : 0;
-      addSkippedReason(summary, DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON);
+      addSkippedReason(summary, reason);
 
       try {
         const skippedEvent = await createSkippedEvent({
@@ -696,7 +706,7 @@ export async function createConfirmedDeliveryReminderEvents(
           deliveryGroup,
           dedupeKey,
           intervalType: options.intervalType,
-          reason: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
+          reason,
           dryRun,
         });
         if (skippedEvent) summary.eventsCreated += 1;
@@ -710,14 +720,14 @@ export async function createConfirmedDeliveryReminderEvents(
           dedupeKey,
           status: NotificationEventStatus.SKIPPED,
           selectedChannel: null,
-          reasonSkipped: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
+          reasonSkipped: reason,
           acumaticaConfirmVia: null,
           detailsLinkCreated: false,
           detailsLinkReused: false,
           detailsLinkTokenPresent: false,
           detailsLinkUrl: null,
           subject: null,
-          renderedMessagePreview: DELIVERY_REMINDER_30_DAY_NOT_CONFIRMED_REASON,
+          renderedMessagePreview: reason,
           itemLineCount: 0,
           paymentStatus: null,
           amountDueNowRounded: null,
@@ -800,8 +810,8 @@ export async function createConfirmedDeliveryReminderEvents(
     const salespersonContact = order.salespersonNumber
       ? salespersonContactsByNumber.get(order.salespersonNumber) ?? null
       : null;
-    const readiness = await getDeliveryGroupReadiness(deliveryGroup.id);
-    const payment = await getDeliveryGroupPaymentEvaluation(
+    const readiness = await (options.getReadiness ?? getDeliveryGroupReadiness)(deliveryGroup.id);
+    const payment = await (options.getPaymentEvaluation ?? getDeliveryGroupPaymentEvaluation)(
       deliveryGroup.id,
       client,
       options.intervalType === NotificationIntervalType.DAY_14

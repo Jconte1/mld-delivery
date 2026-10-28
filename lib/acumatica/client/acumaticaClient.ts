@@ -54,7 +54,7 @@ export const DEFAULT_ALLOWED_SHIP_VIA = [
 
 export const DEFAULT_SALES_ORDER_EXPAND = "Totals,Details/Allocations,ShipToAddress,TaxDetails";
 export const DEFAULT_SALES_ORDER_CUSTOM =
-  "Document.AttributeBUYERGROUP,Document.AttributeCONFIRMVIA,Document.AttributeSALESNEW,Document.AttributeONEWEEKCON";
+  "Document.AttributeBUYERGROUP,Document.AttributeCONFIRMVIA,Document.AttributeCONFIRMWTH,Document.AttributeSALESNEW,Document.AttributeONEWEEKCON";
 export const DEFAULT_ALLOWED_STATUSES = [
   "Open",
   "Awaiting Payment",

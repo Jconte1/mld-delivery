@@ -70,6 +70,7 @@ function group(overrides: {
       orderType: "SO",
       orderNumber,
       acumaticaOneWeekConfirmed: overrides.acumaticaOneWeekConfirmed ?? false,
+      confirmVia: "WEBPAGE", confirmWith: "Customer",
     },
   };
 }
@@ -96,7 +97,7 @@ function fakeClient(existing: ConfirmationRecord[] = [], evidence: {
             JSON.stringify(where.status) !== JSON.stringify({ in: ["SUBMITTED", "DELIVERED"] }) ||
             !scope.orderId || !scope.deliveryGroupId || !scope.deliveryDate ||
             scope.contactId !== "contact_test" ||
-            JSON.stringify(scope.intervalType) !== JSON.stringify({ in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] })) {
+            JSON.stringify(scope.intervalType) !== JSON.stringify({ in: ["DAY_14", "DAY_12", "DAY_10"] })) {
           throw new Error("notification evidence query must exclude failed, unsent, test and unrelated sends");
         }
         return evidence.sent === false ? [] : [{ channel: "EMAIL", realEmailOptIn: evidence.snapshotOptIn !== false,
@@ -241,14 +242,9 @@ async function main() {
       throw new Error("mismatch must not enqueue writeback");
     },
   });
-  assert(!mismatchResult.localConfirmed, "Acumatica true plus local balance due is not locally confirmed", failures);
-  assert(mismatchResult.acumaticaWritebackStatus === "MISMATCH_BALANCE_DUE", "mismatch status is recorded", failures);
-  assert(
-    mismatchResult.mismatchReason ===
-      DELIVERY_TEN_DAY_CONFIRMATION_REASONS.mismatchPaymentNotCleared,
-    "mismatch reason is explicit",
-    failures
-  );
+  assert(mismatchResult.localConfirmed, "Existing ERP confirmation is respected without further writes", failures);
+  assert(mismatchResult.acumaticaWritebackStatus === "ALREADY_TRUE", "existing confirmation remains authoritative", failures);
+  assert(!mismatchResult.wouldWrite, "DAY_8 never initiates clearance", failures);
 
   const dryQueue = fakeClient();
   const dryQueueResult = await evaluateAndRecordDeliveryTenDayConfirmation({
@@ -323,7 +319,7 @@ async function main() {
         sourceInterval: interval, prismaClient: store.client,
         enqueueWriteback: async () => { throw new Error("ineligible notification must never enqueue"); },
       });
-      assert(result.acumaticaWritebackStatus === "AWAITING_NOTIFICATION" && !result.wouldWrite && !result.localConfirmed,
+      assert(result.acumaticaWritebackStatus === (interval === NotificationIntervalType.DAY_8 ? "REFUSED" : "AWAITING_NOTIFICATION") && !result.wouldWrite && !result.localConfirmed,
         `${interval} blocks writeback for ${JSON.stringify(evidence)}`, failures);
     }
   }

@@ -485,22 +485,24 @@ async function runtimeCounts() {
   };
 }
 
-async function scheduledEventsForRun(params: {
+export async function scheduledEventsForRun(params: {
   config: IntervalConfig;
   runDate: string;
   targetDate: string;
   currentRunCreatedEventIds?: string[] | null;
   orderScope?: DeliveryOrderScope | null;
-}) {
+}, client: Pick<typeof prisma, "notificationEvent"> = prisma) {
   if (params.currentRunCreatedEventIds && params.currentRunCreatedEventIds.length === 0) {
     return [];
   }
 
-  return prisma.notificationEvent.findMany({
+  return client.notificationEvent.findMany({
     where: {
       id: params.currentRunCreatedEventIds ? { in: params.currentRunCreatedEventIds } : undefined,
       intervalType: params.config.intervalType,
-      actionType: params.config.actionType,
+      actionType: ["12", "10"].includes(params.config.interval)
+        ? { in: [NotificationActionType.PAYMENT_REQUEST, NotificationActionType.DELIVERY_REMINDER] }
+        : params.config.actionType,
       orderType: params.orderScope?.orderType,
       orderNumber: params.orderScope?.orderNumber,
       deliveryDate: dateFromKey(params.targetDate),

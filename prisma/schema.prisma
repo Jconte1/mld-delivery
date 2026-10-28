@@ -322,6 +322,7 @@ model Order {
   lifecycleUpdatedAt        DateTime?
   buyerGroup                String?                      @db.VarChar(64)
   confirmVia                String?                      @db.VarChar(64)
+  confirmWith               String?                      @db.VarChar(256)
   acumaticaOneWeekConfirmed Boolean?
   salespersonNumber         String?                      @db.VarChar(16)
   createdAt                 DateTime                     @default(now())

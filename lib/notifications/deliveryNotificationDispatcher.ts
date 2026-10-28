@@ -1,4 +1,5 @@
 import { currentCustomerPaymentAmount } from "./customerPaymentPresentation";
+import { paymentLifecycleBlockReason, paymentIsCleared } from "./paymentLifecycleEligibility";
 import {
   InternalOrderLifecycleStatus,
   NotificationAttemptStatus,
@@ -87,6 +88,7 @@ import { claimDeliveryNotificationGroup, markDeliveryNotificationGroupUncertain,
 import { freshImportRequiresSuccessfulOrder, isFreshImportSuccessfulOrder, isFreshImportFailedOrder, type DeliveryIntervalFreshImportResult } from "./freshDeliveryIntervalImport";
 import { buildDeliveryNotificationGroupLink } from "./deliveryNotificationGroupCustomer";
 import { recipientContactSelect, selectDeliveryRecipient } from "./deliveryRecipient";
+import { refreshDeliveryPaymentOrder } from "./freshDeliveryPayment";
 
 export type DispatcherChannelFilter = "sms" | "email" | "both";
 export type DeliveryDispatchMode =
@@ -104,6 +106,7 @@ const CONTROLLED_RECIPIENT_CONFIRM_PHRASE_ENV =
   "DELIVERY_CONTROLLED_RECIPIENT_CONFIRM_PHRASE";
 
 export type DispatchDeliveryNotificationsOptions = {
+  refreshPaymentOrder?: (scope: Parameters<typeof refreshDeliveryPaymentOrder>[0]) => Promise<unknown>;
   preview?: boolean;
   send?: boolean;
   controlledRecipientSend?: boolean;
@@ -225,6 +228,7 @@ const notificationEventInclude = {
       status: true,
       internalLifecycleStatus: true,
       confirmVia: true,
+      confirmWith: true,
       acumaticaOneWeekConfirmed: true,
       buyerGroup: true,
       customerDescription: true,
@@ -404,6 +408,7 @@ function amountIsMeaningful(value: string | null | undefined) {
 function paymentReminderApplies(payment: DeliveryGroupPaymentEvaluation) {
   return (
     payment.paymentStatus === "balance_due" &&
+    payment.hasDeliverableItems !== false &&
     amountIsMeaningful(payment.amountDueNowRounded) &&
     payment.calculationWarnings.length === 0
   );
@@ -770,11 +775,9 @@ function currentDispatchSafetyBlockReason(params: {
   const dateMismatchReason = activeDeliveryLineDateMismatch(event);
   if (dateMismatchReason) return dateMismatchReason;
 
-  if (
-    intervalRequiresOpenOneWeekConfirmation(event.intervalType) &&
-    event.order.acumaticaOneWeekConfirmed === true
-  ) {
-    return "one_week_confirmation_already_true";
+  if (intervalRequiresOpenOneWeekConfirmation(event.intervalType)) {
+    const block = paymentLifecycleBlockReason(event.order);
+    if (block) return block;
   }
 
   if (event.intervalType === NotificationIntervalType.DAY_42) {
@@ -1002,12 +1005,19 @@ async function renderForChannel(params: {
     event.intervalType === NotificationIntervalType.DAY_12 ||
     event.intervalType === NotificationIntervalType.DAY_10
   ) {
-    if (event.actionType !== "PAYMENT_REQUEST") {
+    if (event.actionType !== "PAYMENT_REQUEST" && event.actionType !== "DELIVERY_REMINDER") {
       throw new Error("unsupported_event_action_for_interval");
     }
     const detailsLink = params.groupLink ?? requireDetailsLink(event);
     const payment = await paymentEvaluationForEvent(event, client);
-    const amountDueNowRounded = payment.amountDueNowRounded;
+    if (event.actionType === "DELIVERY_REMINDER") {
+      if (!paymentIsCleared(payment)) throw new Error("catch_up_payment_no_longer_cleared");
+      const input = { ...common, detailsLink, paymentDue: false, salespersonContact };
+      if (channel === "SMS") return { subject: null, textBody: render30DayDeliveryReminderSms(input), htmlBody: null };
+      const rendered = render30DayDeliveryReminderEmail(input);
+      return { subject: rendered.subject, textBody: rendered.body, htmlBody: rendered.htmlBody };
+    }
+    const amountDueNowRounded = currentCustomerPaymentAmount(payment);
     if (!amountIsMeaningful(amountDueNowRounded)) {
       throw new Error("payment_amount_not_due");
     }
@@ -1049,6 +1059,7 @@ async function renderForChannel(params: {
     }
     const payment = await paymentEvaluationForEvent(event, client);
     const amountDueNowRounded = currentCustomerPaymentAmount(payment);
+    if (!amountIsMeaningful(amountDueNowRounded)) throw new Error("payment_amount_not_due");
     const input = {
       ...common,
       detailsLink,
@@ -1365,6 +1376,23 @@ async function dispatchOne(params: {
   globalOptOuts: ActiveNotificationOptOutAddresses;
   now: Date;
 }) {
+  if (params.preflight.send && params.event.status === NotificationEventStatus.SCHEDULED &&
+      ["DAY_30", "DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(params.event.intervalType)) {
+    try {
+      await (params.options.refreshPaymentOrder ?? refreshDeliveryPaymentOrder)(params.event);
+      const current = await reloadEventDispatchState(params.client, params.event.id);
+      if (!current) throw new Error("payment_event_disappeared");
+      params = { ...params, event: current };
+    } catch (error) {
+      const optOuts = optOutSnapshot(params.event, params.globalOptOuts);
+      const reason = `fresh_payment_check_failed: ${truncateError(error)}`;
+      await markEventSkipped({ client: params.client, eventId: params.event.id, reason });
+      return { ...reportBase({ event: params.event, preflight: params.preflight, optOuts }),
+        outcome: "skipped" as const, reason, selectedChannel: params.event.selectedChannel,
+        attemptId: null, fallbackAttemptId: null, realRecipientSuppressed: false,
+        finalRecipientKind: null, externalMessageIdPresent: false };
+    }
+  }
   const optOuts = optOutSnapshot(params.event, params.globalOptOuts);
   const base = reportBase({ event: params.event, preflight: params.preflight, optOuts });
 
@@ -1765,6 +1793,25 @@ async function dispatchOne(params: {
         : { selectedChannel: null, channelReason: "email_fallback_not_available" };
 
     if (fallback.selectedChannel === "EMAIL") {
+      if (["DAY_30", "DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(dispatchEvent.intervalType)) {
+        try {
+          await (params.options.refreshPaymentOrder ?? refreshDeliveryPaymentOrder)(dispatchEvent);
+          const updated = await reloadEventDispatchState(params.client, dispatchEvent.id);
+          if (!updated) throw new Error("fallback_event_disappeared");
+          const block = currentDispatchSafetyBlockReason({ event: updated, selectedChannel: "EMAIL",
+            optOuts: optOutSnapshot(updated, params.globalOptOuts), forceContactEligibility: params.preflight.forceContactEligibilityForTest });
+          if (block) throw new Error(block);
+          // Rendering re-evaluates the fresh balance before the fallback attempt is created.
+          await renderForChannel({ event: updated, channel: "EMAIL", client: params.client });
+          dispatchEvent = updated;
+        } catch (error) {
+          const reason = `fallback_fresh_payment_check_failed: ${truncateError(error)}`;
+          await markEventSkipped({ client: params.client, eventId: params.event.id, reason });
+          return { ...base, outcome: "skipped" as const, reason, selectedChannel: dispatchSelected.selectedChannel,
+            attemptId: attempt.id, fallbackAttemptId: null, realRecipientSuppressed: Boolean(dispatchRecipient.suppressedRecipient),
+            finalRecipientKind: dispatchRecipient.finalRecipientKind, ...dispatchRecipientReport, externalMessageIdPresent: false };
+        }
+      }
       const fallbackRendered = await renderForChannel({
         event: dispatchEvent,
         channel: "EMAIL",
@@ -1962,6 +2009,11 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
     }
     const result = await executeClaimedGroupSend({
       revalidate: async () => {
+        if (["DAY_30", "DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(first.interval)) {
+          for (const event of prepared.events.filter(event => eventIds.includes(event.id))) {
+            await (options.refreshPaymentOrder ?? refreshDeliveryPaymentOrder)(event);
+          }
+        }
         prepared = await load(eventIds, claimed);
         assertGroupStillEligible({ expectedMembershipKey: group.membershipKey, expectedEventIds: eventIds,
           candidates: prepared.members, currentRunEventIds: scope });
@@ -1996,7 +2048,7 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
     // Per-order payment clearance is never pooled and never placed in the provider retry boundary.
     if (result.outcome === "submitted") {
       for (const event of prepared.events) {
-        if (!["DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(event.intervalType)) continue;
+        if (!["DAY_14", "DAY_12", "DAY_10"].includes(event.intervalType)) continue;
         try {
           const payment = await getDeliveryGroupPaymentEvaluation(event.deliveryGroupId, client);
           const evaluation = await evaluateAndRecordDeliveryTenDayConfirmation({ deliveryGroup: {
@@ -2056,7 +2108,7 @@ export async function dispatchDeliveryNotifications(
     // Writeback errors must never enter provider fallback or cause a duplicate send.
     if (report.outcome === "submitted" && !preflight.controlledRecipientMode &&
         !preflight.forceContactEligibilityForTest &&
-        (["DAY_14", "DAY_12", "DAY_10", "DAY_8"] as string[]).includes(event.intervalType)) {
+        (["DAY_14", "DAY_12", "DAY_10"] as string[]).includes(event.intervalType)) {
       try {
         const payment = await getDeliveryGroupPaymentEvaluation(event.deliveryGroupId, client);
         await evaluateAndRecordDeliveryTenDayConfirmation({

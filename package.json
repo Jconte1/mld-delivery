@@ -82,6 +82,8 @@
     "validate:customer-payment-presentation": "tsx scripts/validate-customer-payment-presentation.tsx",
     "validate:delivery-group-payment-scenarios": "tsx -r dotenv/config scripts/validate-delivery-group-payment-scenarios.ts",
     "validate:delivery-payment-payable-basis": "tsx scripts/validate-delivery-payment-payable-basis.tsx",
+    "validate:full-order-prepayment": "tsx scripts/validate-full-order-prepayment.tsx",
+    "validate:payment-lifecycle-consent": "tsx scripts/validate-payment-lifecycle-consent.ts",
     "validate:delivery-payment-interval-scenarios": "tsx scripts/validate-delivery-payment-interval-scenarios.tsx",
     "validate:14-12-10-8-lifecycle-scenarios": "tsx scripts/validate-14-12-10-8-lifecycle-scenarios.ts",
     "validate:one-week-confirmation-foundation": "tsx scripts/validate-one-week-confirmation-foundation.ts",

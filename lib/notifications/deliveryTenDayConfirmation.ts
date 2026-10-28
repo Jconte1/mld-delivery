@@ -7,7 +7,7 @@ import {
   type Order,
   type OrderDeliveryGroup,
 } from "@/lib/generated/prisma/client";
-import { dateFromKey, dateKey, selectNotificationChannel } from "@/lib/notifications/helpers";
+import { dateFromKey, dateKey, selectNotificationChannel, type NotificationContactInput } from "@/lib/notifications/helpers";
 import { loadActiveNotificationOptOutAddresses, mergeNotificationOptOutAddresses } from "@/lib/notifications/notificationOptOutLookup";
 import { normalizeEmailForOptOut, normalizeSmsPhoneForOptOut } from "@/lib/notifications/notificationAddressNormalization";
 import {
@@ -19,6 +19,7 @@ import {
 } from "@/lib/notifications/deliveryTenDayConfirmationWritebackQueue";
 import { prisma } from "@/lib/prisma";
 import { sharedAttemptEvidence } from "./deliveryNotificationGroupEvidence";
+import { clearanceSourceAllowed, paymentLifecycleBlockReason } from "./paymentLifecycleEligibility";
 
 export const DELIVERY_TEN_DAY_CONFIRMATION_REASONS = {
   nonPrepayTermsCleared: "non_prepay_terms_cleared",
@@ -61,7 +62,8 @@ type DeliveryTenDayConfirmationClient = {
 // Only the current recipient's real 14/12/10/8 sends can authorize payment clearance writeback.
 export async function hasQualifyingTenDayNotification(
   group: DeliveryTenDayConfirmationDeliveryGroupInput,
-  client: typeof prisma
+  client: typeof prisma,
+  currentContact?: NotificationContactInput,
 ) {
   if (!client.order?.findUnique || !client.notificationAttempt?.findMany ||
       !client.smsOptOut?.findMany || !client.emailOptOut?.findMany) return false;
@@ -91,7 +93,7 @@ export async function hasQualifyingTenDayNotification(
       notificationEvent: {
         orderId: group.order.id, deliveryGroupId: group.id,
         deliveryDate: dateFromKey(group.deliveryDate), contactId: order.contactId,
-        intervalType: { in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] },
+        intervalType: { in: ["DAY_14", "DAY_12", "DAY_10"] },
       },
     },
     orderBy: { createdAt: "desc" },
@@ -99,7 +101,7 @@ export async function hasQualifyingTenDayNotification(
   const grouped = client.deliveryNotificationGroupAttempt ? await client.deliveryNotificationGroupAttempt.findMany({ where: {
     productionEligibilityVerified: true, status: { in: ["SUBMITTED", "DELIVERED"] }, submittedAt: { not: null },
     group: { contactId: order.contactId!, deliveryDate: dateFromKey(group.deliveryDate),
-      intervalType: { in: ["DAY_14", "DAY_12", "DAY_10", "DAY_8"] },
+      intervalType: { in: ["DAY_14", "DAY_12", "DAY_10"] },
       members: { some: { notificationEvent: { orderId: group.order.id, deliveryGroupId: group.id, contactId: order.contactId! } } } },
   } }) : [];
   return [...attempts, ...grouped.map(sharedAttemptEvidence)].some(attempt => {
@@ -107,9 +109,9 @@ export async function hasQualifyingTenDayNotification(
     if (!sms && attempt.channel !== "EMAIL") return false;
     if (sms ? attempt.realSmsOptIn !== true : attempt.realEmailOptIn !== true) return false;
     const channel = selectNotificationChannel({
-      ...order.contact,
-      smsOptIn: sms && order.contact.smsOptIn,
-      emailOptIn: !sms && order.contact.emailOptIn,
+      ...order.contact, ...currentContact,
+      smsOptIn: sms && (currentContact ?? order.contact).smsOptIn,
+      emailOptIn: !sms && (currentContact ?? order.contact).emailOptIn,
     }, optOuts);
     const normalize = sms ? normalizeSmsPhoneForOptOut : normalizeEmailForOptOut;
     const recipient = normalize(attempt.recipient);
@@ -132,7 +134,7 @@ type ExistingTenDayConfirmationRecord = {
 export type DeliveryTenDayConfirmationOrderInput = Pick<
   Order,
   "id" | "orderType" | "orderNumber" | "acumaticaOneWeekConfirmed"
->;
+> & { confirmVia?: string | null; confirmWith?: string | null };
 
 export type DeliveryTenDayConfirmationDeliveryGroupInput = Pick<
   OrderDeliveryGroup,
@@ -195,6 +197,9 @@ function paymentIsPrepay(payment: DeliveryGroupPaymentEvaluation) {
 }
 
 function getLocalClearanceReason(payment: DeliveryGroupPaymentEvaluation) {
+  if (!payment.paymentTerms || payment.paymentStatus === "calculation_blocked") {
+    return { localCleared: false, reason: DELIVERY_TEN_DAY_CONFIRMATION_REASONS.prepayBalanceNotCleared };
+  }
   if (!paymentIsPrepay(payment)) {
     return {
       localCleared: true,
@@ -361,6 +366,15 @@ export async function evaluateAndRecordDeliveryTenDayConfirmation(
   const dryRun = params.dryRun ?? false;
   const clearance = getLocalClearanceReason(params.payment);
   const acumaticaAlreadyTrue = params.deliveryGroup.order.acumaticaOneWeekConfirmed === true;
+  const eligibilityBlock = !clearanceSourceAllowed(params.sourceInterval) ? "clearance_source_not_allowed"
+    : paymentLifecycleBlockReason(params.deliveryGroup.order);
+  if (eligibilityBlock) {
+    return resultBase({ deliveryGroup: params.deliveryGroup, payment: params.payment, dryRun,
+      localCleared: clearance.localCleared, localConfirmed: acumaticaAlreadyTrue, wouldWrite: false,
+      acumaticaWritebackStatus: acumaticaAlreadyTrue ? DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES.ALREADY_TRUE
+        : DELIVERY_TEN_DAY_CONFIRMATION_WRITEBACK_STATUSES.REFUSED,
+      reason: eligibilityBlock });
+  }
 
   if (acumaticaAlreadyTrue && !clearance.localCleared) {
     const mismatchReason =

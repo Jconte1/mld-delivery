@@ -122,6 +122,7 @@ function targetGroup(overrides: Record<string, unknown> = {}) {
       internalLifecycleStatus: "ACTIVE",
       buyerGroup: "Appliances",
       confirmVia: " WEBPAGE ",
+      confirmWith: "Customer",
       salespersonNumber: "123",
       customerId: "CUST8",
       customerDescription: "Smith",
@@ -545,11 +546,11 @@ async function validateMockedRuntime(
     importSalesOrders: async () => importResult(),
     getPaymentEvaluation: async () => paymentEvaluation({ orderNumber: "SO_NO_CHANNEL" }),
     getSalespersonContactMap: async () => new Map(),
-    enqueueHoldJob: mockEnqueuer(queueResult("already_on_hold", "already_on_hold")) as never,
+    enqueueHoldJob: async () => { throw new Error("No-channel order must never enqueue a hold"); },
   });
-  assert(noChannelSummary.holdActionsSucceeded === 1, "already_on_hold result is idempotent success", failures);
-  assert(noChannelSummary.customerEventsSkipped === 1, "no channel creates skipped customer event after hold success", failures);
-  assert(noChannelStore.state.notificationEvents[0]?.reasonSkipped === "no_automated_channel_available", "no channel reason is recorded", failures);
+  assert(noChannelSummary.holdActionsCreated === 0 && noChannelSummary.queueJobsAccepted === 0, "no channel blocks hold before creation/enqueue", failures);
+  assert(noChannelStore.state.notificationEvents.length === 0, "no channel creates no customer event", failures);
+  assert(noChannelSummary.skippedReasons.no_automated_channel_available === 1, "no channel reason is recorded", failures);
 
   const refusedStore = fakeClient({ groups: [targetGroup()] });
   const refusedSummary = await create8DayPaymentEnforcementEvents({

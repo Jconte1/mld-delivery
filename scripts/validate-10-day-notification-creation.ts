@@ -148,6 +148,7 @@ function targetGroup(overrides: Record<string, unknown> = {}) {
       internalLifecycleStatus: "ACTIVE",
       buyerGroup: "Appliances",
       confirmVia: " WEBPAGE ",
+      confirmWith: "Customer",
       salespersonNumber: "123",
       customerDescription: "Smith",
       locationDescription: "Residence",
@@ -454,10 +455,10 @@ async function main() {
     "PAYMENT_REQUEST is used",
     failures
   );
-  assertNotIncludes(
+  assertIncludes(
     service,
     "NotificationActionType.DELIVERY_REMINDER",
-    "10-day service must not use DELIVERY_REMINDER",
+    "10-day service supports cleared-payment catch-up reminders",
     failures
   );
   assert(

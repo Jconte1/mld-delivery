@@ -2,7 +2,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/prisma";
 import { loadCustomerNotificationGroup, groupCustomerStateError, respondToNotificationGroup, buildDeliveryNotificationGroupLink } from "@/lib/notifications/deliveryNotificationGroupCustomer";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
-import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
+import { getFreshDeliveryGroupPaymentEvaluation } from "@/lib/notifications/freshDeliveryPayment";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import { dateKey, formatCustomerFriendlyDate, formatJobAddress } from "@/lib/notifications/helpers";
 import { getRequestedDeliveryDateWebInstruction } from "@/lib/notifications/deliveryDateEligibility";
@@ -53,8 +53,13 @@ export default async function GroupDeliveryPage({ params, searchParams }: {
   const blocks = [];
   for (const member of group.members) {
     const event = member.notificationEvent;
+    let payment: Awaited<ReturnType<typeof getFreshDeliveryGroupPaymentEvaluation>> | null = null;
+    try {
+      payment = showPayment ? await getFreshDeliveryGroupPaymentEvaluation(event.deliveryGroupId) : null;
+    } catch {
+      return <DeliveryInfoState title="Current delivery details are unavailable" message="We could not verify every order's current balance and delivery details. Please try again or contact MLD." />;
+    }
     const readiness = await getDeliveryGroupReadiness(event.deliveryGroupId);
-    const payment = showPayment ? await getDeliveryGroupPaymentEvaluation(event.deliveryGroupId) : null;
     const salesperson = await getActiveSalespersonContact(event.order.salespersonNumber);
     blocks.push(<section key={member.id} className="border-t border-zinc-200 py-6 space-y-5">
       <h2 className="text-xl font-semibold">Order {event.orderNumber}</h2>

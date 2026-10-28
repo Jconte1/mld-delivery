@@ -548,14 +548,14 @@ async function main() {
   });
   assert(
     backordered14.payableBasisValue === "0.00" &&
-      backordered14.paymentStatus === "no_balance_due",
-    "1. Backordered at 14-day is excluded and no-balance if no other payable value exists",
+      backordered14.paymentStatus === "balance_due" && backordered14.hasDeliverableItems === false,
+    "1. Backordered at 14-day defers payment demand without clearing the balance",
     failures
   );
   assert(
     expected12.payableBasisValue === "1000.00" &&
       expected12.paymentStatus === "balance_due" &&
-      expected12.amountDueNowRounded === "950.00",
+      expected12.amountDueNowRounded === "1500.00",
     "1. expected_on_time at 12-day includes the $1000 line and computes amount due",
     failures
   );
@@ -747,7 +747,7 @@ async function main() {
     backorderedIntervals.every(
       ({ evaluation }) =>
         evaluation.payableBasisValue === "0.00" &&
-        evaluation.paymentStatus === "no_balance_due"
+        evaluation.paymentStatus === "balance_due" && evaluation.hasDeliverableItems === false
     ),
     "7. Backordered through 8-day contributes no payable basis at every interval",
     failures
@@ -954,10 +954,10 @@ async function main() {
   assert(
     unpaidZero.paymentStatus === "no_balance_due" &&
       unpaidNegative.paymentStatus === "no_balance_due" &&
-      threshold.amountDueNowRounded === "0.00" &&
-      threshold.depositCoversCurrentDelivery === true &&
-      threshold.paymentStatus === "no_balance_due",
-    "13/14/15. Zero, negative, and deposit-covered threshold due all return no_balance_due",
+      threshold.amountDueNowRounded === "332.00" &&
+      threshold.depositCoversCurrentDelivery === null &&
+      threshold.paymentStatus === "balance_due",
+    "13/14/15. Zero and negative balances clear; any ERP balance above threshold remains due",
     failures
   );
 

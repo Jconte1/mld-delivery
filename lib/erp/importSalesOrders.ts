@@ -400,6 +400,13 @@ function getConfirmVia(fullOrder: unknown) {
   );
 }
 
+function getConfirmWith(fullOrder: unknown) {
+  return firstString(
+    getString(getNestedField(fullOrder, ["custom", "Document", "AttributeCONFIRMWTH"])),
+    firstStringField(fullOrder, ["ConfirmWith", "ConfirmedWith", "AttributeCONFIRMWTH", "SOOrder_AttributeCONFIRMWTH", "SOOrder.AttributeCONFIRMWTH"])
+  );
+}
+
 function getAcumaticaOneWeekConfirmed(fullOrder: unknown) {
   const customValue = getNestedField(fullOrder, ["custom", "Document", "AttributeONEWEEKCON"]);
   const parsedCustomValue = getBooleanValue(customValue);
@@ -807,6 +814,7 @@ export async function importSalesOrdersForLineRequestedOn(
               locationDescription,
               buyerGroup: getBuyerGroup(fullOrder),
               confirmVia: getConfirmVia(fullOrder),
+              confirmWith: getConfirmWith(fullOrder),
               acumaticaOneWeekConfirmed: getAcumaticaOneWeekConfirmed(fullOrder),
               salespersonNumber: getSalespersonNumber(fullOrder),
               turnInDate: getDateValue(getField(fullOrder, "Date")),

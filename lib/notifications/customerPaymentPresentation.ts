@@ -5,7 +5,7 @@ export function customerPaymentVisible(interval: string | null | undefined) {
 }
 
 export function currentCustomerPaymentAmount(payment: DeliveryGroupPaymentEvaluation) {
-  if (payment.paymentStatus !== "balance_due" || payment.calculationWarnings.length ||
+  if (payment.hasDeliverableItems === false || payment.paymentStatus !== "balance_due" || payment.calculationWarnings.length ||
       !isMeaningfulDeliveryPaymentAmount(payment.amountDueNowRounded)) {
     throw new Error("payment_amount_not_due_or_calculation_blocked");
   }

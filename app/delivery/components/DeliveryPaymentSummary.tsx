@@ -2,6 +2,7 @@ import { isMeaningfulDeliveryPaymentAmount } from "@/lib/delivery-payment/delive
 import { formatCurrencyAmount } from "@/lib/notifications/helpers";
 
 export type DeliveryPaymentSummaryInput = {
+  hasDeliverableItems?: boolean;
   paymentApplicabilityStatus?: string | null;
   paymentStatus: string;
   amountDueNowRounded?: string | null;
@@ -13,6 +14,7 @@ export type DeliveryPaymentSummaryInput = {
 export function deliveryHasBalanceDue(payment: DeliveryPaymentSummaryInput) {
   return (
     payment.paymentApplicabilityStatus !== "not_applicable_terms" &&
+    payment.hasDeliverableItems !== false &&
     payment.paymentStatus === "balance_due" &&
     isMeaningfulDeliveryPaymentAmount(payment.amountDueNowRounded)
   );
@@ -54,8 +56,8 @@ export function DeliveryPaymentSummary({
               {formatCurrencyAmount(payment.amountDueNowRounded)}
             </dd>
             <dd className="mt-2 text-xs leading-5 text-zinc-500">
-              Balance owed is based on items expected to be available for this delivery. You
-              will not be asked to pay for backordered items at this time.
+              Your remaining order balance must be paid before delivery, including items
+              scheduled for a later delivery.
             </dd>
           </div>
         ) : null}

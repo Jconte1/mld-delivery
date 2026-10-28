@@ -31,7 +31,7 @@ for (const patch of blockedPayments) {
   assert.throws(() => currentCustomerPaymentAmount({ ...payment, ...patch }), /not_due_or_calculation_blocked/);
 }
 const page = readFileSync("app/details/[token]/page.tsx", "utf8");
-assert.ok(page.includes("showPayment ? await getDeliveryGroupPaymentEvaluation(group.id) : null"));
+assert.ok(page.includes("showPayment ? await getFreshDeliveryGroupPaymentEvaluation(group.id) : null"));
 assert.ok(page.includes("{payment ? <DeliveryPaymentSummary"));
 for (const field of ["detailsLinkId: loaded.detailsLink.id", "orderId: order.id", "deliveryGroupId: group.id", "deliveryDate: loaded.detailsLink.deliveryDate"]) assert.ok(page.includes(field));
 const dispatcher = readFileSync("lib/notifications/deliveryNotificationDispatcher.ts", "utf8");

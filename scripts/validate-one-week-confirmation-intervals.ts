@@ -103,6 +103,7 @@ function group(params: { id: string; orderNumber: string; deliveryDate: string }
       internalLifecycleStatus: "ACTIVE",
       buyerGroup: "Appliances",
       confirmVia: "WEBPAGE",
+      confirmWith: "Customer",
       acumaticaOneWeekConfirmed: false,
       salespersonNumber: "123",
       customerId: "CUST",
@@ -219,8 +220,8 @@ async function main() {
     failures
   );
   assert(
-    eight.includes("sourceInterval: NotificationIntervalType.DAY_8"),
-    "8-day no-balance path records DAY_8 as ONEWEEKCON source interval",
+    !eight.includes("evaluateAndRecordDeliveryTenDayConfirmation"),
+    "8-day never initiates a clearance writeback",
     failures
   );
   assert(
@@ -238,7 +239,7 @@ async function main() {
     getSalespersonContactMap: async () => new Map(),
   });
   assert(summary12.eventsSkipped === 1, "12-day no-balance group remains skipped", failures);
-  assert(summary12.eventReports[0]?.reasonSkipped === "no_balance_due", "12-day no-balance skip reason remains", failures);
+  assert(summary12.eventReports[0]?.reasonSkipped === "payment_cleared_existing_notification", "12-day reuses qualifying evidence without extra reminder", failures);
   assert(summary12.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN", "12-day dry-run reports ONEWEEKCON dry-run", failures);
 
   const summary10 = await create10DayDeliveryPaymentRequestEvents({
@@ -259,7 +260,7 @@ async function main() {
     getSalespersonContactMap: async () => new Map(),
   });
   assert(summary10.eventsSkipped === 1, "10-day no-balance group remains skipped", failures);
-  assert(summary10.eventReports[0]?.reasonSkipped === "no_balance_due", "10-day no-balance skip reason remains", failures);
+  assert(summary10.eventReports[0]?.reasonSkipped === "payment_cleared_existing_notification", "10-day reuses qualifying evidence without extra reminder", failures);
   assert(summary10.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN", "10-day dry-run reports ONEWEEKCON dry-run", failures);
 
   const summary8 = await create8DayPaymentEnforcementEvents({
@@ -281,7 +282,7 @@ async function main() {
   });
   assert(summary8.paymentDueCount === 0, "8-day no-balance group does not enter enforcement", failures);
   assert(summary8.eventReports[0]?.renderedMessagePreview === "no_balance_due", "8-day no-balance report remains clear", failures);
-  assert(summary8.eventReports[0]?.tenDayConfirmationStatus === "DRY_RUN", "8-day dry-run reports ONEWEEKCON dry-run", failures);
+  assert(summary8.eventReports[0]?.tenDayConfirmationStatus == null, "8-day has no clearance evaluation", failures);
 
   // Payment clearance alone must not authorize a writeback without a real eligible send.
   const { evaluateAndRecordDeliveryTenDayConfirmation } = await import("../lib/notifications/deliveryTenDayConfirmation");
@@ -292,7 +293,7 @@ async function main() {
         deliveryGroup: g, payment: payment(), sourceInterval, dryRun: true,
         prismaClient: fakeClient([g], sent, optedOut) as never,
       });
-      assert(result.acumaticaWritebackStatus === expected, `${sourceInterval} sent=${sent} optedOut=${optedOut}: ${result.acumaticaWritebackStatus}`, failures);
+      assert(result.acumaticaWritebackStatus === (sourceInterval === "DAY_8" ? "REFUSED" : expected), `${sourceInterval} sent=${sent} optedOut=${optedOut}: ${result.acumaticaWritebackStatus}`, failures);
     }
   }
 

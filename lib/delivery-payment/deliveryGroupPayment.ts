@@ -116,6 +116,10 @@ export type DeliveryGroupPaymentLineEvaluation = {
 };
 
 export type DeliveryGroupPaymentEvaluation = {
+  paymentCalculationMethod?: "ERP_UNPAID_BALANCE";
+  hasDeliverableItems?: boolean;
+  deliveryEligibilityReason?: string | null;
+  deliveryValueWarnings?: string[];
   orderDeliveryGroupId: string;
   orderId: string;
   orderType: string;
@@ -164,21 +168,12 @@ export const APPROVED_DELIVERY_PAYMENT_TERMS = ["PIF", "PP", "PPP", "PPT"] as co
 
 const ELIGIBLE_PAYMENT_TERMS = new Set<string>(APPROVED_DELIVERY_PAYMENT_TERMS);
 const MEANINGFUL_BALANCE_THRESHOLD = TWO * SCALE;
-const DOWN_PAYMENT_RATE_NUMERATOR = BigInt(45);
-const DOWN_PAYMENT_RATE_DENOMINATOR = BigInt(100);
 const DELIVERABLE_STOCK_ITEM_TYPE = "F";
 const NON_STOCK_ITEM_TYPE = "N";
-const FREIGHT_DELIVERY_CHARGE_TYPE = "freight_delivery";
 const PAYABLE_STOCK_READINESS_STATUSES = new Set([
   "ready",
   "expected_on_time",
   "partially_allocated",
-]);
-const PAYMENT_GATED_INTERVALS = new Set<NotificationIntervalType>([
-  NotificationIntervalType.DAY_14,
-  NotificationIntervalType.DAY_12,
-  NotificationIntervalType.DAY_10,
-  NotificationIntervalType.DAY_8,
 ]);
 
 export type DeliveryGroupPaymentEvaluationOptions = {
@@ -430,16 +425,6 @@ function payableStockQuantity(params: {
   return { quantity: openQty, reason: null };
 }
 
-function shouldAllocateFreightDeliveryCharges(
-  options: DeliveryGroupPaymentEvaluationOptions | undefined
-) {
-  return (
-    Boolean(options?.allocateFreightDeliveryCharges) &&
-    Boolean(options?.sourceInterval) &&
-    PAYMENT_GATED_INTERVALS.has(options?.sourceInterval as NotificationIntervalType)
-  );
-}
-
 export function normalizeDeliveryPaymentTerms(value: string | null | undefined) {
   return value?.trim().toUpperCase() || null;
 }
@@ -505,7 +490,6 @@ export function evaluateDeliveryGroupPayment(
     addWarning("Order has taxTotal but no TaxDetails rows; effective tax treated as 0.");
   }
 
-  let taxCalculationBlocked = false;
   let currentDeliveryGroupMerchandiseValue = ZERO;
   let currentDeliveryGroupTaxAmount: ScaledDecimal | null = ZERO;
   let completedValueBeforeCurrentDelivery: ScaledDecimal | null = ZERO;
@@ -617,7 +601,6 @@ export function evaluateDeliveryGroupPayment(
     let payableStockTaxAmount: ScaledDecimal | null = ZERO;
 
     if (taxRate.blocked || taxRate.rate === null) {
-      taxCalculationBlocked = true;
       currentDeliveryGroupTaxAmount = null;
       completedValueBeforeCurrentDelivery = null;
       payableStockValue = null;
@@ -724,71 +707,29 @@ export function evaluateDeliveryGroupPayment(
         assignedFreightDeliveryChargeValue +
         newlyAssignedFreightDeliveryChargeValue;
 
-  let remainingUndeliveredValueAfterCurrentDelivery: ScaledDecimal | null = null;
-  let creditAfterCurrentDelivery: ScaledDecimal | null = null;
-  let requiredDownOnRemaining: ScaledDecimal | null = null;
   let amountDueNow: ScaledDecimal | null = null;
-  let depositCoverageBeforeCurrentDelivery: ScaledDecimal | null = null;
-  let depositCoversCurrentDelivery: boolean | null = null;
+  const calculationWarnings: string[] = [];
+  const hasDeliverableItems = lineEvaluations.some(line => line.includedInCurrentDeliveryGroup &&
+    line.itemType === DELIVERABLE_STOCK_ITEM_TYPE && (parseScaledDecimal(line.openQty) ?? ZERO) > ZERO &&
+    (line.externalStockReadinessMatched || line.readinessStatus === "ready" ||
+      line.readinessStatus === "expected_on_time" || (line.readinessStatus === "partially_allocated" &&
+        (parseScaledDecimal(line.activeAllocatedQty) ?? ZERO) > ZERO)));
 
-  if (
-    paymentApplicabilityStatus === "applicable" &&
-    (orderTotal === null || unpaidBalance === null || paidToDate === null)
-  ) {
+  if (!paymentTerms || (eligibleTerms && unpaidBalance === null)) {
     paymentStatus = "calculation_blocked";
     urgencyStatus = "not_applicable";
-    addWarning("Payment calculation blocked: orderTotal or unpaidBalance is missing.");
-  } else if (paymentApplicabilityStatus === "applicable" && taxCalculationBlocked) {
-    paymentStatus = "calculation_blocked";
-    urgencyStatus = "not_applicable";
-  } else if (
-    paymentApplicabilityStatus === "applicable" &&
-    currentDeliveryGroupValue !== null &&
-    currentDeliveryGroupValue <= ZERO
-  ) {
-    paymentStatus = "no_balance_due";
-    urgencyStatus = "reminder_only";
-  } else if (
-    paymentApplicabilityStatus === "applicable" &&
-    orderTotal !== null &&
-    unpaidBalance !== null &&
-    paidToDate !== null &&
-    currentDeliveryGroupValue !== null &&
-    completedValueBeforeCurrentDelivery !== null
-  ) {
-    remainingUndeliveredValueAfterCurrentDelivery = clampAtZero(
-      orderTotal - completedValueBeforeCurrentDelivery - currentDeliveryGroupValue
-    );
-    depositCoverageBeforeCurrentDelivery =
-      paidToDate - completedValueBeforeCurrentDelivery;
-    creditAfterCurrentDelivery =
-      paidToDate - completedValueBeforeCurrentDelivery - currentDeliveryGroupValue;
-    depositCoversCurrentDelivery = creditAfterCurrentDelivery >= ZERO;
-
-    if (depositCoversCurrentDelivery) {
-      amountDueNow = ZERO;
-      paymentStatus = "no_balance_due";
-      urgencyStatus = "reminder_only";
-    } else {
-      requiredDownOnRemaining =
-        (remainingUndeliveredValueAfterCurrentDelivery * DOWN_PAYMENT_RATE_NUMERATOR +
-          DOWN_PAYMENT_RATE_DENOMINATOR / TWO) /
-        DOWN_PAYMENT_RATE_DENOMINATOR;
-      amountDueNow = requiredDownOnRemaining - creditAfterCurrentDelivery;
-      amountDueNow = clampAtZero(amountDueNow);
-      if (amountDueNow > unpaidBalance) amountDueNow = unpaidBalance;
-
-      if (amountDueNow > MEANINGFUL_BALANCE_THRESHOLD) {
-        paymentStatus = "balance_due";
-        urgencyStatus = "payment_required";
-      } else {
-        paymentStatus = "no_balance_due";
-        urgencyStatus = "reminder_only";
-      }
-    }
+    calculationWarnings.push("Payment calculation blocked: payment terms or unpaid balance is missing/invalid.");
+  } else if (eligibleTerms && unpaidBalance !== null) {
+    amountDueNow = unpaidBalance > MEANINGFUL_BALANCE_THRESHOLD ? unpaidBalance : ZERO;
+    paymentStatus = amountDueNow > ZERO ? "balance_due" : "no_balance_due";
+    urgencyStatus = amountDueNow > ZERO ? "payment_required" : "reminder_only";
   }
 
   return {
+    paymentCalculationMethod: "ERP_UNPAID_BALANCE",
+    hasDeliverableItems,
+    deliveryEligibilityReason: hasDeliverableItems ? null : "no_deliverable_items",
+    deliveryValueWarnings: warnings,
     orderDeliveryGroupId: input.orderDeliveryGroupId,
     orderId: input.orderId,
     orderType: input.orderType,
@@ -803,13 +744,11 @@ export function evaluateDeliveryGroupPayment(
     currentDeliveryGroupTaxAmount: moneyOrNull(currentDeliveryGroupTaxAmount),
     currentDeliveryGroupValue: moneyOrNull(currentDeliveryGroupValue),
     completedValueBeforeCurrentDelivery: moneyOrNull(completedValueBeforeCurrentDelivery),
-    depositCoverageBeforeCurrentDelivery: moneyOrNull(depositCoverageBeforeCurrentDelivery),
-    depositCoversCurrentDelivery,
-    remainingUndeliveredValueAfterCurrentDelivery: moneyOrNull(
-      remainingUndeliveredValueAfterCurrentDelivery
-    ),
-    creditAfterCurrentDelivery: moneyOrNull(creditAfterCurrentDelivery),
-    requiredDownOnRemaining: moneyOrNull(requiredDownOnRemaining),
+    depositCoverageBeforeCurrentDelivery: null,
+    depositCoversCurrentDelivery: null,
+    remainingUndeliveredValueAfterCurrentDelivery: null,
+    creditAfterCurrentDelivery: null,
+    requiredDownOnRemaining: null,
     amountDueNow: amountDueNow === null ? null : formatExactMoney(amountDueNow),
     amountDueNowRounded: moneyOrNull(amountDueNow),
     payableStockValue: moneyOrNull(payableStockValue) ?? "0.00",
@@ -820,7 +759,7 @@ export function evaluateDeliveryGroupPayment(
     paymentApplicabilityStatus,
     paymentStatus,
     urgencyStatus,
-    calculationWarnings: warnings,
+    calculationWarnings,
     lines: lineEvaluations,
   };
 }
@@ -875,91 +814,15 @@ function orderLinePaymentWhere(): Prisma.OrderLineWhereInput {
   };
 }
 
-function getUnallocatedFreightDeliveryChargeLines(input: DeliveryGroupPaymentInput) {
-  const allocatedLineIds = new Set(
-    (input.freightDeliveryChargeAllocations ?? []).map((allocation) => allocation.orderLineId)
-  );
-  return input.lines.filter(
-    (line) =>
-      isFreightDeliveryChargeLine(line) &&
-      !allocatedLineIds.has(line.id) &&
-      freightDeliveryOpenAmount(line) > ZERO
-  );
-}
-
-function chargeAllocationDelegate(client: DeliveryPaymentPrismaClient) {
-  const delegate = client.deliveryGroupPaymentChargeAllocation;
-  if (!delegate) {
-    throw new Error(
-      "DeliveryGroupPaymentChargeAllocation delegate is unavailable; run prisma generate after applying the payable-basis schema change."
-    );
-  }
-  return delegate;
-}
-
-async function refreshPaymentChargeAllocations(params: {
-  client: DeliveryPaymentPrismaClient;
-  orderId: string;
-}) {
-  return chargeAllocationDelegate(params.client).findMany({
-    where: { orderId: params.orderId },
-    select: {
-      orderDeliveryGroupId: true,
-      orderLineId: true,
-      amountIncluded: true,
-      sourceInterval: true,
-    },
-    orderBy: [{ includedAt: "asc" }, { orderLineId: "asc" }],
-  });
-}
-
 async function inputWithFreightDeliveryAllocations(
   deliveryGroup: DeliveryGroupWithPaymentData,
-  client: DeliveryPaymentPrismaClient,
-  options?: DeliveryGroupPaymentEvaluationOptions
+  _client: DeliveryPaymentPrismaClient,
+  _options?: DeliveryGroupPaymentEvaluationOptions
 ) {
-  const input = inputFromDeliveryGroup(deliveryGroup);
-  if (!shouldAllocateFreightDeliveryCharges(options)) {
-    return input;
-  }
-
-  const candidates = getUnallocatedFreightDeliveryChargeLines(input);
-  if (options?.dryRun) {
-    return inputFromDeliveryGroup(deliveryGroup, {
-      newlyAssignedFreightDeliveryChargeLines: candidates,
-    });
-  }
-
-  if (candidates.length > 0) {
-    const includedAt = new Date();
-    await chargeAllocationDelegate(client).createMany({
-      data: candidates.map((line) => ({
-        orderDeliveryGroupId: deliveryGroup.id,
-        orderLineId: line.id,
-        orderId: deliveryGroup.orderId,
-        orderType: deliveryGroup.orderType,
-        orderNumber: deliveryGroup.orderNumber,
-        deliveryDate: deliveryGroup.deliveryDate,
-        lineNbr: line.lineNbr,
-        inventoryId: line.inventoryId,
-        lineDescription: line.lineDescription,
-        chargeType: FREIGHT_DELIVERY_CHARGE_TYPE,
-        amountIncluded: formatMoney(freightDeliveryOpenAmount(line)),
-        sourceInterval: options?.sourceInterval as NotificationIntervalType,
-        includedAt,
-        createdAt: includedAt,
-        updatedAt: includedAt,
-      })),
-      skipDuplicates: true,
-    });
-  }
-
-  return inputFromDeliveryGroup(deliveryGroup, {
-    freightDeliveryChargeAllocations: await refreshPaymentChargeAllocations({
-      client,
-      orderId: deliveryGroup.orderId,
-    }),
-  });
+  // Historical allocations remain descriptive; ERP unpaid balance includes all charges.
+  void _client;
+  void _options;
+  return inputFromDeliveryGroup(deliveryGroup);
 }
 
 async function inputWithExternalStockReadiness(

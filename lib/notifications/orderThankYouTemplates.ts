@@ -1,5 +1,4 @@
 const BRAND_COLOR = "#111827";
-const ACCENT_COLOR = "#dbaa3c";
 
 function escapeHtml(value: unknown) {
   return String(value ?? "")
@@ -61,13 +60,7 @@ export function renderWillCallThankYou(params: {
   buyerGroup?: string | null;
   customerName?: string | null;
   locationName?: string | null;
-  url: string;
-  existingAccount: boolean;
 }) {
-  const action = params.existingAccount
-    ? "Please log in to your Will Call account"
-    : "Finish your Will Call account setup";
-  const text = `MLD: Thank you for your purchase. Order ${params.orderNumber}. ${action} here: ${params.url} We will text you with any changes to your order. Reply STOP to opt out.`;
   const orderType = String(params.orderType || "").trim().toUpperCase();
   const orderGroup = String(params.buyerGroup || "").trim() ||
     (["PG", "PL"].includes(orderType) ? "Plumbing" :
@@ -76,6 +69,9 @@ export function renderWillCallThankYou(params: {
   const customer = String(params.customerName || "Customer").trim();
   const location = String(params.locationName || "").trim();
   const includeLocation = location && !["MAIN", "PRIMARY LOCATION"].includes(location.toUpperCase());
+  const orderDescription = `${orderGroup} order #${params.orderNumber} for ${customer}${includeLocation ? ` / ${location}` : ""}`;
+  const nextStep = "We will let you know when your order is ready for pickup.";
+  const text = `MLD: Thank you for your purchase.\n\nYour ${orderDescription} has been received.\n\n${nextStep}\n\nReply STOP to opt out.`;
   const subject = [orderGroup, params.orderNumber, customer, includeLocation ? location : null]
     .filter(Boolean)
     .join(" | ");
@@ -84,9 +80,8 @@ export function renderWillCallThankYou(params: {
     textBody: text,
     htmlBody: emailShell({
       title: "Thank you for your purchase",
-      preheader: `Order ${params.orderNumber} has been confirmed.`,
-      content: `<p style="font-size:15px;line-height:1.6">Your ${escapeHtml(orderGroup)} order ${escapeHtml(params.orderNumber)} for ${escapeHtml(customer)}${includeLocation ? ` / ${escapeHtml(location)}` : ""} has been confirmed and is being processed.</p><p style="font-size:15px;line-height:1.6">To track product, order status, and schedule pickup, ${escapeHtml(action.toLowerCase())}.</p>`,
-      cta: `<a href="${escapeHtml(params.url)}" style="display:inline-block;background:${ACCENT_COLOR};color:#fff;text-decoration:none;padding:12px 18px">${params.existingAccount ? "Log In To Will Call" : "Open Will Call"}</a>`,
+      preheader: `Order ${params.orderNumber} has been received.`,
+      content: `<p style="font-size:15px;line-height:1.6">Your ${escapeHtml(orderDescription)} has been received.</p><p style="font-size:15px;line-height:1.6">${nextStep}</p>`,
     }),
   };
 }

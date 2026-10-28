@@ -1,4 +1,4 @@
-import { getDeliveryGroupPaymentEvaluation } from "@/lib/delivery-payment/deliveryGroupPayment";
+import { getFreshDeliveryGroupPaymentEvaluation } from "@/lib/notifications/freshDeliveryPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import {
   formatCustomerFriendlyDate,
@@ -104,7 +104,7 @@ export default async function DeliveryDetailsPage({ params, searchParams }: Page
     );
   }
 
-  // Keep this details page read-only during render; do not update lastViewedAt here.
+  // Viewing a payment interval refreshes the scoped ERP order, without recording a response.
   const requestedEvent = (await searchParams).event;
   const event = await prisma.notificationEvent.findFirst({
     where: {
@@ -119,8 +119,13 @@ export default async function DeliveryDetailsPage({ params, searchParams }: Page
     select: { intervalType: true },
   });
   const showPayment = customerPaymentVisible(event?.intervalType);
+  let payment: Awaited<ReturnType<typeof getFreshDeliveryGroupPaymentEvaluation>> | null = null;
+  try {
+    payment = showPayment ? await getFreshDeliveryGroupPaymentEvaluation(group.id) : null;
+  } catch {
+    return <DeliveryInfoState title="Current delivery details are unavailable" message="We could not verify your current balance and delivery details. Please try again or contact MLD." />;
+  }
   const readiness = await getDeliveryGroupReadiness(group.id);
-  const payment = showPayment ? await getDeliveryGroupPaymentEvaluation(group.id) : null;
   const scheduledDateLabel = formatCustomerFriendlyDate(group.deliveryDate);
   const jobName = formatJobName({
     customerDescription: order.customerDescription,
@@ -128,7 +133,7 @@ export default async function DeliveryDetailsPage({ params, searchParams }: Page
   });
   const jobAddress = formatJobAddress(order.address ?? {}) || "the job site";
   const deliveryDescription = order.buyerGroup ? `${order.buyerGroup} delivery` : "Delivery";
-  const lastUpdated = group.lastSeenAt ?? group.lastSyncedAt ?? order.lastSyncedAt ?? null;
+  const lastUpdated = payment?.paymentRefreshedAt ? new Date(payment.paymentRefreshedAt) : group.lastSeenAt ?? group.lastSyncedAt ?? order.lastSyncedAt ?? null;
 
   return (
     <main className="min-h-screen bg-zinc-50 text-zinc-950">

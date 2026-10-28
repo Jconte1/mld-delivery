@@ -363,8 +363,8 @@ async function main() {
     failures
   );
   assert(
-    stockVsBackorder.amountDueNowRounded === "470.00",
-    "1. Amount due is calculated from payable basis after deposit coverage is exhausted",
+    stockVsBackorder.amountDueNowRounded === "800.00",
+    "1. Full ERP unpaid balance is due even with backorders",
     failures
   );
   assert(
@@ -436,7 +436,7 @@ async function main() {
   });
   assert(
     partialWithoutAllocation.payableBasisValue === "0.00" &&
-      partialWithoutAllocation.paymentStatus === "no_balance_due",
+      partialWithoutAllocation.paymentStatus === "balance_due" && partialWithoutAllocation.hasDeliverableItems === false,
     "6. Partially allocated lines with activeAllocatedQty <= 0 are excluded",
     failures
   );
@@ -590,8 +590,8 @@ async function main() {
   );
 
   assert(
-    ordinaryNonStock.paymentStatus === "no_balance_due",
-    "18. payableBasisValue <= 0 returns no_balance_due",
+    ordinaryNonStock.paymentStatus === "balance_due" && ordinaryNonStock.hasDeliverableItems === false,
+    "18. No deliverable items defers demand without clearing the order balance",
     failures
   );
 
@@ -608,9 +608,9 @@ async function main() {
     lines: [line({ id: "threshold_due", lineNbr: 1, discountedUnitPrice: "998.00" })],
   });
   assert(
-    thresholdDue.amountDueNowRounded === "1.90" &&
-      thresholdDue.paymentStatus === "no_balance_due",
-    "20. amountDueNow <= threshold returns no_balance_due",
+    thresholdDue.amountDueNowRounded === "3.00" &&
+      thresholdDue.paymentStatus === "balance_due",
+    "20. ERP balance above threshold is due without line-value offsets",
     failures
   );
 
@@ -629,12 +629,12 @@ async function main() {
     activeOrderLineIds: ["covered_delivery"],
   });
   assert(
-    depositCoversCurrentDelivery.depositCoverageBeforeCurrentDelivery === "25000.00" &&
-      depositCoversCurrentDelivery.depositCoversCurrentDelivery === true &&
-      depositCoversCurrentDelivery.paymentStatus === "no_balance_due" &&
-      depositCoversCurrentDelivery.amountDueNowRounded === "0.00" &&
+    depositCoversCurrentDelivery.depositCoverageBeforeCurrentDelivery === null &&
+      depositCoversCurrentDelivery.depositCoversCurrentDelivery === null &&
+      depositCoversCurrentDelivery.paymentStatus === "balance_due" &&
+      depositCoversCurrentDelivery.amountDueNowRounded === "25000.00" &&
       depositCoversCurrentDelivery.requiredDownOnRemaining === null,
-    "21. Deposit covering current delivery bypasses 45% remaining-open enforcement",
+    "21. Deposit covering this delivery does not waive the remaining order balance",
     failures
   );
 
@@ -653,12 +653,12 @@ async function main() {
     activeOrderLineIds: ["short_delivery"],
   });
   assert(
-    depositShortCurrentDelivery.depositCoverageBeforeCurrentDelivery === "25000.00" &&
-      depositShortCurrentDelivery.depositCoversCurrentDelivery === false &&
-      depositShortCurrentDelivery.requiredDownOnRemaining === "10800.00" &&
-      depositShortCurrentDelivery.amountDueNowRounded === "11800.00" &&
+    depositShortCurrentDelivery.depositCoverageBeforeCurrentDelivery === null &&
+      depositShortCurrentDelivery.depositCoversCurrentDelivery === null &&
+      depositShortCurrentDelivery.requiredDownOnRemaining === null &&
+      depositShortCurrentDelivery.amountDueNowRounded === "25000.00" &&
       depositShortCurrentDelivery.paymentStatus === "balance_due",
-    "22. Current delivery exceeding remaining deposit falls back to 45% remaining-open enforcement",
+    "22. Delivery size does not change the full unpaid balance",
     failures
   );
 
@@ -686,12 +686,12 @@ async function main() {
     activeOrderLineIds: ["current_after_completed"],
   });
   assert(
-    completedValueConsumesDeposit.depositCoverageBeforeCurrentDelivery === "15000.00" &&
-      completedValueConsumesDeposit.depositCoversCurrentDelivery === false &&
-      completedValueConsumesDeposit.requiredDownOnRemaining === "8100.00" &&
-      completedValueConsumesDeposit.amountDueNowRounded === "15100.00" &&
+    completedValueConsumesDeposit.depositCoverageBeforeCurrentDelivery === null &&
+      completedValueConsumesDeposit.depositCoversCurrentDelivery === null &&
+      completedValueConsumesDeposit.requiredDownOnRemaining === null &&
+      completedValueConsumesDeposit.amountDueNowRounded === "25000.00" &&
       completedValueConsumesDeposit.paymentStatus === "balance_due",
-    "23. Completed/shipped value consumes deposit before current delivery coverage is checked",
+    "23. Completed/shipped value does not reduce the ERP balance a second time",
     failures
   );
 

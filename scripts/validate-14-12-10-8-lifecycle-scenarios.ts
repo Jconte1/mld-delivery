@@ -163,9 +163,11 @@ function nextPaymentLifecycleAction(params: {
 }) {
   if (params.acumaticaOneWeekConfirmed) return "SKIP_ALREADY_CONFIRMED";
   if (params.day === 14) {
-    return balanceIsDue(params.evaluation) ? "DAY_14_REMINDER_WITH_PAYMENT" : "DAY_14_REMINDER";
+    return balanceIsDue(params.evaluation) && params.evaluation.hasDeliverableItems !== false
+      ? "DAY_14_REMINDER_WITH_PAYMENT" : "DAY_14_REMINDER";
   }
-  if (!balanceIsDue(params.evaluation)) return "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE";
+  if (!balanceIsDue(params.evaluation)) return params.day === 8 ? "SKIP_PAID_OR_TERMS_NO_ACTION" : "CLEARED_CATCHUP_OR_EXISTING_EVIDENCE";
+  if (params.evaluation.hasDeliverableItems === false) return "SKIP_NO_DELIVERABLE_ITEMS";
   if (params.day === 12) return "DAY_12_PAYMENT_REQUEST";
   if (params.day === 10) return "DAY_10_PAYMENT_REQUEST";
   return "DAY_8_PAYMENT_ENFORCEMENT_ELIGIBLE";
@@ -187,6 +189,7 @@ async function dryRunTenDayStatus(evaluation: DeliveryGroupPaymentEvaluation) {
         orderType: evaluation.orderType,
         orderNumber: evaluation.orderNumber,
         acumaticaOneWeekConfirmed: false,
+        confirmVia: "WEB", confirmWith: "Customer",
       },
     },
     payment: evaluation,
@@ -302,15 +305,15 @@ function sourceGuardScenarios(): Scenario[] {
     {
       group: "Source",
       id: "S4",
-      name: "manual ERP confirmation before dispatch is currently not a direct dispatcher guard",
+      name: "dispatcher rechecks confirmation lifecycle before payment notifications",
       severity: "production_blocker",
       run: () => {
         const failures: string[] = [];
         const dispatcher = read("lib/notifications/deliveryNotificationDispatcher.ts");
         assertIncludes(
           dispatcher,
-          "acumaticaOneWeekConfirmed",
-          "dispatcher should re-check acumaticaOneWeekConfirmed before dispatching 12/10/8 stale payment events",
+          "paymentLifecycleBlockReason(event.order)",
+          "dispatcher must apply both six-week and one-week confirmation checks before dispatch",
           failures
         );
         return done({ manualConfirmationPreDispatchGuard: true }, failures);
@@ -389,14 +392,14 @@ const scenarios: Scenario[] = [
   ...([12, 11, 10, 9, 8] as const).map((paidOnDay, index): Scenario => ({
     group: "B",
     id: `B${index + 2}`,
-    name: `Prepay pays on/before day ${paidOnDay}; payment chain stops and 10-day writeback is eligible`,
+    name: `Prepay pays on/before day ${paidOnDay}; payment demand stops, no day-8 catch-up`,
     severity: "production_blocker",
     run: async () => {
       const p = paidPayment();
       const status = await dryRunTenDayStatus(p);
       const action = nextPaymentLifecycleAction({ day: paidOnDay === 8 ? 8 : 10, evaluation: p });
       const failures: string[] = [];
-      assert(action === "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE", "paid customer should skip payment reminder", failures);
+      assert(action === (paidOnDay === 8 ? "SKIP_PAID_OR_TERMS_NO_ACTION" : "CLEARED_CATCHUP_OR_EXISTING_EVIDENCE"), "paid customer should skip payment demand", failures);
       assert(status === "AWAITING_NOTIFICATION", "paid customer still needs a successful notification", failures);
       return done({ paidOnDay, action, tenDayWritebackStatus: status }, failures);
     },
@@ -465,7 +468,7 @@ const scenarios: Scenario[] = [
       });
       const failures: string[] = [];
       assert(p.payableBasisValue === "0.00", "backordered line should be excluded", failures);
-      assert(p.paymentStatus === "no_balance_due", "all backordered should have no balance due now", failures);
+      assert(p.paymentStatus === "balance_due" && p.hasDeliverableItems === false, "backorders defer demand without clearing the ERP balance", failures);
       return done({ payableBasisValue: p.payableBasisValue, paymentStatus: p.paymentStatus }, failures);
     },
   },
@@ -640,7 +643,7 @@ const scenarios: Scenario[] = [
       });
       const action = nextPaymentLifecycleAction({ day: 12, evaluation: p });
       const failures: string[] = [];
-      assert(action === "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE", "12 should skip if recalculated payable balance is zero", failures);
+      assert(action === "SKIP_NO_DELIVERABLE_ITEMS", "12 should defer unavailable delivery without payment clearance", failures);
       return done({ action, payableBasisValue: p.payableBasisValue }, failures);
     },
   },
@@ -723,7 +726,7 @@ const scenarios: Scenario[] = [
     run: () => {
       const p = payment({ lines: [], activeOrderLineIds: [] });
       const failures: string[] = [];
-      assert(!balanceIsDue(p), "empty delivery group should not be due", failures);
+      assert(balanceIsDue(p) && p.hasDeliverableItems === false, "empty delivery group cannot trigger demand but retains its unpaid balance", failures);
       return done({ paymentStatus: p.paymentStatus, payableBasisValue: p.payableBasisValue }, failures);
     },
   },
@@ -847,11 +850,11 @@ const scenarios: Scenario[] = [
   },
   ...[
     ["J1", "Prepay unpaid reaches 8; hold path eligible", payment(), "DAY_8_PAYMENT_ENFORCEMENT_ELIGIBLE"],
-    ["J2", "Customer pays on day 8 before runner; no hold", paidPayment(), "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE"],
-    ["J6", "Non-prepay reaches 8; no prepayment hold", nonPrepayPayment(), "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE"],
+    ["J2", "Customer pays on day 8 before runner; no hold or clearance", paidPayment(), "SKIP_PAID_OR_TERMS_NO_ACTION"],
+    ["J6", "Non-prepay reaches 8; no hold or catch-up", nonPrepayPayment(), "SKIP_PAID_OR_TERMS_NO_ACTION"],
     [
       "J7",
-      "Prepay zero payable due to all backordered; no hold",
+      "Prepay all backordered; defer hold without clearing balance",
       payment({
         lines: [
           line({
@@ -865,7 +868,7 @@ const scenarios: Scenario[] = [
           }),
         ],
       }),
-      "SKIP_PAYMENT_CLEAR_WRITEBACK_ELIGIBLE",
+      "SKIP_NO_DELIVERABLE_ITEMS",
     ],
   ].map(([id, name, evaluation, expected]) => ({
     group: "J" as const,

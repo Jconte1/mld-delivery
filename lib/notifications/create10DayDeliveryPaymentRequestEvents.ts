@@ -1,4 +1,6 @@
 import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
+import { paymentLifecycleBlockReason, paymentIsCleared } from "./paymentLifecycleEligibility";
+import { render30DayDeliveryReminderSms, render30DayDeliveryReminderEmail } from "./deliveryReminder30Day";
 import {
   getDeliveryGroupPaymentEvaluation,
   isMeaningfulDeliveryPaymentAmount,
@@ -47,6 +49,7 @@ import {
 } from "@/lib/notifications/deliveryPaymentReminder10Day";
 import {
   evaluateAndRecordDeliveryTenDayConfirmation,
+  hasQualifyingTenDayNotification,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
@@ -63,12 +66,17 @@ export const DELIVERY_PAYMENT_REQUEST_10_DAY_INTERVAL_DAYS = 10;
 export const DELIVERY_PAYMENT_REQUEST_10_DAY_REQUESTED_ON_TIME = "09:19:00.000Z";
 
 export const DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS = {
+  confirmationIncomplete: "six_week_confirmation_incomplete",
+  alreadyConfirmed: "one_week_confirmation_already_true",
+  existingClearanceNotification: "payment_cleared_existing_notification",
   deliveryDateWeekend: DELIVERY_DATE_WEEKEND_SKIP_REASON,
   notConfirmedInAcumatica: "not_confirmed_in_acumatica",
   paymentTermsNotEligible: "payment_terms_not_eligible",
   missingOrderTotal: "missing_order_total",
   missingUnpaidBalance: "missing_unpaid_balance",
   noBalanceDue: "no_balance_due",
+  noDeliverableItems: "no_deliverable_items",
+  calculationBlocked: "payment_calculation_blocked",
   noAutomatedChannelAvailable: "no_automated_channel_available",
 } as const;
 
@@ -271,6 +279,7 @@ export function get10DayPaymentSkipReason(params: {
   paymentStatus: string | null | undefined;
   amountDueNowRounded: string | null | undefined;
   calculationWarnings?: string[];
+  hasDeliverableItems?: boolean;
 }): DeliveryPaymentRequest10DaySkipReason | null {
   if (!params.hasOrderTotal) {
     return DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.missingOrderTotal;
@@ -284,6 +293,12 @@ export function get10DayPaymentSkipReason(params: {
     return DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.missingUnpaidBalance;
   }
 
+  if (params.paymentStatus === "calculation_blocked" || (params.calculationWarnings?.length ?? 0) > 0) {
+    return DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.calculationBlocked;
+  }
+  if (params.paymentStatus === "balance_due" && params.hasDeliverableItems === false) {
+    return DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.noDeliverableItems;
+  }
   if (
     params.paymentStatus !== "balance_due" ||
     !amountIsPositive(params.amountDueNowRounded) ||
@@ -365,6 +380,7 @@ export async function find10DayDeliveryPaymentRequestTargetGroups(
           internalLifecycleStatus: true,
           buyerGroup: true,
           confirmVia: true,
+          confirmWith: true,
           acumaticaOneWeekConfirmed: true,
           salespersonNumber: true,
           customerDescription: true,
@@ -590,6 +606,7 @@ export async function create10DayDeliveryPaymentRequestEvents(
       continue;
     }
 
+    // Keep one interval slot across payment/catch-up purposes so reruns cannot send both.
     const dedupeKey = buildNotificationDedupeKey({
       orderType: order.orderType,
       orderNumber: order.orderNumber,
@@ -668,13 +685,14 @@ export async function create10DayDeliveryPaymentRequestEvents(
     }
 
     const acumaticaConfirmVia = normalize10DayConfirmVia(order.confirmVia);
-    if (!acumaticaConfirmVia) {
+    const lifecycleBlock = paymentLifecycleBlockReason(order);
+    if (lifecycleBlock) {
       await skipDeliveryGroup({
         summary,
         client,
         deliveryGroup,
         dedupeKey,
-        reason: DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.notConfirmedInAcumatica,
+        reason: lifecycleBlock,
         dryRun,
         acumaticaConfirmVia: null,
         renderedMessagePreview:
@@ -697,9 +715,11 @@ export async function create10DayDeliveryPaymentRequestEvents(
       paymentStatus: payment.paymentStatus,
       amountDueNowRounded: payment.amountDueNowRounded,
       calculationWarnings: payment.calculationWarnings,
+      hasDeliverableItems: payment.hasDeliverableItems,
     });
 
-    if (paymentSkipReason) {
+    const catchUpReminder = paymentIsCleared(payment);
+    if (paymentSkipReason && !catchUpReminder) {
       const tenDayConfirmation =
         paymentSkipReason === DELIVERY_PAYMENT_REQUEST_10_DAY_SKIP_REASONS.noBalanceDue
           ? await evaluateAndRecordDeliveryTenDayConfirmation({
@@ -725,6 +745,16 @@ export async function create10DayDeliveryPaymentRequestEvents(
       continue;
     }
 
+    if (catchUpReminder && await hasQualifyingTenDayNotification(deliveryGroup, client as typeof prisma)) {
+      const tenDayConfirmation = await evaluateAndRecordDeliveryTenDayConfirmation({
+        deliveryGroup, payment, sourceInterval: NotificationIntervalType.DAY_10, dryRun, prismaClient: client,
+      });
+      await skipDeliveryGroup({ summary, client, deliveryGroup, dedupeKey,
+        reason: "payment_cleared_existing_notification", dryRun, acumaticaConfirmVia, payment,
+        tenDayConfirmation, renderedMessagePreview: "Existing qualifying notification used for clearance; no extra reminder.",
+      });
+      continue;
+    }
     const channelRepair = await selectNotificationChannelWithOptOutRepair({
       client,
       contact: order.contact,
@@ -752,7 +782,7 @@ export async function create10DayDeliveryPaymentRequestEvents(
     }
 
     summary.eligibleDeliveryGroups += 1;
-    summary.paymentDueCount += 1;
+    if (!catchUpReminder) summary.paymentDueCount += 1;
 
     const contactName = formatContactName(order.contact);
     const jobName = formatJobName({
@@ -786,7 +816,10 @@ export async function create10DayDeliveryPaymentRequestEvents(
     }
 
     const amountDueNowRounded = payment.amountDueNowRounded as string;
-    const smsMessage = render10DayDeliveryPaymentReminderSms({
+    const smsRenderer = catchUpReminder ? render30DayDeliveryReminderSms : render10DayDeliveryPaymentReminderSms;
+    const emailRenderer = catchUpReminder ? render30DayDeliveryReminderEmail : render10DayDeliveryPaymentReminderEmail;
+    const smsMessage = smsRenderer({
+      paymentDue: false,
       orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
@@ -799,7 +832,8 @@ export async function create10DayDeliveryPaymentRequestEvents(
       lines: readiness.lines,
       salespersonContact,
     });
-    const emailMessage = render10DayDeliveryPaymentReminderEmail({
+    const emailMessage = emailRenderer({
+      paymentDue: false,
       orderNumber: order.orderNumber,
       contactName,
       buyerGroup: order.buyerGroup,
@@ -861,7 +895,7 @@ export async function create10DayDeliveryPaymentRequestEvents(
           orderNumber: order.orderNumber,
           deliveryDate: deliveryGroup.deliveryDate,
           intervalType: NotificationIntervalType.DAY_10,
-          actionType: NotificationActionType.PAYMENT_REQUEST,
+          actionType: catchUpReminder ? NotificationActionType.DELIVERY_REMINDER : NotificationActionType.PAYMENT_REQUEST,
           dedupeKey,
           selectedChannel: channel.selectedChannel,
           channelReason: channel.channelReason,

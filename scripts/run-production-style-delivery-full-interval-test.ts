@@ -1,4 +1,5 @@
 import ExcelJS from "exceljs";
+import { paymentLifecycleBlockReason, paymentIsCleared } from "../lib/notifications/paymentLifecycleEligibility";
 import { mkdir } from "fs/promises";
 import path from "path";
 
@@ -86,6 +87,7 @@ import { requestedOnFor14DayTargetDate } from "../lib/notifications/create14DayD
 import { getRequestedDeliveryDateRouteNote } from "../lib/notifications/deliveryDateEligibility";
 import {
   evaluateAndRecordDeliveryTenDayConfirmation,
+  hasQualifyingTenDayNotification,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "../lib/notifications/deliveryTenDayConfirmation";
 import { ensurePendingDeliveryConfirmation } from "../lib/notifications/deliveryConfirmationState";
@@ -926,6 +928,8 @@ function paymentDue(payment: DeliveryGroupPaymentEvaluation | null) {
 function paymentSkipReason(config: IntervalConfig, group: DeliveryGroupRecord, payment: DeliveryGroupPaymentEvaluation | null) {
   const total = group.order.total;
   if (!payment) return "payment_calculation_failed";
+  if (payment.paymentStatus === "balance_due" && payment.hasDeliverableItems === false) return "no_deliverable_items";
+  if (["DAY_12", "DAY_10"].includes(config.intervalType) && paymentIsCleared(payment)) return null;
 
   if (config.intervalType === NotificationIntervalType.DAY_12) {
     return get12DayPaymentSkipReason({
@@ -971,8 +975,7 @@ async function oneWeekDryRunPreview(params: {
   if (
     params.config.intervalType !== NotificationIntervalType.DAY_14 &&
     params.config.intervalType !== NotificationIntervalType.DAY_12 &&
-    params.config.intervalType !== NotificationIntervalType.DAY_10 &&
-    params.config.intervalType !== NotificationIntervalType.DAY_8
+    params.config.intervalType !== NotificationIntervalType.DAY_10
   ) {
     return null;
   }
@@ -1138,6 +1141,17 @@ async function evaluateGroup(params: {
     }
   }
 
+  if (["DAY_14", "DAY_12", "DAY_10", "DAY_8"].includes(config.intervalType)) {
+    businessSkipReason = paymentLifecycleBlockReason(order) ?? businessSkipReason;
+  }
+  if (!businessSkipReason && ["DAY_12", "DAY_10"].includes(config.intervalType) &&
+      payment.evaluation && paymentIsCleared(payment.evaluation) && await hasQualifyingTenDayNotification(group, prisma)) {
+    businessSkipReason = "payment_cleared_existing_notification";
+    tenDayPreview = await oneWeekDryRunPreview({ config, group, payment: payment.evaluation });
+    writebackPlanned = Boolean(tenDayPreview?.wouldWrite);
+    writebackDryRun = Boolean(tenDayPreview);
+  }
+
   if (
     !businessSkipReason &&
     config.intervalType === NotificationIntervalType.DAY_14 &&
@@ -1228,7 +1242,8 @@ async function evaluateGroup(params: {
     testRunId: options.testRunId,
     interval: config.key,
     intervalLabel: config.label,
-    actionType: config.actionType,
+    actionType: ["DAY_12", "DAY_10"].includes(config.intervalType) && payment.evaluation && paymentIsCleared(payment.evaluation)
+      ? NotificationActionType.DELIVERY_REMINDER : config.actionType,
     evaluationDate: options.runDate,
     targetDate: deliveryDate,
     orderType: order.orderType,
@@ -1354,14 +1369,14 @@ async function evaluateGroup(params: {
       inventoryIdStorageDeliveryInstallSuppressed:
         shouldSuppressDeliveryItemCustomerEtaAndStatus(line),
       stockListMatchReady: Boolean(line.externalStockReadinessMatched),
-      paymentInclusionStatus: paymentLine?.payableBasisIncluded
+      deliveryAvailabilityInclusionStatus: paymentLine?.payableBasisIncluded
         ? "included"
         : paymentLine
           ? "excluded"
           : null,
-      paymentIncludedQuantity: paymentLine?.payableQuantity ?? null,
-      paymentIncludedAmount: paymentLine?.payableStockMerchandiseValue ?? null,
-      paymentExclusionReason: paymentLine?.payableBasisExclusionReason ?? null,
+      deliveryAvailableQuantity: paymentLine?.payableQuantity ?? null,
+      deliveryAvailableMerchandiseValue: paymentLine?.payableStockMerchandiseValue ?? null,
+      deliveryAvailabilityExclusionReason: paymentLine?.payableBasisExclusionReason ?? null,
     };
   });
 
@@ -1633,6 +1648,13 @@ function renderMessages(params: {
   }
 
   if (config.category === "payment_request") {
+    if (payment && paymentIsCleared(payment)) {
+      const input = { orderNumber: order.orderNumber, contactName, buyerGroup: order.buyerGroup, jobName, jobAddress,
+        deliveryDate: group.deliveryDate, detailsLink: params.detailsLinkUrl, paymentDue: false, salespersonContact: salesperson };
+      const email = render30DayDeliveryReminderEmail(input);
+      return { emailSubject: email.subject, emailBody: email.body, smsBody: render30DayDeliveryReminderSms(input),
+        confirmationUrl: null, shortConfirmationUrl: null, detailsUrl: params.detailsLinkUrl };
+    }
     if (!payment?.amountDueNowRounded) {
       return { emailSubject: null, emailBody: null, smsBody: null, confirmationUrl: null, shortConfirmationUrl: null, detailsUrl: params.detailsLinkUrl };
     }
@@ -1767,12 +1789,15 @@ function paymentRow(params: {
     unpaidBalance: payment?.unpaidBalance ?? params.group.order.total?.unpaidBalance ?? null,
     paymentTerms: payment?.paymentTerms ?? normalizeDeliveryPaymentTerms(params.group.order.total?.paymentTerms ?? null),
     paymentApplicabilityStatus: payment?.paymentApplicabilityStatus ?? null,
-    payableBasisValue: payment?.payableBasisValue ?? null,
+    paymentCalculationMethod: payment?.paymentCalculationMethod ?? null,
+    hasDeliverableItems: payment?.hasDeliverableItems ?? null,
+    deliveryEligibilityReason: payment?.deliveryEligibilityReason ?? null,
+    availableDeliveryMerchandiseValue: payment?.payableBasisValue ?? null,
     amountDueNow: payment?.amountDueNowRounded ?? payment?.amountDueNow ?? null,
-    deliveryGroupPaymentAmount: payment?.currentDeliveryGroupValue ?? null,
-    freightDeliveryChargeAllocationAmount: payment?.assignedFreightDeliveryChargeValue ?? null,
-    backorderedExcludedAmount: money(sum(backorderedExcluded.map((line) => line.lineOpenMerchandiseValue))),
-    etaPendingExcludedAmount: money(sum(etaPendingExcluded.map((line) => line.lineOpenMerchandiseValue))),
+    deliveryGroupValueNotPaymentBasis: payment?.currentDeliveryGroupValue ?? null,
+    historicalFreightAllocationValue: payment?.assignedFreightDeliveryChargeValue ?? null,
+    backorderedOpenValueStillIncludedInBalance: money(sum(backorderedExcluded.map((line) => line.lineOpenMerchandiseValue))),
+    etaPendingOpenValueStillIncludedInBalance: money(sum(etaPendingExcluded.map((line) => line.lineOpenMerchandiseValue))),
     partiallyAllocatedPayableQuantity: sum(partialLines.map((line) => line.payableQuantity)),
     readyPayableQuantity: sum(readyLines.map((line) => line.payableQuantity)),
     expectedOnTimePayableQuantity: sum(expectedOnTimeLines.map((line) => line.payableQuantity)),
@@ -2074,7 +2099,8 @@ async function createSelectedNotificationEvent(params: {
     orderNumber: params.group.order.orderNumber,
     deliveryDate,
     intervalType: params.config.intervalType,
-    actionType: params.config.actionType,
+    actionType: ["DAY_12", "DAY_10"].includes(params.config.intervalType) && params.row.actionType === NotificationActionType.DELIVERY_REMINDER
+      ? NotificationActionType.DELIVERY_REMINDER : params.config.actionType,
     dedupeKey,
     selectedChannel: params.channel,
     channelReason: params.selected.channelReason,

@@ -276,35 +276,6 @@ async function contactForRun(contactId: string, contact: unknown, now: Date, sen
   return { contactId, ...freshContactData(contact), smsOptOuts, emailOptOuts };
 }
 
-async function getWillCallUrl(params: {
-  customerId: string;
-  billingZip: string;
-  email: string;
-  orderNumber: string;
-}) {
-  const baseUrl = process.env.WILLCALL_BACKEND_URL?.trim().replace(/\/+$/, "");
-  const token = process.env.WILLCALL_INVITE_TOKEN?.trim();
-  if (!baseUrl || !token) throw new Error("Missing WILLCALL_BACKEND_URL or WILLCALL_INVITE_TOKEN");
-  const response = await fetch(`${baseUrl}/api/internal/invites/dispatch`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...params, sendEmail: false }),
-  });
-  const body = await response.text();
-  const result = body ? JSON.parse(body) as {
-    registrationUrl?: string;
-    existingAccount?: boolean;
-    message?: string;
-  } : {};
-  if (!response.ok || !result.registrationUrl) {
-    throw new Error(`Will Call invite failed status=${response.status} error=${result.message || "registration URL missing"}`);
-  }
-  return {
-    url: result.registrationUrl,
-    existingAccount: result.existingAccount === true,
-  };
-}
-
 function skippedReason(candidate: ThankYouCandidate, classification: OrderThankYouClassification | null) {
   if (!ACTIVE_STATUSES.has(normalize(candidate.status))) return "status_not_eligible";
   if (!classification) return "unsupported_ship_via";
@@ -534,24 +505,6 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
       }
 
       const deliveryDate = fullOrderRequestedDate(fullOrder, candidate.requestedDeliveryDate);
-      let willCall: { url: string; existingAccount: boolean } | null = null;
-      if (classification === OrderThankYouClassification.WILL_CALL) {
-        const email = contact.email?.trim();
-        if (!candidate.customerId || !candidate.billingZip || !email) {
-          throw new Error("will_call_customer_id_billing_zip_or_email_missing");
-        }
-        willCall = options.send
-          ? await getWillCallUrl({
-              customerId: candidate.customerId,
-              billingZip: candidate.billingZip,
-              email,
-              orderNumber: candidate.orderNumber,
-            })
-          : {
-              url: (process.env.WILLCALL_FRONTEND_URL || "https://mld.com/willcall").replace(/\/+$/, ""),
-              existingAccount: false,
-            };
-      }
       const rendered = classification === OrderThankYouClassification.DELIVERY
         ? renderDeliveryThankYou({
             orderNumber: candidate.orderNumber,
@@ -564,8 +517,6 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
             buyerGroup: candidate.buyerGroup,
             customerName: candidate.customerName,
             locationName: candidate.locationName,
-            url: willCall!.url,
-            existingAccount: willCall!.existingAccount,
           });
       summary.eligible += 1;
       if (!options.send) {
@@ -601,7 +552,7 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
           reportFetchedAt: now,
           fullOrderFetchedAt: now,
           contactFetchedAt: now,
-          willCallUrl: willCall?.url ?? null,
+          willCallUrl: null,
         },
         update: {
           classification,
@@ -620,7 +571,7 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
           reportFetchedAt: now,
           fullOrderFetchedAt: now,
           contactFetchedAt: now,
-          willCallUrl: willCall?.url ?? null,
+          willCallUrl: null,
         },
       });
       const claimed = await prisma.orderThankYouEvent.updateMany({

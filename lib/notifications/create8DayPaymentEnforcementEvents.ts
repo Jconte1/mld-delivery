@@ -1,4 +1,5 @@
 import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
+import { paymentLifecycleBlockReason } from "./paymentLifecycleEligibility";
 import {
   getDeliveryGroupPaymentEvaluation,
   isMeaningfulDeliveryPaymentAmount,
@@ -38,6 +39,7 @@ import {
   formatJobName,
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
+  selectNotificationChannel,
 } from "@/lib/notifications/helpers";
 import { selectNotificationChannelWithOptOutRepair } from "@/lib/notifications/contactOptInWritebackActions";
 import {
@@ -52,7 +54,6 @@ import {
   render8DayPaymentEnforcementInternalSuccess,
 } from "@/lib/notifications/deliveryPaymentEnforcement8Day";
 import {
-  evaluateAndRecordDeliveryTenDayConfirmation,
   type DeliveryTenDayConfirmationEvaluationResult,
 } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
@@ -87,6 +88,8 @@ export const DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS = {
   missingOrderTotal: "missing_order_total",
   missingUnpaidBalance: "missing_unpaid_balance",
   noBalanceDue: "no_balance_due",
+  noDeliverableItems: "no_deliverable_items",
+  calculationBlocked: "payment_calculation_blocked",
   noAutomatedChannelAvailable: "no_automated_channel_available",
   alreadyEnforced: "already_enforced",
   holdActionFailed: "hold_action_failed",
@@ -386,6 +389,7 @@ export function get8DayPaymentEnforcementSkipReason(params: {
   paymentStatus: string | null | undefined;
   amountDueNowRounded: string | null | undefined;
   calculationWarnings?: string[];
+  hasDeliverableItems?: boolean;
 }): DeliveryPaymentEnforcement8DaySkipReason | null {
   if (!params.hasOrderTotal) {
     return DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.missingOrderTotal;
@@ -399,6 +403,12 @@ export function get8DayPaymentEnforcementSkipReason(params: {
     return DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.missingUnpaidBalance;
   }
 
+  if (params.paymentStatus === "calculation_blocked" || (params.calculationWarnings?.length ?? 0) > 0) {
+    return DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.calculationBlocked;
+  }
+  if (params.paymentStatus === "balance_due" && params.hasDeliverableItems === false) {
+    return DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.noDeliverableItems;
+  }
   if (
     params.paymentStatus !== "balance_due" ||
     !amountIsGreaterThanMeaningfulThreshold(params.amountDueNowRounded) ||
@@ -499,6 +509,7 @@ export async function find8DayPaymentEnforcementTargetGroups(
           internalLifecycleStatus: true,
           buyerGroup: true,
           confirmVia: true,
+          confirmWith: true,
           acumaticaOneWeekConfirmed: true,
           salespersonNumber: true,
           customerId: true,
@@ -660,13 +671,13 @@ async function markHoldActionFromQueueResult(params: {
     });
   }
 
-  if (holdQueueResultIsDryRun(params.queueResult)) {
+  if (holdQueueResultIsDryRun(params.queueResult) || params.queueResult.status === "skipped") {
     return params.client.deliveryOrderHoldAction.update({
       where: { id: params.holdActionId },
       data: {
         status: DeliveryOrderHoldActionStatus.SKIPPED,
         queueJobId: params.fallbackJobId ?? undefined,
-        errorMessage: DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.dryRun,
+        errorMessage: params.queueResult.reason ?? DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.dryRun,
         acumaticaResponseSummary: jsonSafe(params.queueResult),
         completedAt: new Date(),
       },
@@ -1292,17 +1303,22 @@ export async function create8DayPaymentEnforcementEvents(
     }
 
     const acumaticaConfirmVia = normalize8DayConfirmVia(order.confirmVia);
-    if (!acumaticaConfirmVia) {
+    const lifecycleBlock = paymentLifecycleBlockReason(order);
+    const holdChannel = selectNotificationChannel(order.contact, mergeNotificationOptOutAddresses(activeOptOutAddresses, {
+      activeSmsOptOutPhones: order.contact.smsOptOuts.map(row => row.phone),
+      activeEmailOptOutEmails: order.contact.emailOptOuts.map(row => row.email),
+    }));
+    const holdBlock = lifecycleBlock ?? (!holdChannel.selectedChannel ? "no_automated_channel_available" : null);
+    if (holdBlock) {
       addSkippedReason(
         summary,
-        DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.notConfirmedInAcumatica
+        holdBlock
       );
       summary.eventReports.push(
         baseReport({
           deliveryGroup,
           acumaticaConfirmVia: null,
-          renderedMessagePreview:
-            DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.notConfirmedInAcumatica,
+          renderedMessagePreview: holdBlock,
         })
       );
       continue;
@@ -1322,26 +1338,16 @@ export async function create8DayPaymentEnforcementEvents(
       paymentStatus: payment.paymentStatus,
       amountDueNowRounded: payment.amountDueNowRounded,
       calculationWarnings: payment.calculationWarnings,
+      hasDeliverableItems: payment.hasDeliverableItems,
     });
 
     if (paymentSkipReason) {
-      const tenDayConfirmation =
-        paymentSkipReason === DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.noBalanceDue
-          ? await evaluateAndRecordDeliveryTenDayConfirmation({
-              deliveryGroup,
-              payment,
-              sourceInterval: NotificationIntervalType.DAY_8,
-              dryRun,
-              prismaClient: client,
-            })
-          : null;
       addSkippedReason(summary, paymentSkipReason);
       summary.eventReports.push(
         baseReport({
           deliveryGroup,
           acumaticaConfirmVia,
           payment,
-          tenDayConfirmation,
           renderedMessagePreview: paymentSkipReason,
         })
       );
@@ -1557,10 +1563,11 @@ export async function create8DayPaymentEnforcementEvents(
     report.queueResultReason = queueResultReason(queueResult);
 
     if (finalHoldAction.status === DeliveryOrderHoldActionStatus.SKIPPED) {
-      summary.holdActionsDryRun += 1;
+      if (holdQueueResultIsDryRun(queueResult ?? {})) summary.holdActionsDryRun += 1;
       summary.holdActionsSkipped += 1;
-      addSkippedReason(summary, DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.dryRun);
-      report.renderedMessagePreview = DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.dryRun;
+      const reason = queueResult?.reason ?? DELIVERY_PAYMENT_ENFORCEMENT_8_DAY_SKIP_REASONS.dryRun;
+      addSkippedReason(summary, reason);
+      report.renderedMessagePreview = reason;
       summary.eventReports.push(report);
       continue;
     }

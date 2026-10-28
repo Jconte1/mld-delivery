@@ -351,12 +351,15 @@ function dryRunNotificationEvent(params: {
   };
 }
 
+import { explicitDeliveryOrderWhere } from "./explicitDeliveryRun";
+
 export async function find42DayDeliveryConfirmationTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryConfirmation42DayClient = prisma
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },

@@ -2041,6 +2041,8 @@ function selectCandidateChannel(
   );
 }
 
+import { explicitDeliveryOrderWhere } from "./explicitDeliveryRun";
+
 async function findNoResponseLifecycleCandidates(params: {
   client: DeliveryConfirmationNoResponseClient;
   deliveryDateFrom: Date;
@@ -2048,6 +2050,7 @@ async function findNoResponseLifecycleCandidates(params: {
 }) {
   const rows = await params.client.deliveryConfirmation.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: {
         gte: params.deliveryDateFrom,
         lte: params.deliveryDateTo,

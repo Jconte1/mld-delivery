@@ -308,12 +308,15 @@ export function is30DayDeliveryGroupEligible(group: DeliveryReminder30DayTargetG
   );
 }
 
+import { explicitDeliveryOrderWhere } from "./explicitDeliveryRun";
+
 export async function find30DayDeliveryReminderTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryReminder30DayClient = prisma
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },

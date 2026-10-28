@@ -303,12 +303,15 @@ function tenDayConfirmationReport(group: DeliveryReminder2DayTargetGroup) {
   };
 }
 
+import { explicitDeliveryOrderWhere } from "./explicitDeliveryRun";
+
 export async function find2DayDeliveryReminderTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryReminder2DayClient = prisma
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },

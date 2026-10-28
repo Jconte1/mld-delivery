@@ -1,5 +1,6 @@
 import { createUnsentEventRecovery, type UnsentEventRecoverySummary } from "./unsentEventRecovery";
 import { paymentLifecycleBlockReason } from "./paymentLifecycleEligibility";
+import { explicitDeliveryOrderWhere, assertExplicitDeliveryOrders } from "./explicitDeliveryRun";
 import {
   getDeliveryGroupPaymentEvaluation,
   isMeaningfulDeliveryPaymentAmount,
@@ -485,6 +486,7 @@ export async function find8DayPaymentEnforcementTargetGroups(
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },
@@ -1231,6 +1233,7 @@ export async function create8DayPaymentEnforcementEvents(
     client
   );
   summary.targetDeliveryGroups = deliveryGroups.length;
+  assertExplicitDeliveryOrders(deliveryGroups);
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 
   const salespersonContactsByNumber = deliveryDateSkipReason

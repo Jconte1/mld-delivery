@@ -1,4 +1,5 @@
 import { currentCustomerPaymentAmount } from "./customerPaymentPresentation";
+import { assertExplicitDeliveryGroup, assertExplicitDeliveryOrders } from "./explicitDeliveryRun";
 import { paymentLifecycleBlockReason, paymentIsCleared } from "./paymentLifecycleEligibility";
 import {
   InternalOrderLifecycleStatus,
@@ -1932,6 +1933,7 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
   const load = async (eventIds: string[], claimed = false) => {
     const events = await client.notificationEvent.findMany({ where: { id: { in: eventIds } }, include: notificationEventInclude });
     if (events.length !== eventIds.length) throw new Error("grouped_event_missing");
+    assertExplicitDeliveryOrders(events);
     const optOuts = await loadActiveNotificationOptOutAddresses(client);
     const members: GroupingCandidate[] = [];
     const messages = new Map<string, RenderedMessage>();
@@ -1974,6 +1976,7 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
   const initial = await load(ids);
   const planned = planDeliveryNotificationGroups(initial.members, scope);
   if (planned.excluded.length) throw new Error("grouped_member_excluded");
+  assertExplicitDeliveryGroup(planned.groups);
   const reports = [];
   for (const group of planned.groups) {
     const first = group.members[0];

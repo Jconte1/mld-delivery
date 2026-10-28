@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "demo": "tsx -r dotenv/config scripts/run-delivery-demo.ts",
+    "validate:delivery-demo": "tsx scripts/validate-delivery-demo.ts",
     "preview:delivery-notification-groups": "tsx -r dotenv/config scripts/preview-delivery-notification-groups.ts",
     "validate:delivery-notification-grouping": "tsx scripts/validate-delivery-notification-grouping.ts",
     "validate:delivery-notification-group-lifecycle": "tsx scripts/validate-delivery-notification-group-lifecycle.ts",

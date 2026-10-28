@@ -210,6 +210,8 @@ function renderSubject(params: {
   });
 }
 
+import { explicitDeliveryOrderWhere } from "./explicitDeliveryRun";
+
 export async function createDeliveryReminderEvents(
   options: CreateDeliveryReminderEventsOptions
 ): Promise<CreateDeliveryReminderEventsSummary> {
@@ -246,6 +248,7 @@ export async function createDeliveryReminderEvents(
 
   const deliveryGroups = await client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: targetDeliveryDate,
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },

@@ -186,6 +186,11 @@ const INTERVAL_CONFIGS: Record<SupportedInterval, IntervalConfig> = {
   },
 };
 
+export function deliveryIntervalConfirmationPhrase(interval: string) {
+  if (!SUPPORTED_INTERVALS.includes(interval as SupportedInterval)) throw new Error("unsupported_demo_interval");
+  return INTERVAL_CONFIGS[interval as SupportedInterval].confirmPhrase;
+}
+
 export type DeliveryIntervalRunOptions = {
   interval: SupportedInterval | null;
   runDate: string | null;
@@ -388,7 +393,7 @@ function verifyPackageScript() {
   }
 }
 
-function preflight(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv = process.env) {
+export function preflightDeliveryInterval(options: DeliveryIntervalRunOptions, env: NodeJS.ProcessEnv = process.env) {
   const failures: string[] = [];
   const config = options.interval ? INTERVAL_CONFIGS[options.interval] : null;
 
@@ -651,7 +656,7 @@ export async function runDeliveryInterval(options: DeliveryIntervalRunOptions) {
   const runId = options.runId ?? (runDate && config ? defaultRunId(runDate, config.interval) : null);
   if (runId) validateRunId(runId);
 
-  preflight(options);
+  preflightDeliveryInterval(options);
   if (!runDate || !runId || !config) throw new Error("Internal preflight error: missing run date, run id, or interval.");
   let migrationStatus = "not checked by in-process API runner";
   if (options.verifyPackageAndMigrations) {

@@ -19,6 +19,7 @@ import {
 import { syncOrderDeliveryGroups } from "@/lib/erp/syncOrderDeliveryGroups";
 import { persistOrderReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import { prisma } from "@/lib/prisma";
+import { explicitDeliveryOrders, assertExplicitDeliveryOrders } from "../notifications/explicitDeliveryRun";
 
 export type ImportSalesOrdersResult = {
   deliveryContactWarnings?: Array<{ orderType: string; orderNumber: string; reason: string }>;
@@ -100,6 +101,7 @@ export type ImportSalesOrdersForLineRequestedOnOptions = {
   erpClient?: DeliveryErpClient;
   orderLookups?: ImportSalesOrderLookup[];
   includeUnqualifiedOrderLookups?: boolean;
+  explicitOrdersOnly?: boolean;
 };
 
 const DEFAULT_ERP_IMPORT_TRANSACTION_TIMEOUT_MS = 30_000;
@@ -360,7 +362,7 @@ function getDateValue(field: unknown): Date | null {
   return key ? dateFromKey(key) : null;
 }
 
-function getOrderIdentity(row: unknown) {
+export function getOrderIdentity(row: unknown) {
   return {
     orderNumber: getString(getField(row, "OrderNbr")),
     orderType: getString(getField(row, "OrderType")),
@@ -504,7 +506,14 @@ export async function importSalesOrdersForLineRequestedOn(
     DEFAULT_ERP_IMPORT_TRANSACTION_TIMEOUT_MS
   );
 
-  const qualifyingRows = await client.fetchQualifyingSalesOrdersByLineRequestedOn(requestedOn);
+  const scope = explicitDeliveryOrders();
+  const lookups = options.orderLookups ?? scope;
+  const explicitOnly = options.explicitOrdersOnly || Boolean(scope);
+  if (explicitOnly && (!lookups?.length || lookups.some(o => !o.orderType || !o.orderNumber))) {
+    throw new Error("explicit_import_requires_order_type_and_number");
+  }
+  if (scope && lookups) assertExplicitDeliveryOrders(lookups);
+  const qualifyingRows = explicitOnly ? [] : await client.fetchQualifyingSalesOrdersByLineRequestedOn(requestedOn);
   result.qualifyingOrdersFetched = qualifyingRows.length;
 
   const qualifyingOrders = new Map<string, OrderIdentity>();
@@ -532,8 +541,8 @@ export async function importSalesOrdersForLineRequestedOn(
     qualifyingOrders.set(orderKey(lookup.orderType, lookup.orderNumber), lookup);
   }
 
-  if (options.includeUnqualifiedOrderLookups) {
-    for (const lookup of options.orderLookups ?? []) {
+  if (options.includeUnqualifiedOrderLookups || explicitOnly) {
+    for (const lookup of lookups ?? []) {
       qualifyingOrders.set(orderKey(lookup.orderType ?? null, lookup.orderNumber), {
         orderNumber: lookup.orderNumber,
         orderType: lookup.orderType ?? null,

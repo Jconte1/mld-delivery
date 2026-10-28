@@ -350,12 +350,15 @@ function tenDayConfirmationReport(
     : {};
 }
 
+import { explicitDeliveryOrderWhere, assertExplicitDeliveryOrders } from "./explicitDeliveryRun";
+
 export async function find12DayDeliveryPaymentRequestTargetGroups(
   targetDeliveryDate: Date | string,
   client: DeliveryPaymentRequest12DayClient = prisma
 ) {
   return client.orderDeliveryGroup.findMany({
     where: {
+      ...explicitDeliveryOrderWhere(),
       deliveryDate: dateFromKey(targetDeliveryDate),
       isActive: true,
       deliveryGroupLines: { some: { isActive: true } },
@@ -510,6 +513,7 @@ export async function create12DayDeliveryPaymentRequestEvents(
     client
   );
   summary.targetDeliveryGroups = deliveryGroups.length;
+  assertExplicitDeliveryOrders(deliveryGroups);
   const activeOptOutAddresses = await loadActiveNotificationOptOutAddresses(client);
 
   const salespersonContactsByNumber = deliveryDateSkipReason

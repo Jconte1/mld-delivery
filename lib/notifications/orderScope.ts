@@ -1,3 +1,5 @@
+import { matchesExplicitDeliveryOrder } from "./explicitDeliveryRun";
+
 export type DeliveryOrderScope = {
   orderType: string;
   orderNumber: string;
@@ -36,6 +38,7 @@ export function deliveryOrderMatchesScope(
   order: { orderType?: string | null; orderNumber?: string | null },
   scope: DeliveryOrderScope | null | undefined
 ) {
+  if (!matchesExplicitDeliveryOrder(order)) return false;
   if (!scope) return true;
   return (
     normalizeDeliveryOrderScopeValue(order.orderType) === scope.orderType &&
@@ -47,7 +50,7 @@ export function filterByDeliveryOrderScope<T extends { orderType?: string | null
   rows: T[],
   scope: DeliveryOrderScope | null | undefined
 ) {
-  return scope ? rows.filter((row) => deliveryOrderMatchesScope(row, scope)) : rows;
+  return rows.filter((row) => deliveryOrderMatchesScope(row, scope));
 }
 
 export function deliveryOrderScopeReport(params: {

@@ -32,7 +32,7 @@ function main() {
   const renderer = read("lib/notifications/deliveryReminder14Day.ts");
 
   const importIndex = shared.indexOf(
-    "summary.importResult = await importSalesOrdersForLineRequestedOn(importRequestedOn)"
+    "summary.importResult = await (options.importSalesOrders ?? importSalesOrdersForLineRequestedOn)(importRequestedOn)"
   );
   const queryIndex = shared.indexOf(
     "const unscopedDeliveryGroups = await find30DayDeliveryReminderTargetGroups"
@@ -123,13 +123,13 @@ function main() {
   );
   assertIncludes(
     shared,
-    "getDeliveryGroupReadiness(deliveryGroup.id)",
+    "(options.getReadiness ?? getDeliveryGroupReadiness)(deliveryGroup.id)",
     "14-day loads all items for this delivery",
     failures
   );
   assertIncludes(
     shared,
-    "getDeliveryGroupPaymentEvaluation(",
+    "(options.getPaymentEvaluation ?? getDeliveryGroupPaymentEvaluation)(",
     "14-day evaluates payment inside combined reminder",
     failures
   );

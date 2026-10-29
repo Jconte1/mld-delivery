@@ -4,6 +4,8 @@
   "private": true,
   "scripts": {
     "demo": "tsx -r dotenv/config scripts/run-delivery-demo.ts",
+    "demo:reset": "tsx -r dotenv/config scripts/reset-delivery-demo.ts",
+    "validate:delivery-demo-reset": "tsx scripts/validate-delivery-demo-reset.ts",
     "validate:delivery-demo": "tsx scripts/validate-delivery-demo.ts",
     "preview:delivery-notification-groups": "tsx -r dotenv/config scripts/preview-delivery-notification-groups.ts",
     "validate:delivery-notification-grouping": "tsx scripts/validate-delivery-notification-grouping.ts",

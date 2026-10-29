@@ -66,3 +66,32 @@ Validation (no real sends or ERP/database access):
 ```powershell
 npm.cmd run validate:delivery-demo
 ```
+
+## Reset between complete scenarios
+
+```powershell
+# Preview only
+npm.cmd run demo:reset -- SO38056
+# Archive and delete identified local demo lifecycle records
+npm.cmd run demo:reset -- SO38056 --apply
+# A shared group must be reset together
+npm.cmd run demo:reset -- SO38056 PL02718 --apply
+```
+
+Only events identified by `demo_` attempt/run IDs are eligible. Mixed production
+history, partial groups, unresolved provider claims and unfinished ERP writebacks
+block deletion. No wildcards, interval-wide cleanup or scheduler-lock deletion exists.
+An archive is saved under ignored `artifacts/delivery-demo-resets/` before an atomic
+reset. The archive contains private customer data; keep it private. Callback/inbound
+audit rows are retained and their deleted-record references are detached.
+
+Reset removes the selected demo events/attempts, confirmation/group links and related
+local hold/clearance/internal-notification state. Old confirmation/group links stop
+working. It does NOT delete orders, items, contacts, opt-outs, stock lists or queue jobs,
+and it does not send messages or undo any ERP writeback. Configure ERP confirmations,
+dates, payments and holds manually for the next scenario. A pending writeback must
+finish first. Queue job IDs are read only to verify completion; no replay or purge.
+
+Do not reset between the initial 42 request and the follow-up touches: they need real
+history. Reset after that entire scenario. Run no other demo for these orders during
+reset. Failed pre-send events with no demo provenance are deliberately not auto-deleted.

@@ -47,3 +47,4 @@ next-env.d.ts
 
 # Operational recap exports contain customer/order information.
 /artifacts/delivery-recap-*
+/artifacts/delivery-demo-resets/

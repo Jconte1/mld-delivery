@@ -5,6 +5,15 @@ import type { DeliveryErpClient } from "../erp/erpClient";
 
 export type PaymentOrderScope = { orderType: string; orderNumber: string; deliveryDate: Date | string };
 
+export function freshPaymentFailureDiagnostic(error: unknown, depth = 0): Record<string, unknown> {
+  if (!(error instanceof Error)) return { name: "UnknownError" };
+  // Upstream response bodies and URLs can contain customer data or credentials.
+  const message = error.message.split(/ body=|\s*\{\s*"/)[0]
+    .replace(/https?:\/\/\S+/g, "[url]").slice(0, 500);
+  return { name: error.name, message,
+    ...(depth < 2 && error.cause instanceof Error ? { cause: freshPaymentFailureDiagnostic(error.cause, depth + 1) } : {}) };
+}
+
 export async function refreshDeliveryPaymentOrder(scope: PaymentOrderScope, ports: {
   erpClient?: DeliveryErpClient; importOrders?: typeof importSalesOrdersForLineRequestedOn;
 } = {}) {
@@ -22,7 +31,9 @@ export async function refreshDeliveryPaymentOrder(scope: PaymentOrderScope, port
   });
   if (!result.successfullyRefreshedOrders?.some(order => order.orderType === scope.orderType &&
       order.orderNumber === scope.orderNumber) || result.failedOrders || result.errors.length) {
-    throw new Error("fresh_payment_import_failed");
+    throw new Error("fresh_payment_import_failed", {
+      cause: new Error(result.errors.map(error => error.reason).join("; ") || "requested_order_not_refreshed"),
+    });
   }
   return result;
 }

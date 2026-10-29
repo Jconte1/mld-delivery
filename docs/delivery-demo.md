@@ -13,7 +13,44 @@ npm.cmd run demo -- 10 SO38056
 npm.cmd run demo -- 8 SO38056
 npm.cmd run demo -- 42 SO38056 PL02718
 npm.cmd run demo -- followup SO38056 PL02718
+npm.cmd run demo -- noresponse SO38056
+npm.cmd run demo -- hold SO38056
 ```
+
+## No-response and hold presentation shortcuts
+
+`noresponse` (or `39`) is an alias for `followup`, not a forced escalation.
+Keep the real initial 42-day send and do not respond or reset between touches.
+The production state machine sends the next missing reminder at 41/40 days,
+then creates the internal escalation at 39 days only when the customer touch
+sequence is complete. Internal escalation requires a configured eligible internal
+recipient. It does not write confirmation attributes or change ERP delivery dates.
+
+For a December 10 delivery initially sent on October 29, these explicit evaluation
+dates let an operator demonstrate the sequence without changing ERP delivery dates:
+
+```powershell
+npm.cmd run demo -- noresponse SO38056 --run-date 2026-10-30
+npm.cmd run demo -- noresponse SO38056 --run-date 2026-10-31
+npm.cmd run demo -- noresponse SO38056 --run-date 2026-11-01
+```
+
+Inspect each result and actual completed touch history before proceeding. These
+are live sends evaluated as those dates, not fake attempts or fake callbacks.
+An already confirmed or date-changed order will not qualify.
+
+`hold` is an alias for interval `8`, supporting one named order only. Configure
+its delivery for run date + 8 days, a prepayment account with fresh unpaid balance
+above $2, the required six-week confirmation fields, an opted-in eligible customer
+contact, and ONEWEEKCON unchecked. Normal item, order and delivery eligibility
+still applies. Earlier reminders are not required. The production path verifies
+the ERP hold before customer/internal hold notifications. A dry-run hold setting
+will not demonstrate a real ERP hold; review the reported outcome. This command
+can place a REAL hold and sends to the actual ERP-selected contact, not an override.
+
+No scheduler resume, migration, new environment switch, or worker rebuild is
+needed for these local CLI aliases. The existing ERP queue worker and deployed
+web response endpoints must still be available.
 
 Configure dates, order status, delivery method, items, primary/delivery contact and
 consent, terms, balances and confirmation fields in ERP first. The command resolves

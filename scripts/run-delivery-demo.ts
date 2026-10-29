@@ -28,7 +28,9 @@ export function demoDiscoveryBlockReason(row: unknown) {
 }
 
 export function parseDemoArgs(args: string[], now = new Date()) {
-  const [action, ...rest] = args;
+  const [requestedAction, ...rest] = args;
+  const action = requestedAction === "noresponse" || requestedAction === "39" ? "followup"
+    : requestedAction === "hold" ? "8" : requestedAction;
   if (action !== "followup") deliveryIntervalConfirmationPhrase(action ?? "");
   const orders: string[] = [];
   let runDate = denverDateTimeParts(now).date;

@@ -3,7 +3,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { evaluateDeliveryGroupPayment, type DeliveryGroupPaymentInput } from "../lib/delivery-payment/deliveryGroupPayment";
 import { currentCustomerPaymentAmount, customerPaymentVisible } from "../lib/notifications/customerPaymentPresentation";
 import { DeliveryPaymentSummary } from "../app/delivery/components/DeliveryPaymentSummary";
-import { refreshDeliveryPaymentOrder } from "../lib/notifications/freshDeliveryPayment";
+import { freshPaymentFailureDiagnostic, refreshDeliveryPaymentOrder } from "../lib/notifications/freshDeliveryPayment";
 import type { DeliveryErpClient } from "../lib/erp/erpClient";
 
 const input: DeliveryGroupPaymentInput = {
@@ -17,6 +17,14 @@ const input: DeliveryGroupPaymentInput = {
 const evaluate = (patch: Partial<DeliveryGroupPaymentInput> = {}) => evaluateDeliveryGroupPayment({ ...input, ...patch });
 
 async function main() {
+  await validateRenderSafeQueuePolling();
+  const diagnostic = freshPaymentFailureDiagnostic(new Error("fresh_payment_import_failed", {
+    cause: new Error('Queue ERP request failed status=500 path=/api/erp/jobs/test body={"private":"customer"}'),
+  }));
+  assert.equal(diagnostic.message, "fresh_payment_import_failed");
+  assert.ok(JSON.stringify(diagnostic).includes("status=500"));
+  assert.ok(!JSON.stringify(diagnostic).includes("private"));
+  assert.ok(!JSON.stringify(freshPaymentFailureDiagnostic(new Error("fetch https://private.invalid/token"))).includes("private.invalid"));
   process.env.DATABASE_URL ||= "postgresql://validation:validation@localhost:5432/validation";
   const { get12DayPaymentSkipReason } = await import("../lib/notifications/create12DayDeliveryPaymentRequestEvents");
   const { get10DayPaymentSkipReason } = await import("../lib/notifications/create10DayDeliveryPaymentRequestEvents");
@@ -96,8 +104,45 @@ async function main() {
   }
   await assert.rejects(refreshDeliveryPaymentOrder(scope, { erpClient: erp,
     importOrders: async () => { throw Error("ERP unavailable"); } }), /ERP unavailable/);
+  await assert.rejects(refreshDeliveryPaymentOrder(scope, { erpClient: erp,
+    importOrders: async () => ({ successfullyRefreshedOrders: [], failedOrders: 1,
+      errors: [{ reason: "Primary Contact fetch failed: Queue ERP job timeout jobId=test" }] }) as never,
+  }), (error: unknown) => JSON.stringify(freshPaymentFailureDiagnostic(error)).includes("Primary Contact fetch failed"));
   await validateDispatchRefresh();
   console.log("Full-order prepayment passed: balances, readiness separation, mixed orders, payment copy, threshold, fresh dispatch and refresh failures. No live database/provider/ERP calls.");
+}
+
+async function validateRenderSafeQueuePolling() {
+  const { QueueErpClient } = await import("../lib/erp/queueErpClient");
+  const previousFetch = globalThis.fetch;
+  const names = ["MLD_QUEUE_BASE_URL", "MLD_QUEUE_TOKEN", "MLD_QUEUE_JOB_POLL_INTERVAL_MS"] as const;
+  const previousEnv = names.map(name => process.env[name]);
+  const signals = new Set<AbortSignal>();
+  let polls = 0;
+  try {
+    process.env.MLD_QUEUE_BASE_URL = "https://queue.invalid";
+    process.env.MLD_QUEUE_TOKEN = "fake";
+    process.env.MLD_QUEUE_JOB_POLL_INTERVAL_MS = "1";
+    globalThis.fetch = async (_url, options) => {
+      assert.equal(options?.cache, "no-store");
+      assert.ok(options.signal, "queue polling must opt out of React request memoization");
+      assert.ok(!signals.has(options.signal), "every request must have a distinct signal");
+      signals.add(options.signal);
+      if (options.method === "POST") return Response.json({ jobId: "fake-job" });
+      polls++;
+      return Response.json(polls === 1 ? { status: "processing" }
+        : { status: "succeeded", result: { rows: [{ OrderNbr: { value: "TEST" } }] } });
+    };
+    const rows = await new QueueErpClient().fetchDeliverySalesOrderByOrderNumber("TEST", "SO");
+    assert.equal(rows.length, 1);
+    assert.equal(polls, 2, "polls must observe a transition from processing to succeeded");
+  } finally {
+    globalThis.fetch = previousFetch;
+    names.forEach((name, i) => {
+      if (previousEnv[i] === undefined) delete process.env[name];
+      else process.env[name] = previousEnv[i];
+    });
+  }
 }
 
 async function validateDispatchRefresh() {

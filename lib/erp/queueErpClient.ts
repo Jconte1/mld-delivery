@@ -194,6 +194,9 @@ export class QueueErpClient implements DeliveryErpClient {
       },
       body: opts.method === "POST" ? JSON.stringify(opts.body ?? {}) : undefined,
       cache: "no-store",
+      // React render-pass memoization is separate from the HTTP data cache.
+      // A signal makes every status poll read the current job state.
+      signal: AbortSignal.timeout(30_000),
     });
 
     const text = await response.text();

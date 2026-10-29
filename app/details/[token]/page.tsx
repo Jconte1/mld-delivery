@@ -1,4 +1,4 @@
-import { getFreshDeliveryGroupPaymentEvaluation } from "@/lib/notifications/freshDeliveryPayment";
+import { freshPaymentFailureDiagnostic, getFreshDeliveryGroupPaymentEvaluation } from "@/lib/notifications/freshDeliveryPayment";
 import { getDeliveryGroupReadiness } from "@/lib/delivery-readiness/orderLineReadiness";
 import {
   formatCustomerFriendlyDate,
@@ -122,7 +122,14 @@ export default async function DeliveryDetailsPage({ params, searchParams }: Page
   let payment: Awaited<ReturnType<typeof getFreshDeliveryGroupPaymentEvaluation>> | null = null;
   try {
     payment = showPayment ? await getFreshDeliveryGroupPaymentEvaluation(group.id) : null;
-  } catch {
+  } catch (error) {
+    console.error(JSON.stringify({
+      message: "delivery_details_fresh_payment_failed",
+      orderType: group.orderType,
+      orderNumber: group.orderNumber,
+      deliveryGroupId: group.id,
+      ...freshPaymentFailureDiagnostic(error),
+    }));
     return <DeliveryInfoState title="Current delivery details are unavailable" message="We could not verify your current balance and delivery details. Please try again or contact MLD." />;
   }
   const readiness = await getDeliveryGroupReadiness(group.id);

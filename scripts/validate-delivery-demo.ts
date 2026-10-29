@@ -15,6 +15,10 @@ async function main() {
   const now = new Date("2026-10-29T01:00:00Z");
   assert.equal(parseDemoArgs(["42", a.orderNumber], now).runDate, "2026-10-28");
   assert.equal(parseDemoArgs(["followup", a.orderNumber], now).action, "followup");
+  assert.equal(parseDemoArgs(["noresponse", a.orderNumber], now).action, "followup");
+  assert.equal(parseDemoArgs(["39", a.orderNumber], now).action, "followup");
+  assert.equal(parseDemoArgs(["hold", a.orderNumber], now).action, "8");
+  assert.throws(() => parseDemoArgs(["hold", a.orderNumber, b.orderNumber], now));
   assert.deepEqual(parseDemoArgs(["42", "SO/SO12345", b.orderNumber], now).orders, ["SO/SO12345", b.orderNumber]);
   for (const args of [["42"], ["bad", "SO12345"], ["42", "SO12345", "SO12345"], ["42", "*"],
     ["42", "SO12345", "--send"], ["42", "SO12345", "--run-date", "2026-02-30"], ["8", "SO12345", "PL02718"]]) {
@@ -102,6 +106,22 @@ async function main() {
   await runDeliveryDemo(["followup", a.orderNumber], dependencies);
   assert.equal(executions, 2);
   assert.equal(refreshed, 2);
+  for (const [alias, interval, followup] of [["noresponse", "42", true], ["39", "42", true], ["hold", "8", false]] as const) {
+    let called = false;
+    await runDeliveryDemo([alias, a.orderNumber], {
+      ...dependencies,
+      execute: async (options, isFollowup) => {
+        called = true;
+        assert.equal(options.interval, interval);
+        assert.equal(isFollowup, followup);
+        assert.deepEqual(options.orderScope, a);
+        assert.equal(options.send, true);
+        assert.equal(explicitDeliveryOrders()?.length, 1);
+        return { ok: true, currentRunCreatedEventIds: [] } as never;
+      },
+    });
+    assert.equal(called, true, `${alias} delegates through the existing production execution path`);
+  }
   await assert.rejects(runDeliveryDemo(["42", a.orderNumber], {
     ...dependencies, preflight: () => { throw new Error("production_gate_blocked"); },
   }), /production_gate/);

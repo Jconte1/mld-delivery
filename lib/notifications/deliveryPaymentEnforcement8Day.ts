@@ -2,6 +2,8 @@ import {
   formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
+  formatOrderGroup,
+  normalizeNotificationName,
 } from "@/lib/notifications/helpers";
 import {
   getSalespersonContactDisplay,
@@ -21,6 +23,7 @@ export type Render8DayDeliveryPaymentEnforcementCustomerParams = {
 };
 
 export type Render8DayPaymentEnforcementInternalParams = {
+  buyerGroup?: string | null;
   salespersonName?: string | null;
   customerName: string;
   customerEmail?: string | null;
@@ -74,10 +77,10 @@ export function render8DayPaymentEnforcementCustomerEmail(
   const amountDue = formatCurrencyAmount(params.amountDueNowRounded);
   const salespersonDisplay = getSalespersonContactDisplay(params.salespersonContact);
   const salespersonFooter = salespersonDisplay?.emailFooterText ?? null;
-  const subject = `Attention: Delivery Order On Hold - ${params.jobName} - ${deliveryDate}`;
+  const subject = `Attention: ${formatOrderGroup(params.buyerGroup) ? `${formatOrderGroup(params.buyerGroup)} ` : ""}Delivery Order On Hold - ${params.jobName} - ${deliveryDate}`;
 
   const bodyParts = [
-    `Hello ${params.contactName},`,
+    `Hello ${normalizeNotificationName(params.contactName) ?? "there"},`,
     "",
     `Your ${deliveryDescription} for ${params.jobName} at ${params.jobAddress} was scheduled for ${deliveryDate}.`,
     `Order: ${params.orderNumber}`,
@@ -98,7 +101,7 @@ export function render8DayPaymentEnforcementCustomerEmail(
 
   const escapedLink = escapeHtml(params.detailsLink);
   const htmlParts = [
-    `<p>Hello ${escapeHtml(params.contactName)},</p>`,
+    `<p>Hello ${escapeHtml(normalizeNotificationName(params.contactName) ?? "there")},</p>`,
     `<p>Your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> at ${escapeHtml(params.jobAddress)} was scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
     `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p>Your delivery is currently on hold because payment was not received by the required deadline.</p>`,
@@ -126,7 +129,7 @@ export function render8DayPaymentEnforcementInternalSuccess(
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
   const deadline = formatCustomerFriendlyDate(params.paymentDeadlineDate);
   const amountDue = formatCurrencyAmount(params.amountDueNowRounded);
-  const greetingName = clean(params.salespersonName) ?? "there";
+  const greetingName = normalizeNotificationName(params.salespersonName) ?? "there";
   const contacts = customerContactLines(params);
   const customerContact = contacts.length > 0 ? contacts.join("\n") : "No customer contact on file.";
   const subject = `Customer Payment Missed: ${params.orderNumber} - ${params.jobName} - ${deliveryDate}`;
@@ -137,6 +140,7 @@ export function render8DayPaymentEnforcementInternalSuccess(
     "",
     `Order: ${params.orderNumber}`,
     `Job: ${params.jobName}`,
+    ...(formatOrderGroup(params.buyerGroup) ? [`Order Group: ${formatOrderGroup(params.buyerGroup)}`] : []),
     `Delivery Date: ${deliveryDate}`,
     `Payment Deadline: ${deadline}`,
     `Amount Due: ${amountDue}`,
@@ -166,7 +170,7 @@ export function render8DayPaymentEnforcementInternalFailure(
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
   const deadline = formatCustomerFriendlyDate(params.paymentDeadlineDate);
   const amountDue = formatCurrencyAmount(params.amountDueNowRounded);
-  const greetingName = clean(params.salespersonName) ?? "Internal Team";
+  const greetingName = normalizeNotificationName(params.salespersonName) ?? "Internal Team";
   const errorSummary = clean(params.errorSummary) ?? "Unknown hold write failure.";
   const subject = `Action Needed: Automated Hold Failed - ${params.orderNumber} - ${params.jobName}`;
   const body = [
@@ -178,6 +182,7 @@ export function render8DayPaymentEnforcementInternalFailure(
     "",
     `Order: ${params.orderNumber}`,
     `Job: ${params.jobName}`,
+    ...(formatOrderGroup(params.buyerGroup) ? [`Order Group: ${formatOrderGroup(params.buyerGroup)}`] : []),
     `Delivery Date: ${deliveryDate}`,
     `Payment Deadline: ${deadline}`,
     `Amount Due: ${amountDue}`,

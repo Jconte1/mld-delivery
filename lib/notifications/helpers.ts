@@ -203,6 +203,16 @@ export function normalizeCustomerDisplayText(value: string | null | undefined) {
   return compacted.split(" ").map(titleCaseCustomerDisplayToken).join(" ");
 }
 
+export function normalizeNotificationName(value: string | null | undefined) {
+  const normalized = normalizeCustomerDisplayText(value);
+  if (!normalized) return null;
+  if (normalized === "there") return normalized;
+  return normalized.split(" ").map(token =>
+    /[a-z]/.test(token) && token === token.toLowerCase()
+      ? titleCaseCustomerDisplayToken(token) : token
+  ).join(" ");
+}
+
 export function dateKey(value: Date | string) {
   if (value instanceof Date) return value.toISOString().slice(0, 10);
 
@@ -407,8 +417,34 @@ export function getDeliveryReminderIntro(intervalType: NotificationIntervalType)
   }
 }
 
+export function formatOrderGroup(buyerGroup: string | null | undefined, orderType?: string | null) {
+  const value = cleanNotificationText(buyerGroup);
+  const labels: Record<string, string> = {
+    APPLIANCE: "Appliance", APPLIANCES: "Appliance", PLUMBING: "Plumbing", HARDWARE: "Hardware",
+    FIREPLACE: "Fireplace", FIREPLACES: "Fireplace",
+  };
+  if (value) return labels[value.toUpperCase()] ?? normalizeCustomerDisplayText(value);
+  const type = orderType?.trim().toUpperCase();
+  if (type && ["PG", "PL"].includes(type)) return "Plumbing";
+  if (type && ["HW", "HC"].includes(type)) return "Hardware";
+  if (type && ["SO", "R1", "RP", "C1"].includes(type)) return "Appliance";
+  return null;
+}
+
+export function getSalesOrderBuyerGroup(order: unknown) {
+  if (!order || typeof order !== "object") return null;
+  const row = order as Record<string, unknown>;
+  const custom = row.custom as { Document?: Record<string, unknown> } | undefined;
+  for (const raw of [custom?.Document?.AttributeBUYERGROUP, row.BuyerGroup, row.AttributeBUYERGROUP,
+    row.SOOrder_AttributeBUYERGROUP, row["SOOrder.AttributeBUYERGROUP"]]) {
+    const value = raw && typeof raw === "object" && "value" in raw ? raw.value : raw;
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+
 export function formatDeliveryDescription(buyerGroup: string | null | undefined) {
-  const cleanedBuyerGroup = normalizeCustomerDisplayText(buyerGroup);
+  const cleanedBuyerGroup = formatOrderGroup(buyerGroup);
   return cleanedBuyerGroup ? `${cleanedBuyerGroup} delivery` : "delivery";
 }
 
@@ -419,15 +455,15 @@ export function formatContactName(params: {
   lastName?: string | null;
 }) {
   const fullName = [params.firstName, params.lastName]
-    .map(normalizeCustomerDisplayText)
+    .map(normalizeNotificationName)
     .filter(Boolean)
     .join(" ");
 
   return (
-    normalizeCustomerDisplayText(params.firstName) ??
-    normalizeCustomerDisplayText(params.displayName) ??
-    normalizeCustomerDisplayText(fullName) ??
-    normalizeCustomerDisplayText(params.companyName) ??
+    normalizeNotificationName(params.firstName) ??
+    normalizeNotificationName(params.displayName) ??
+    normalizeNotificationName(fullName) ??
+    normalizeNotificationName(params.companyName) ??
     "there"
   );
 }
@@ -456,7 +492,7 @@ export function renderDeliveryReminderSummarySentence(params: {
 }) {
   const intro = getDeliveryReminderIntro(params.intervalType);
   const deliveryDescription = formatDeliveryDescription(params.buyerGroup);
-  const contactName = normalizeCustomerDisplayText(params.contactName) ?? params.contactName;
+  const contactName = normalizeNotificationName(params.contactName) ?? "there";
   const jobName = normalizeCustomerDisplayText(params.jobName) ?? params.jobName;
   const jobAddress = normalizeCustomerDisplayText(params.jobAddress) ?? "the job site";
 
@@ -486,7 +522,7 @@ export function renderDeliveryReminderEmailSubject(params: {
   jobName?: string | null;
   deliveryDate: Date | string;
 }) {
-  const buyerGroup = normalizeCustomerDisplayText(params.buyerGroup);
+  const buyerGroup = formatOrderGroup(params.buyerGroup);
   const jobName = normalizeCustomerDisplayText(params.jobName);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 

@@ -3,6 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "validate:notification-order-groups": "tsx scripts/validate-notification-order-groups.ts",
+    "validate:notification-salesperson-contact": "tsx scripts/validate-notification-salesperson-contact.ts",
     "demo": "tsx -r dotenv/config scripts/run-delivery-demo.ts",
     "demo:reset": "tsx -r dotenv/config scripts/reset-delivery-demo.ts",
     "validate:delivery-demo-reset": "tsx scripts/validate-delivery-demo-reset.ts",

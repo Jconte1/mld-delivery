@@ -36,22 +36,51 @@ function main() {
 
   const standard = renderDeliveryThankYou({
     orderNumber: "SO12345",
+    orderType: "SO",
+    customerName: "Example Construction",
+    locationName: "Main Street Job",
     requestedDeliveryDate: new Date("2026-11-03T00:00:00Z"),
-    withinSixWeeks: false,
+    salespersonContact: { salespersonName: "alex morgan", salespersonEmail: "alex@example.test",
+      salespersonPhone: "8015550142", isActive: true },
   });
   assert.match(standard.textBody, /send reminders as your delivery approaches/i);
-  assert.match(standard.textBody, /six weeks before delivery/i);
-  assert.match(standard.textBody, /confirm your delivery date or request a later date/i);
+  assert.doesNotMatch(standard.textBody, /six weeks|confirm your delivery date|later date/i);
   assert.match(standard.textBody, /Reply STOP to opt out/);
   assert.match(standard.textBody, /Tuesday, November 3, 2026/);
+  assert.equal(standard.textBody, "MLD: Thank you for your purchase!\n\nYour Appliance order #SO12345 for Example Construction / Main Street Job has been received.\n\nCurrent requested delivery date: Tuesday, November 3, 2026.\n\nWe will send reminders as your delivery approaches.\n\nQuestions? Contact Alex Morgan at 801-555-0142 or alex@example.test.\n\nReply STOP to opt out.");
+  assert.match(standard.textBody, /alex@example.test/);
+  for (const body of [standard.emailTextBody, standard.htmlBody]) {
+    assert.match(body, /Thank you for your purchase!/);
+    assert.match(body, /Appliance order #SO12345 for Example Construction \/ Main Street Job/);
+    assert.match(body, /If you have questions, please contact Alex Morgan at 801-555-0142 or alex@example.test\./);
+    assert.match(body, /We will send reminders as your delivery approaches\./);
+    assert.doesNotMatch(body, /six weeks|confirm the date|later date|Reply STOP/i);
+  }
+  assert.match(standard.emailTextBody, /What happens next\nWe will send reminders/);
 
   const short = renderDeliveryThankYou({
     orderNumber: "SO12345",
     requestedDeliveryDate: new Date("2026-10-01T00:00:00Z"),
-    withinSixWeeks: true,
   });
-  assert.match(short.textBody, /within six weeks/i);
-  assert.match(short.textBody, /contact you soon/i);
+  assert.match(short.textBody, /We will send reminders as your delivery approaches\./);
+  assert.doesNotMatch(short.textBody, /six weeks|contact you soon/i);
+  assert.match(short.htmlBody, /If you have questions, please contact your salesperson\./);
+  const noDate = renderDeliveryThankYou({ orderNumber: "TEST", requestedDeliveryDate: null,
+    salespersonContact: { salespersonEmail: "inactive@example.test", isActive: false } });
+  assert.doesNotMatch(noDate.textBody, /Current requested delivery date/);
+  assert.doesNotMatch(noDate.htmlBody, /inactive@example.test/);
+  const escaped = renderDeliveryThankYou({ orderNumber: "TEST", requestedDeliveryDate: null,
+    salespersonContact: { salespersonName: "Alex <Morgan>", salespersonEmail: "alex@example.test", isActive: true } });
+  assert.match(escaped.htmlBody, /Alex &lt;Morgan&gt;/);
+  assert.doesNotMatch(escaped.htmlBody, /Alex <Morgan>/);
+  for (const [orderType, category] of [["PG", "Plumbing"], ["PL", "Plumbing"], ["HW", "Hardware"], ["HC", "Hardware"], ["SO", "Appliance"]]) {
+    const message = renderDeliveryThankYou({ orderNumber: "TEST", orderType, requestedDeliveryDate: null,
+      customerName: "Smith & Sons", locationName: "Job <One>" });
+    assert.match(message.textBody, new RegExp(`${category} order #TEST for Smith & Sons / Job <One>`));
+    assert.match(message.htmlBody, /Smith &amp; Sons \/ Job &lt;One&gt;/);
+  }
+  assert.match(renderDeliveryThankYou({ orderNumber: "TEST", requestedDeliveryDate: null,
+    orderType: "SO", buyerGroup: "Plumbing" }).textBody, /Plumbing order #TEST/);
 
   const willCall = renderWillCallThankYou({
     orderNumber: "SO12345",
@@ -79,6 +108,8 @@ function main() {
   assert.equal(selectNotificationChannel({ emailOptIn: true, email: "example@example.com" }).selectedChannel, "EMAIL");
   assert.equal(selectNotificationChannel({ phone1: "8015550123", email: "example@example.com" }).selectedChannel, null);
   const runner = readFileSync(new URL("../lib/notifications/orderThankYou.ts", import.meta.url), "utf8");
+  assert.match(runner, /getActiveSalespersonContact\(text\(field\(fullOrder, "SalespersonNumber"\)\)\)/);
+  assert.match(runner, /textBody: messageTextBody, htmlBody: rendered.htmlBody/);
   assert.doesNotMatch(runner, /getWillCallUrl|WILLCALL_BACKEND_URL|WILLCALL_INVITE_TOKEN|WILLCALL_FRONTEND_URL|invites\/dispatch|will_call_customer_id_billing_zip_or_email_missing/);
 
   assert.equal(orderThankYouIsDue({ localTime: "10:00", enabled: "true" }), true);

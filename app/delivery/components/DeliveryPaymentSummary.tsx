@@ -6,6 +6,8 @@ export type DeliveryPaymentSummaryInput = {
   paymentApplicabilityStatus?: string | null;
   paymentStatus: string;
   amountDueNowRounded?: string | null;
+  orderTotal?: string | null;
+  paidToDate?: string | null;
   unpaidBalance?: string | null;
   currentDeliveryGroupValue?: string | null;
   calculationWarnings?: string[];
@@ -24,18 +26,21 @@ export function deliveryPaymentCanShowCustomerBalance(payment: DeliveryPaymentSu
   return payment.paymentApplicabilityStatus !== "not_applicable_terms";
 }
 
+function availableMoney(value: string | null | undefined) {
+  const trimmed = value?.trim();
+  if (!trimmed || !/^-?\d+(?:\.\d+)?$/.test(trimmed) || !Number.isFinite(Number(trimmed))) return null;
+  return formatCurrencyAmount(trimmed);
+}
+
 export function DeliveryPaymentSummary({
   payment,
 }: {
   payment: DeliveryPaymentSummaryInput;
 }) {
-  const canShowCustomerBalance = deliveryPaymentCanShowCustomerBalance(payment);
   const showAmountDue = deliveryHasBalanceDue(payment);
-  const showUnpaidBalance =
-    canShowCustomerBalance && isMeaningfulDeliveryPaymentAmount(payment.unpaidBalance);
-  const showCurrentDeliveryValue = isMeaningfulDeliveryPaymentAmount(
-    payment.currentDeliveryGroupValue
-  );
+  const showOrderAmounts = deliveryPaymentCanShowCustomerBalance(payment) && payment.paymentStatus !== "calculation_blocked";
+  const orderTotal = showOrderAmounts ? availableMoney(payment.orderTotal) : null;
+  const paidToDate = showOrderAmounts ? availableMoney(payment.paidToDate) : null;
 
   return (
     <aside className="rounded-lg bg-white p-6 shadow-sm ring-1 ring-zinc-200">
@@ -47,33 +52,28 @@ export function DeliveryPaymentSummary({
             {payment.paymentStatus.replace(/_/g, " ")}
           </dd>
         </div>
+        {orderTotal !== null ? (
+          <div>
+            <dt className="font-medium text-zinc-500">Order Total</dt>
+            <dd className="mt-1 font-medium text-zinc-900">{orderTotal}</dd>
+          </div>
+        ) : null}
+        {paidToDate !== null ? (
+          <div>
+            <dt className="font-medium text-zinc-500">Payments / Credits Applied</dt>
+            <dd className="mt-1 font-medium text-emerald-700">{paidToDate}</dd>
+          </div>
+        ) : null}
         {showAmountDue ? (
           <div>
             <dt className="font-medium text-zinc-500">
               Balance owed prior to scheduling Delivery
             </dt>
-            <dd className="mt-1 text-2xl font-semibold">
+            <dd className="mt-1 text-2xl font-semibold text-rose-700">
               {formatCurrencyAmount(payment.amountDueNowRounded)}
             </dd>
             <dd className="mt-2 text-xs leading-5 text-zinc-500">
-              Your remaining order balance must be paid before delivery, including items
-              scheduled for a later delivery.
-            </dd>
-          </div>
-        ) : null}
-        {showUnpaidBalance ? (
-          <div>
-            <dt className="font-medium text-zinc-500">Unpaid balance</dt>
-            <dd className="mt-1 text-zinc-900">
-              {formatCurrencyAmount(payment.unpaidBalance)}
-            </dd>
-          </div>
-        ) : null}
-        {showCurrentDeliveryValue ? (
-          <div>
-            <dt className="font-medium text-zinc-500">Current delivery value</dt>
-            <dd className="mt-1 text-zinc-900">
-              {formatCurrencyAmount(payment.currentDeliveryGroupValue)}
+              Your remaining order balance must be paid in full before delivery
             </dd>
           </div>
         ) : null}

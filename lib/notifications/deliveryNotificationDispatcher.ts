@@ -40,6 +40,7 @@ import {
   formatContactName,
   formatJobAddress,
   formatJobName,
+  formatOrderGroup,
   renderDeliveryReminderEmailSubject,
   renderDeliveryReminderMessage,
   selectNotificationChannel,
@@ -56,6 +57,8 @@ import {
 } from "@/lib/notifications/notificationAddressNormalization";
 import { getPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
 import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
+import { appendSalespersonSmsContact, renderSalespersonContactText, renderGroupedSalespersonContactText,
+  type SalespersonContactInput } from "@/lib/notifications/salespersonContactDisplay";
 import { prisma } from "@/lib/prisma";
 import { evaluateAndRecordDeliveryTenDayConfirmation } from "@/lib/notifications/deliveryTenDayConfirmation";
 import {
@@ -825,7 +828,7 @@ function commonRenderParams(event: DispatchNotificationEvent) {
   return {
     orderNumber: event.orderNumber,
     contactName,
-    buyerGroup: order.buyerGroup,
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     jobName,
     jobAddress,
     deliveryDate: event.deliveryDate,
@@ -856,13 +859,26 @@ async function renderForChannel(params: {
   channel: HelperNotificationChannel;
   client: typeof prisma;
   groupLink?: string;
+  groupedContactText?: string;
+}): Promise<RenderedMessage> {
+  const salespersonContact = params.groupedContactText ? null : await getActiveSalespersonContact(params.event.order.salespersonNumber, params.client);
+  const rendered = await renderForChannelContent({ ...params, salespersonContact });
+  if (params.channel === "SMS") return { ...rendered,
+    textBody: appendSalespersonSmsContact(rendered.textBody, params.groupedContactText ?? renderSalespersonContactText(salespersonContact)) };
+  if (params.groupedContactText) return { ...rendered, textBody: `${rendered.textBody}\n\n${params.groupedContactText}` };
+  return rendered;
+}
+
+async function renderForChannelContent(params: {
+  event: DispatchNotificationEvent;
+  channel: HelperNotificationChannel;
+  client: typeof prisma;
+  groupLink?: string;
+  salespersonContact: SalespersonContactInput | null;
 }): Promise<RenderedMessage> {
   const { event, channel, client } = params;
   const common = commonRenderParams(event);
-  const salespersonContact = await getActiveSalespersonContact(
-    event.order.salespersonNumber,
-    client
-  );
+  const salespersonContact = params.salespersonContact;
 
   if (
     event.intervalType === NotificationIntervalType.DAY_180 ||
@@ -905,7 +921,9 @@ async function renderForChannel(params: {
         return {
           subject: null,
           textBody: render42DaySmsConfirmationReminderMessage({
+            buyerGroup: common.buyerGroup,
             orderNumber: event.orderNumber,
+            contactName: common.contactName,
             deliveryDate: event.deliveryDate,
             link,
             deliveryAddress: event.order.address,
@@ -915,11 +933,13 @@ async function renderForChannel(params: {
         };
       }
       const rendered = render42DayEmailConfirmationReminderMessage({
+        buyerGroup: common.buyerGroup,
         orderNumber: event.orderNumber,
         contactName: common.contactName,
         deliveryDate: event.deliveryDate,
         link,
         touchNumber: touchNumber ?? undefined,
+        salespersonContact,
       });
       return {
         subject: rendered.subject,
@@ -1990,8 +2010,16 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
     const render = async () => {
       if (["DAY_180", "DAY_90", "DAY_60", "DAY_42"].includes(first.interval)) {
         const event = prepared.events.find(e => e.id === first.eventId)!;
-        const combined = await renderForChannel({ event: { ...event, orderNumber: group.members.map(m => m.orderNumber).join(", ") },
-          channel: first.channel, client, groupLink: groupToken ? buildDeliveryNotificationGroupLink(groupToken) : undefined });
+        const buyerGroup = [...new Set(group.members.map(member => {
+          const order = prepared.events.find(e => e.id === member.eventId)!.order;
+          return formatOrderGroup(order.buyerGroup, order.orderType);
+        }).filter(Boolean))].join(" / ") || null;
+        const groupedContactText = renderGroupedSalespersonContactText(await Promise.all(group.members.map(async member => {
+          const memberEvent = prepared.events.find(e => e.id === member.eventId)!;
+          return { orderNumber: member.orderNumber, contact: await getActiveSalespersonContact(memberEvent.order.salespersonNumber, client) };
+        })));
+        const combined = await renderForChannel({ event: { ...event, order: { ...event.order, buyerGroup }, orderNumber: group.members.map(m => m.orderNumber).join(", ") },
+          channel: first.channel, client, groupedContactText, groupLink: groupToken ? buildDeliveryNotificationGroupLink(groupToken) : undefined });
         return { subject: combined.subject ?? `MLD delivery: ${report.orders.join(", ")}`, body: combined.textBody };
       }
       if (groupToken) {
@@ -1999,7 +2027,10 @@ export async function dispatchGroupedDeliveryNotifications(options: DispatchDeli
           groupLink: buildDeliveryNotificationGroupLink(groupToken) }));
       }
       return ({
-      subject: `MLD delivery reminder: ${report.orders.join(", ")}`,
+      subject: `MLD ${[...new Set(group.members.map(member => {
+        const order = prepared.events.find(e => e.id === member.eventId)!.order;
+        return formatOrderGroup(order.buyerGroup, order.orderType);
+      }).filter(Boolean))].join(" / ")} delivery reminder: ${report.orders.join(", ")}`,
       body: group.members.map(m => `Order ${m.orderType}/${m.orderNumber}\n${prepared.messages.get(m.eventId)!.textBody}`).join("\n\n"),
     }); };
     if (!preflight.send) { reports.push({ ...report, outcome: "previewed", rendered: await render(), attemptId: null, groupId: null }); continue; }

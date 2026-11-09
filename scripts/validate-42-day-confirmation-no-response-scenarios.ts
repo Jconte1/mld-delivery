@@ -622,7 +622,7 @@ async function validateTouchHistoryStateMachine(failures: Failure[]) {
     });
     assert(
       String(store.internalNotificationEvents[0]?.bodyPreview ?? "").includes(
-        "Customer did not respond after 3 total 42-day confirmation touches."
+        "did not respond to the 6-week delivery confirmation request after 3 attempts."
       ),
       "39 full sequence completed uses normal no-response escalation",
       failures

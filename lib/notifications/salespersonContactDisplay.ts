@@ -1,6 +1,6 @@
 import {
   cleanNotificationText,
-  normalizeCustomerDisplayText,
+  normalizeNotificationName,
 } from "@/lib/notifications/helpers";
 
 export type SalespersonContactInput = {
@@ -61,7 +61,7 @@ export function getSalespersonContactDisplay(
 ): SalespersonContactDisplay | null {
   if (!contact || contact.isActive !== true) return null;
 
-  const name = normalizeCustomerDisplayText(contact.salespersonName);
+  const name = normalizeNotificationName(contact.salespersonName);
   const email = normalizeEmail(contact.salespersonEmail);
   const phone = formatPhone(normalizePhone(contact.salespersonPhone));
   const target = targetText({ name, phone, email });
@@ -90,4 +90,28 @@ export function renderSalespersonWebpageContactText(
   contact: SalespersonContactInput | null | undefined
 ) {
   return getSalespersonContactDisplay(contact)?.webpageText ?? null;
+}
+
+export function renderSalespersonContactText(contact: SalespersonContactInput | null | undefined) {
+  const display = getSalespersonContactDisplay(contact);
+  return display ? `Questions? Contact ${display.targetText}.` : "Questions? Contact your MLD salesperson.";
+}
+
+export function appendSalespersonSmsContact(body: string, contactText: string) {
+  const optOut = "Reply STOP to opt out.";
+  const content = body.trim().endsWith(optOut) ? body.trim().slice(0, -optOut.length).trimEnd() : body.trim();
+  return `${content}\n\n${contactText}\n\n${optOut}`;
+}
+
+export function renderGroupedSalespersonContactText(orders: Array<{
+  orderNumber: string;
+  contact: SalespersonContactInput | null | undefined;
+}>) {
+  const groups = new Map<string, string[]>();
+  for (const order of orders) {
+    const text = renderSalespersonContactText(order.contact);
+    groups.set(text, [...(groups.get(text) ?? []), order.orderNumber]);
+  }
+  if (groups.size === 1) return groups.keys().next().value!;
+  return [...groups].map(([text, numbers]) => `Order ${numbers.join(", ")}: ${text}`).join("\n");
 }

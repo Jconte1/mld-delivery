@@ -38,6 +38,7 @@ import {
   formatContactName,
   formatJobAddress,
   formatJobName,
+  formatOrderGroup,
   getDeliveryDateCustomerNotificationSkipReason,
   getNotificationTargetDate,
   selectNotificationChannel,
@@ -1069,6 +1070,7 @@ async function createInternalSuccessNotification(params: {
     locationDescription: order.locationDescription,
   });
   const rendered = render8DayPaymentEnforcementInternalSuccess({
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     salespersonName: params.salespersonContact?.salespersonName,
     customerName: customerNameForInternal(params.deliveryGroup),
     customerEmail: order.contact.email,
@@ -1112,6 +1114,7 @@ async function createInternalFailureNotification(params: {
     locationDescription: order.locationDescription,
   });
   const rendered = render8DayPaymentEnforcementInternalFailure({
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     salespersonName: params.salespersonContact?.salespersonName,
     customerName: customerNameForInternal(params.deliveryGroup),
     orderNumber: order.orderNumber,

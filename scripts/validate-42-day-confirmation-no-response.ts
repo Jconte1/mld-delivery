@@ -583,9 +583,9 @@ async function validateEscalation(failures: string[]) {
   assert(Boolean(candidate.noResponseAt), "day 39 sets noResponseAt", failures);
   assertEqual(summary.manualReviewMarked, 1, "summary manual review marked", failures);
   assertEqual(summary.internalEscalationEventIdsCreatedThisRun[0], internal?.id, "day 39 current-run internal id", failures);
-  assertIncludes(internal?.bodyPreview ?? "", "Touch history", "day 39 internal body summarizes touches", failures);
-  assertIncludes(internal?.bodyPreview ?? "", "Delivery address", "day 39 internal body includes address", failures);
-  assertIncludes(internal?.bodyPreview ?? "", "No Acumatica writeback", "day 39 internal body states no writeback", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "after 3 attempts", "day 39 internal body summarizes attempts", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "Delivery Address", "day 39 internal body includes address", failures);
+  assertIncludes(internal?.bodyPreview ?? "", "Please contact the customer", "day 39 internal body requests follow-up", failures);
 }
 
 async function validateCatchUpBeforeEscalation(failures: string[]) {
@@ -864,12 +864,25 @@ function validateRendering(failures: string[]) {
     currentStatus: DeliveryConfirmationStatus.PENDING,
     reason: "Customer did not respond after 3 total 42-day confirmation touches.",
   });
-  assertIncludes(internal.subject, "Order SO42", "internal subject order", failures);
-  assertIncludes(internal.body, "Recommended action", "internal body recommended action", failures);
+  assertIncludes(internal.subject, "Customer Confirmation Missed: SO42 - Customer / Residence -", "internal subject order and job", failures);
+  assertIncludes(internal.body, "Please contact the customer", "internal body recommended action", failures);
   assertIncludes(internal.body, "Job: Customer / Residence", "internal body job", failures);
-  assertIncludes(internal.body, "Delivery address", "internal body address", failures);
-  assertIncludes(internal.body, "Touches sent", "internal body touches", failures);
-  assertIncludes(internal.body, "No Acumatica writeback", "internal body writeback posture", failures);
+  assertIncludes(internal.body, "Delivery Address", "internal body address", failures);
+  assertIncludes(internal.body, "Customer did not respond to the 6-week delivery confirmation request after 3 attempts.", "internal body three attempts", failures);
+  assertIncludes(internal.body, "Hello Sales Person,\n\n", "internal greeting spacing", failures);
+  assertIncludes(internal.body, "Customer Contact:\ncustomer@example.test\n8015550100", "internal contact block", failures);
+  assertIncludes(internal.body, `Delivery Details:\nView Delivery Details: ${link}`, "internal details block", failures);
+  assertIncludes(internal.body, "Thank you,\nMLD Delivery Notifications", "internal signature", failures);
+  assertNotIncludes(internal.body, "Current confirmation status", "internal hides technical status", failures);
+  assertNotIncludes(internal.body, "Touch history", "internal hides technical history", failures);
+  const incomplete = render42DayNoResponseSalespersonEmail({
+    salespersonName: null, customerName: "Customer", orderType: "SO", orderNumber: "SO42",
+    deliveryDate: "2026-09-02", confirmationLink: link, currentStatus: DeliveryConfirmationStatus.PENDING,
+    reason: "incomplete", messageSummaryOverride: "Customer touch sequence could not be completed safely.",
+  });
+  assertIncludes(incomplete.body, "Customer touch sequence could not be completed safely.", "incomplete sequence keeps distinct explanation", failures);
+  assertNotIncludes(incomplete.body, "after 3 attempts", "incomplete sequence must not claim three attempts", failures);
+  assertIncludes(incomplete.body, "No customer contact on file.", "missing contact fallback", failures);
 }
 
 function validateStaticSafety(failures: string[]) {

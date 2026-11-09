@@ -11,7 +11,8 @@ import {
 } from "@/lib/acumatica/client/acumaticaClient";
 import { mapAcumaticaContactOptIns } from "@/lib/acumatica/contactOptInFields";
 import { QueueErpClient } from "@/lib/erp/queueErpClient";
-import { selectNotificationChannel } from "@/lib/notifications/helpers";
+import { selectNotificationChannel, getSalesOrderBuyerGroup } from "@/lib/notifications/helpers";
+import { getActiveSalespersonContact } from "@/lib/notifications/salespersonContactCache";
 import {
   loadActiveNotificationOptOutAddresses,
 } from "@/lib/notifications/notificationOptOutLookup";
@@ -196,13 +197,6 @@ function denverDateKey(date: Date) {
   const part = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((item) => item.type === type)?.value ?? "";
   return `${part("year")}-${part("month")}-${part("day")}`;
-}
-
-function deliveryWithinSixWeeks(deliveryDate: Date | null, now: Date) {
-  if (!deliveryDate) return false;
-  const [year, month, day] = denverDateKey(now).split("-").map(Number);
-  const threshold = new Date(Date.UTC(year, month - 1, day + 42)).toISOString().slice(0, 10);
-  return deliveryDate.toISOString().slice(0, 10) < threshold;
 }
 
 function localOptOutSnapshot(contact: {
@@ -505,19 +499,27 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
       }
 
       const deliveryDate = fullOrderRequestedDate(fullOrder, candidate.requestedDeliveryDate);
+      const salespersonContact = await getActiveSalespersonContact(text(field(fullOrder, "SalespersonNumber")));
       const rendered = classification === OrderThankYouClassification.DELIVERY
         ? renderDeliveryThankYou({
             orderNumber: candidate.orderNumber,
+            orderType: candidate.orderType,
+            buyerGroup: getSalesOrderBuyerGroup(fullOrder) ?? candidate.buyerGroup,
+            customerName: candidate.customerName,
+            locationName: candidate.locationName,
             requestedDeliveryDate: deliveryDate,
-            withinSixWeeks: deliveryWithinSixWeeks(deliveryDate, now),
+            salespersonContact,
           })
         : renderWillCallThankYou({
             orderNumber: candidate.orderNumber,
             orderType: candidate.orderType,
-            buyerGroup: candidate.buyerGroup,
+            buyerGroup: getSalesOrderBuyerGroup(fullOrder) ?? candidate.buyerGroup,
             customerName: candidate.customerName,
             locationName: candidate.locationName,
+            salespersonContact,
           });
+      const messageTextBody = selected.selectedChannel === "EMAIL" && "emailTextBody" in rendered && typeof rendered.emailTextBody === "string"
+        ? rendered.emailTextBody : rendered.textBody;
       summary.eligible += 1;
       if (!options.send) {
         summary.reports.push({
@@ -528,7 +530,7 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
           selectedChannel: selected.selectedChannel,
           channelReason: selected.channelReason,
           subject: rendered.subject,
-          textBody: rendered.textBody,
+          textBody: messageTextBody,
         });
         continue;
       }
@@ -606,7 +608,7 @@ export async function runOrderThankYou(options: RunOrderThankYouOptions) {
       try {
         const result = channel === NotificationChannel.SMS
           ? await provider.sendSms({ to: recipient, body: rendered.textBody, statusCallbackUrl: buildTwilioStatusCallbackUrl() })
-          : await provider.sendEmail({ to: recipient, subject: rendered.subject, textBody: rendered.textBody, htmlBody: rendered.htmlBody });
+          : await provider.sendEmail({ to: recipient, subject: rendered.subject, textBody: messageTextBody, htmlBody: rendered.htmlBody });
         await prisma.$transaction([
           prisma.orderThankYouAttempt.update({
             where: { id: attempt.id },

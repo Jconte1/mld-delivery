@@ -30,9 +30,11 @@ import {
   dateKey,
   DELIVERY_DATE_WEEKEND_SKIP_REASON,
   formatContactName,
+  normalizeNotificationName,
   formatCustomerFriendlyDate,
   formatJobAddress,
   formatJobName,
+  formatOrderGroup,
   getDeliveryDateCustomerNotificationSkipReason,
   selectNotificationChannel,
 } from "@/lib/notifications/helpers";
@@ -1800,18 +1802,22 @@ function renderCustomerTouchMessages(params: {
   const touchNumber = params.action === "SEND_REMINDER_1" ? 2 : 3;
   return {
     smsMessage: render42DaySmsConfirmationReminderMessage({
+      buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
       orderNumber: order.orderNumber,
+      contactName: contactNameForCandidate(params.candidate),
       deliveryDate: deliveryGroup.deliveryDate,
       link: params.link,
       deliveryAddress: order.address,
       touchNumber,
     }),
     emailMessage: render42DayEmailConfirmationReminderMessage({
+      buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
       orderNumber: order.orderNumber,
       contactName: contactNameForCandidate(params.candidate),
       deliveryDate: deliveryGroup.deliveryDate,
       link: params.link,
       touchNumber,
+      salespersonContact: params.salespersonContact,
     }),
   };
 }
@@ -2144,6 +2150,7 @@ function resolveInternalRecipient(salespersonContact: SalespersonContactInput | 
 }
 
 export function render42DayNoResponseSalespersonEmail(params: {
+  buyerGroup?: string | null;
   salespersonName?: string | null;
   salespersonNumber?: string | null;
   customerName: string;
@@ -2160,44 +2167,38 @@ export function render42DayNoResponseSalespersonEmail(params: {
   touchHistorySummary?: string | null;
   messageSummaryOverride?: string | null;
 }) {
-  const salespersonName = cleanNotificationText(params.salespersonName) ?? "there";
-  const salespersonNumber = cleanNotificationText(params.salespersonNumber);
+  const salespersonName = normalizeNotificationName(params.salespersonName) ?? "there";
   const customerEmail = cleanNotificationText(params.customerEmail);
   const customerPhone = cleanNotificationText(params.customerPhone);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
-  const customerContact = [customerEmail, customerPhone].filter(Boolean).join(" / ") || "not available";
+  const customerContact = [customerEmail, customerPhone].filter(Boolean).join("\n") || "No customer contact on file.";
   const jobName = cleanNotificationText(params.jobName) ?? "not available";
   const jobAddress = cleanNotificationText(params.jobAddress) ?? "not available";
-  const salespersonLine = salespersonNumber
-    ? `${salespersonName} (${salespersonNumber})`
-    : salespersonName;
   const messageSummary =
     cleanNotificationText(params.messageSummaryOverride) ??
-    "Customer did not respond after 3 total 42-day delivery confirmation touches.";
-  const subject = `No response: Delivery confirmation for Order ${params.orderNumber}`;
+    `${normalizeNotificationName(params.customerName) ?? "Customer"} did not respond to the 6-week delivery confirmation request after 3 attempts.`;
+  const subject = `Customer Confirmation Missed: ${params.orderNumber} - ${jobName} - ${deliveryDate}`;
   const body = [
     `Hello ${salespersonName},`,
     "",
     messageSummary,
     "",
-    `Order: ${params.orderType} ${params.orderNumber}`,
-    `Delivery date: ${deliveryDate}`,
+    `Order: ${params.orderNumber}`,
     `Job: ${jobName}`,
-    `Delivery address: ${jobAddress}`,
-    `Customer: ${params.customerName}`,
-    `Customer contact: ${customerContact}`,
-    `Salesperson: ${salespersonLine}`,
-    params.touchHistorySummary
-      ? `Touch history: ${params.touchHistorySummary}`
-      : "Touches sent: initial 6-week confirmation request, first reminder, and final reminder.",
-    `Current confirmation status: ${params.currentStatus}`,
-    `Reason: ${params.reason}`,
+    ...(formatOrderGroup(params.buyerGroup, params.orderType) ? [`Order Group: ${formatOrderGroup(params.buyerGroup, params.orderType)}`] : []),
+    `Delivery Date: ${deliveryDate}`,
+    `Delivery Address: ${jobAddress}`,
     "",
-    "Recommended action: contact the customer manually to confirm delivery or update the delivery date.",
-    "No Acumatica writeback, one-week confirmation update, or hold was placed for this no-response escalation.",
+    "Please contact the customer to confirm their delivery date or help them request a new date.",
     "",
-    "Confirmation link:",
-    params.confirmationLink,
+    "Customer Contact:",
+    customerContact,
+    "",
+    "Delivery Details:",
+    `View Delivery Details: ${params.confirmationLink}`,
+    "",
+    "Thank you,",
+    "MLD Delivery Notifications",
   ].join("\n");
 
   return {
@@ -2277,6 +2278,7 @@ async function createOrReuseSalespersonEscalation(params: {
   const recipient = resolveInternalRecipient(params.salespersonContact);
   const confirmationLink = candidate.linkToken ? buildDeliveryConfirmationLink(candidate.linkToken) : "";
   const rendered = render42DayNoResponseSalespersonEmail({
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     salespersonName: params.salespersonContact?.salespersonName,
     salespersonNumber: order.salespersonNumber,
     customerName: contactNameForCandidate(candidate),
@@ -2638,18 +2640,22 @@ async function processReminderCandidate(params: {
   });
   const noChannel = channel.selectedChannel === null;
   const smsMessage = render42DaySmsConfirmationReminderMessage({
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     orderNumber: order.orderNumber,
+    contactName: contactNameForCandidate(candidate),
     deliveryDate: deliveryGroup.deliveryDate,
     link,
     deliveryAddress: order.address,
     touchNumber: params.schedule.touchNumber,
   });
   const emailMessage = render42DayEmailConfirmationReminderMessage({
+    buyerGroup: formatOrderGroup(order.buyerGroup, order.orderType),
     orderNumber: order.orderNumber,
     contactName: contactNameForCandidate(candidate),
     deliveryDate: deliveryGroup.deliveryDate,
     link,
     touchNumber: params.schedule.touchNumber,
+    salespersonContact,
   });
   const subject = channel.selectedChannel === "EMAIL" ? emailMessage.subject : null;
   const renderedMessagePreview =

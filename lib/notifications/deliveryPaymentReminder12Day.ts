@@ -3,6 +3,7 @@ import {
   formatCurrencyAmount,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
+  normalizeNotificationName,
   renderDeliveryReminderEmailSubject,
 } from "@/lib/notifications/helpers";
 import { formatPaymentDeadlineDate } from "@/lib/notifications/paymentDeadlineBusinessDays";
@@ -71,7 +72,7 @@ export function render12DayDeliveryPaymentReminderEmail(
   const deadlineLine = paymentDeadlineText(params.deliveryDate, params.paymentDeadlineDate);
 
   const bodyParts = [
-    `Hello ${params.contactName},`,
+    `Hello ${normalizeNotificationName(params.contactName) ?? "there"},`,
     "",
     "This is your second balance reminder.",
     "",
@@ -92,7 +93,7 @@ export function render12DayDeliveryPaymentReminderEmail(
 
   const escapedLink = escapeHtml(params.detailsLink);
   const htmlParts = [
-    `<p>Hello ${escapeHtml(params.contactName)},</p>`,
+    `<p>Hello ${escapeHtml(normalizeNotificationName(params.contactName) ?? "there")},</p>`,
     `<p>This is your second balance reminder.</p>`,
     `<p>Your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> is scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
     `<p><strong>Job address:</strong> ${escapeHtml(params.jobAddress)}</p>`,

@@ -14,8 +14,8 @@ import {
 } from "../app/delivery/components/DeliveryItemsForThisDelivery";
 import { DeliveryPaymentSummary } from "../app/delivery/components/DeliveryPaymentSummary";
 import { GET as shortConfirmationLinkGet } from "../app/c/[token]/route";
-import { render42DayEmailConfirmationMessage } from "../lib/notifications/deliveryConfirmationEmail";
-import { render42DaySmsConfirmationMessage } from "../lib/notifications/deliveryConfirmationSms";
+import { render42DayEmailConfirmationMessage, render42DayEmailConfirmationReminderMessage } from "../lib/notifications/deliveryConfirmationEmail";
+import { render42DaySmsConfirmationMessage, render42DaySmsConfirmationReminderMessage } from "../lib/notifications/deliveryConfirmationSms";
 import { buildDeliveryConfirmationLink } from "../lib/notifications/deliveryConfirmationLinks";
 import {
   render10DayDeliveryPaymentReminderEmail,
@@ -42,7 +42,7 @@ import {
   render2DayDeliveryReminderSms,
 } from "../lib/notifications/deliveryReminder2Day";
 import { renderDeliveryReminderEmailBody } from "../lib/notifications/deliveryReminderEmail";
-import { renderDeliveryReminderMessage } from "../lib/notifications/helpers";
+import { formatContactName, normalizeNotificationName, renderDeliveryReminderMessage } from "../lib/notifications/helpers";
 
 function assert(condition: unknown, message: string, failures: string[]) {
   if (!condition) failures.push(message);
@@ -146,7 +146,7 @@ function paymentLine(
 function validateCustomerMessages(failures: string[]) {
   const common = {
     orderNumber: "SO-CUST",
-    contactName: "James",
+    contactName: "james",
     buyerGroup: "Appliance",
     jobName: "Smith Residence",
     jobAddress: "123 Main St, Salt Lake City UT",
@@ -283,6 +283,7 @@ function validateCustomerMessages(failures: string[]) {
   ];
 
   for (const message of proactiveMessages) {
+    assertIncludes(message.emailBody, "Hello James,", `${message.label}-day email normalizes lowercase name`, failures);
     assertIncludes(
       message.emailBody,
       "Order: SO-CUST",
@@ -303,6 +304,30 @@ function validateCustomerMessages(failures: string[]) {
         `${message.label}-day customer SMS includes order number`,
         failures
       );
+    }
+  }
+
+  for (const [name, expected] of [["james", "James"], ["JAMES CONTE", "James Conte"],
+    ["james McDonald", "James McDonald"], ["DeVries", "DeVries"], ["anne-marie o'brien", "Anne-Marie O'Brien"]]) {
+    assert(normalizeNotificationName(name) === expected, `name normalized: ${name}`, failures);
+  }
+  assert(formatContactName({ firstName: "james" }) === "James", "contact first name normalized", failures);
+  assert(formatContactName({ displayName: "james conte" }) === "James Conte", "contact display name normalized", failures);
+  assert(formatContactName({}) === "there", "missing name fallback preserved", failures);
+  for (const touchNumber of [2, 3] as const) {
+    const sms = render42DaySmsConfirmationReminderMessage({ ...common, touchNumber, link: confirmLink });
+    const email = render42DayEmailConfirmationReminderMessage({ ...common, touchNumber, link: confirmLink });
+    assertIncludes(sms, "\n\nHello James,", `touch ${touchNumber} SMS greeting paragraph`, failures);
+    assertIncludes(sms, "\n\nReply Y", `touch ${touchNumber} SMS reply paragraph`, failures);
+    assertIncludes(sms, "\n\nFor Delivery Details:", `touch ${touchNumber} SMS link paragraph`, failures);
+    assertIncludes(sms, "\n\nReply STOP to opt out.", `touch ${touchNumber} SMS opt-out paragraph`, failures);
+    assertIncludes(email.body, "Hello James,\n\n", `touch ${touchNumber} email greeting paragraph`, failures);
+    assertIncludes(email.body, "\n\nOrder: SO-CUST\n\n", `touch ${touchNumber} email order paragraph`, failures);
+    assertIncludes(email.htmlBody, "<p>Hello James,</p>", `touch ${touchNumber} HTML greeting paragraph`, failures);
+    assertIncludes(email.htmlBody, "Confirm/ Change Delivery", `touch ${touchNumber} HTML retains action button`, failures);
+    for (const output of [sms, email.body, email.htmlBody]) {
+      assertNotIncludes(output, "Hello james", `touch ${touchNumber} lowercase greeting removed`, failures);
+      assertNotIncludes(output, "Balance owed", `touch ${touchNumber} no payment content`, failures);
     }
   }
 
@@ -480,10 +505,10 @@ function validatePaymentSummary(failures: string[]) {
     "prepay webpage payment summary still shows positive amount due",
     failures
   );
-  assertIncludes(
+  assertNotIncludes(
     prepayMarkup,
     "Unpaid balance",
-    "prepay webpage payment summary still shows unpaid balance",
+    "prepay webpage payment summary hides redundant unpaid balance",
     failures
   );
 

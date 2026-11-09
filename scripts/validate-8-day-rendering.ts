@@ -64,7 +64,7 @@ function main() {
 
   assert(
     customerEmail.subject ===
-      "Attention: Delivery Order On Hold - Smith Residence - Wednesday, July 29, 2026",
+      "Attention: Appliance Delivery Order On Hold - Smith Residence - Wednesday, July 29, 2026",
     "customer subject matches approved on-hold subject",
     failures
   );

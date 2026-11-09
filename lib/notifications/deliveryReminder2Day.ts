@@ -2,6 +2,8 @@ import {
   cleanNotificationText,
   formatCustomerFriendlyDate,
   formatDeliveryDescription,
+  formatOrderGroup,
+  normalizeNotificationName,
 } from "@/lib/notifications/helpers";
 import {
   getSalespersonContactDisplay,
@@ -33,7 +35,7 @@ export function render2DayDeliveryReminderEmailSubject(params: {
   jobName?: string | null;
   deliveryDate: Date | string;
 }) {
-  const buyerGroup = cleanNotificationText(params.buyerGroup);
+  const buyerGroup = formatOrderGroup(params.buyerGroup);
   const jobName = cleanNotificationText(params.jobName);
   const deliveryDate = formatCustomerFriendlyDate(params.deliveryDate);
 
@@ -81,7 +83,7 @@ export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryRemind
   );
 
   const bodyParts = [
-    `Hello ${params.contactName},`,
+    `Hello ${normalizeNotificationName(params.contactName) ?? "there"},`,
     "",
     `This is your final reminder that your ${deliveryDescription} for ${params.jobName} at ${params.jobAddress} is scheduled for ${deliveryDate}.`,
     `Order: ${params.orderNumber}`,
@@ -98,7 +100,7 @@ export function render2DayDeliveryReminderEmail(params: Render2DayDeliveryRemind
 
   const escapedLink = escapeHtml(params.detailsLink);
   const htmlParts = [
-    `<p>Hello ${escapeHtml(params.contactName)},</p>`,
+    `<p>Hello ${escapeHtml(normalizeNotificationName(params.contactName) ?? "there")},</p>`,
     `<p>This is your final reminder that your ${escapeHtml(deliveryDescription)} for <strong>${escapeHtml(params.jobName)}</strong> at ${escapeHtml(params.jobAddress)} is scheduled for <strong>${escapeHtml(deliveryDate)}</strong>.</p>`,
     `<p><strong>Order:</strong> ${escapeHtml(params.orderNumber)}</p>`,
     `<p>Please use the link below to review your delivery details:</p>`,

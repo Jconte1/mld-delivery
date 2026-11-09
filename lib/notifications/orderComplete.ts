@@ -1,5 +1,5 @@
 import { mapAcumaticaContactOptIns } from "@/lib/acumatica/contactOptInFields";
-import { selectNotificationChannel, type NotificationChannel } from "@/lib/notifications/helpers";
+import { selectNotificationChannel, getSalesOrderBuyerGroup, type NotificationChannel } from "@/lib/notifications/helpers";
 import { normalizeEmailForOptOut, normalizeSmsPhoneForOptOut } from "@/lib/notifications/notificationAddressNormalization";
 import type { ActiveNotificationOptOutAddresses } from "@/lib/notifications/notificationOptOutLookup";
 import { DeliveryNotificationProviderError, type DeliveryNotificationProvider, type DeliveryNotificationProviderResult } from "@/lib/notifications/deliveryNotificationProviders";
@@ -145,7 +145,7 @@ export async function runOrderComplete(
       if (!selected.selectedChannel) { results.push({ ...identity, outcome: "skipped", reason: selected.channelReason }); continue; }
       if (!options.send) { results.push({ ...identity, outcome: "previewed" }); continue; }
       const recipient = selected.selectedChannel === "SMS" ? selected.recipientPhone : selected.recipientEmail;
-      const rendered = renderOrderComplete(candidate, selected.selectedChannel);
+      const rendered = renderOrderComplete({ ...candidate, buyerGroup: getSalesOrderBuyerGroup(order) }, selected.selectedChannel);
       const statusCallbackUrl = selected.selectedChannel === "SMS" ? deps.statusCallbackUrl() : "";
       const claimed = await deps.store.claim({ ...candidate, ...optIns, contactId, channel: selected.selectedChannel, recipient, discoveryJobId: report.jobId, checkedAt: deps.clock() });
       if (!claimed) { results.push({ ...identity, outcome: "deduped" }); continue; }

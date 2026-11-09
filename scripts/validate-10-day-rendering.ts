@@ -66,7 +66,7 @@ function main() {
 
   assert(
     email.subject ===
-      "Balance Reminder: Appliances delivery reminder: Smith Residence - Thursday, July 30, 2026",
+      "Balance Reminder: Appliance delivery reminder: Smith Residence - Thursday, July 30, 2026",
     "10-day email subject prefixes existing reminder subject",
     failures
   );
